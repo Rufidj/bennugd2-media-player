@@ -20,9 +20,16 @@ Interface drawn at 1080p with a PlayStation-style skin, designed to be driven wi
 
 See the [Releases](../../releases) page:
 
-- **PS5**: `UP9000-PPSA00090_00-BENNUMEDIAPLAYER.pkg` (title id PPSA00090)
+- **PS5 (title folder for ShadowMount+)**: `BennuGD2-Media-Player-PPSA00090-ShadowMount.zip` — copy the `PPSA00090` folder to `/data/homebrew/`, `eboot.bin` last
+- **PS5 (package)**: `UP9000-PPSA00090_00-BENNUMEDIAPLAYER.pkg` (title id PPSA00090)
 - **Linux x86-64**: `bennugd2-media-player-linux-x86_64.tar.gz` (needs FFmpeg, SDL2, FreeType and OpenSSL libraries, see its README)
 - **Windows x86-64**: `bennugd2-media-player-windows-x86_64.zip` (self-contained; tested under Wine, not yet on a real Windows machine)
+
+## PS5 requirements
+
+Tested on firmware 9.00 with etaHEN and ShadowMount+ v1.7-beta5fix1 (kstuff active). With etaHEN running, the app asks it to leave the sandbox
+(it writes its PID to `/download0/etahen_jailbreak`) so it can browse the whole system; without etaHEN it still runs, sandboxed (own folder and `/data/mediaplayer` only).
+If the app does not open: check the firmware, that kstuff is loaded before ShadowMount+, copy `eboot.bin` last, and change the title id if a failed launch left it registered with error `0x80020008`.
 
 ## Controls
 
