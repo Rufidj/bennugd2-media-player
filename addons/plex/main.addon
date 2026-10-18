@@ -10,7 +10,8 @@ version 0.1
 author "BennuGD2 Media Player"
 description "Plex free catalogue (watch.plex.tv) and your own Plex Media Server."
 
-setting server is text, label "Server address (like http://192.168.1.50:32400)", default "http://192.168.1.50:32400"
+setting server is text, label "Server address (set by Choose a server, or type http://IP:32400)"
+setting server_token is secret text, label "Server access token (set by Choose a server)"
 setting token is secret text, label "Plex token (filled by Sign in, or paste yours)"
 setting client is text, label "Device id (made automatically)"
 
@@ -41,7 +42,8 @@ page home:
         show folder "Sign in with plex.tv (get a code)" opening login info "You will type a short code at plex.tv/link on your phone or computer. Nothing is stored except the token, in the addon settings."
         stop
     show folder "Free movies and shows (On Plex)" opening free info "The free, ad-supported catalogue of watch.plex.tv. Needs only a (free) Plex account."
-    show folder "My Plex server" opening server info "The libraries of the server in the addon settings."
+    show folder "Choose a Plex server" opening servers info "Lists the servers of your plex.tv account, including servers shared with you by other users."
+    show folder "Open the chosen server" opening server info "The libraries of the server you chose (or typed in the addon settings)."
 
 # ---- the free catalogue (https://watch.plex.tv)
 page free:
@@ -88,24 +90,54 @@ define show_free(item, shown, skipped):
         add 1 to shown
     give back 0
 
-# ---- your own server
+# ---- choose a server from the plex.tv account (own servers and servers shared with you)
+page servers:
+    fetch json from "https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1" with header "Accept" is "application/json" with header "X-Plex-Token" is token with header "X-Plex-Client-Identifier" is client
+    set found to []
+    for each res in result:
+        if res.provides contains "server":
+            for each conn in res.connections:
+                set kind to "remote"
+                if conn.relay:
+                    set kind to "relay (slower)"
+                otherwise if conn.local:
+                    set kind to "local network"
+                set owner to "your server"
+                if not default(res.owned, true):
+                    set owner to "shared with you"
+                set address to conn.uri
+                if conn.local and not conn.relay:
+                    set address to "http://{conn.address}:{conn.port}"
+                show folder "{res.name} - {kind} ({conn.address})" opening pickserver with name is res.name with address is address with access is res.accessToken info "{owner}. {address}"
+                add 1 to found
+    if length(found) is 0:
+        fail "No Plex servers were found in your plex.tv account. Make sure the server is signed in to the same account, or type its address in the addon settings."
+
+page pickserver with name, address, access:
+    save server as address
+    save server_token as access
+    show folder "Chosen: {name}. Press circle and open the server" opening server
+
+# ---- the chosen server (or the address typed in the settings)
 page server:
-    fetch json from "{server}/library/sections?X-Plex-Token={url_encode(token)}" with header "Accept" is "application/json"
+    if server is empty:
+        fail "No server chosen yet. Use 'Choose a Plex server' (or type the address, like http://192.168.1.50:32400, in the addon settings)."
+    fetch json from "{server}/library/sections?X-Plex-Token={url_encode(stoken())}" with header "Accept" is "application/json"
     for each lib in result.MediaContainer.Directory:
         show folder lib.title opening library with key is lib.key with title is lib.title with kind is lib.type info "Library ({lib.type})"
 
 page library with key, title, kind:
-    fetch json from "{server}/library/sections/{key}/all?X-Plex-Token={url_encode(token)}&X-Plex-Container-Start=0&X-Plex-Container-Size=500" with header "Accept" is "application/json"
+    fetch json from "{server}/library/sections/{key}/all?X-Plex-Token={url_encode(stoken())}&X-Plex-Container-Start=0&X-Plex-Container-Size=500" with header "Accept" is "application/json"
     for each item in result.MediaContainer.Metadata:
         show_entry(item)
 
 page seasons with id, title:
-    fetch json from "{server}/library/metadata/{id}/children?X-Plex-Token={url_encode(token)}" with header "Accept" is "application/json"
+    fetch json from "{server}/library/metadata/{id}/children?X-Plex-Token={url_encode(stoken())}" with header "Accept" is "application/json"
     for each item in result.MediaContainer.Metadata:
         show folder item.title opening episodes with id is item.ratingKey with title is item.title logo picture(item) info "{item.leafCount} episodes"
 
 page episodes with id, title:
-    fetch json from "{server}/library/metadata/{id}/children?X-Plex-Token={url_encode(token)}" with header "Accept" is "application/json"
+    fetch json from "{server}/library/metadata/{id}/children?X-Plex-Token={url_encode(stoken())}" with header "Accept" is "application/json"
     for each item in result.MediaContainer.Metadata:
         show_entry(item)
 
@@ -117,7 +149,7 @@ define show_entry(item):
         show folder item.title opening episodes with id is item.ratingKey with title is item.title logo picture(item)
     otherwise if has(item, "Media"):
         set path to item.Media[1].Part[1].key
-        set address to "{server}{path}?X-Plex-Token={url_encode(token)}"
+        set address to "{server}{path}?X-Plex-Token={url_encode(stoken())}"
         if item.type is "track":
             show audio item.title playing address logo picture(item) info default(item.grandparentTitle, "")
         otherwise:
@@ -126,10 +158,16 @@ define show_entry(item):
 
 define picture(item):
     if has(item, "thumb"):
-        give back "{server}{item.thumb}?X-Plex-Token={url_encode(token)}"
+        give back "{server}{item.thumb}?X-Plex-Token={url_encode(stoken())}"
     give back ""
 
 define call_check():
     if token is empty:
         fail "Please enter your Plex token first: select the Plex addon, press SQUARE and open Settings."
     give back 0
+
+# the token to use with the chosen server: the one plex.tv gave for that server (differs for shared servers), else the account token
+define stoken():
+    if server_token is not empty:
+        give back server_token
+    give back token
