@@ -27,7 +27,7 @@ See the [Releases](../../releases) page:
 
 ## PS5 requirements
 
-Tested on firmware 9.00 with etaHEN and ShadowMount+ v1.7-beta5fix1 (kstuff active). With etaHEN running, the app asks it to leave the sandbox
+Tested on firmware 9.00 with etaHEN and ShadowMount+ v1.7-beta5fix1 (kstuff active). The payloads used are in [`payloads.zip`](payloads.zip) (`kstuff.elf`, `a53_ppr_install_fast.elf`). With etaHEN running, the app asks it to leave the sandbox
 (it writes its PID to `/download0/etahen_jailbreak`) so it can browse the whole system; without etaHEN it still runs, sandboxed (own folder and `/data/mediaplayer` only).
 If the app does not open: check the firmware, that kstuff is loaded before ShadowMount+, copy `eboot.bin` last, and change the title id if a failed launch left it registered with error `0x80020008`.
 
