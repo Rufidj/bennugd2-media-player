@@ -1,0 +1,806 @@
+diff --git a/modules/libmod_video/libmod_video.c b/modules/libmod_video/libmod_video.c
+index 0f604cb7..eea3455a 100644
+--- a/modules/libmod_video/libmod_video.c
++++ b/modules/libmod_video/libmod_video.c
+@@ -19,6 +19,8 @@
+ #include <stdlib.h>
+ #include <string.h>
+ #include <stdint.h>
++#include <stdarg.h>
++#include <unistd.h>
+ #include <math.h>
+ 
+ #include <SDL.h>
+@@ -59,6 +61,7 @@ typedef struct {
+ } VFRAME;
+ 
+ #define MAX_SUBS     8                 /* embedded text subtitle tracks kept   */
++#define MAX_ATRACKS  16                /* embedded audio tracks kept           */
+ 
+ typedef struct {
+     double    start, end;              /* seconds                               */
+@@ -114,6 +117,19 @@ typedef struct {
+     double          a_pts_end;         /* pts of the end of the queued audio    */
+     int             a_rate, a_ch, a_bps;   /* mixer spec in use                 */
+     int             has_audio;         /* decoding audio for the mixer hook     */
++    int             naudio;                    /* audio tracks found at open    */
++    int             audio_stream[MAX_ATRACKS]; /* stream index of each track    */
++    int             audio_switch_req;          /* VIDEO_AUDIO_SELECT pending    */
++    int             audio_switch_to;           /* ...to this stream index       */
++    int             audio_only;                /* no picture at all (music file)*/
++    int16_t         vis[8192];                 /* last mixer chunk, mono, for the visualiser  */
++    int             vis_len;                   /* samples valid in vis[]                       */
++    double          vstart;                    /* media time of the first picture (a stream that starts mid-way, e.g. a trimmed list) */
++    int             vpts_init;                 /* the wall clock was aligned with the first picture since the start / last seek */
++    int             a_got;                     /* sound decoded since the start / last seek (else the wall clock is used) */
++    Uint32          vis_t0;                    /* SDL ticks when that chunk was handed to the mixer */
++    double          spec[32];                  /* spectrum cache (VIDEO_SPECTRUM)              */
++    Uint32          spec_tick;
+ 
+     int             playing, paused, loop, eof, finished, quit;
+     int             seek_req;          double seek_to;
+@@ -144,6 +160,9 @@ typedef struct {
+ 
+ static VIDEO       g_vid[MAX_VIDEOS + 1];       /* handle = index, 0 unused     */
+ static VIDEO *     g_audio_owner = NULL;
++static char g_trace_path[512] = "";
++static Uint32 g_open_t0 = 0;
++static void vtrace( const char * fmt, ... );
+ 
+ /* Graphs of closed videos are freed a few frames later, not immediately: on the PS5 the GPU runs
+    draw calls after the CPU has queued them, and recreating a texture right after freeing one
+@@ -182,6 +201,10 @@ static VIDEO * vid_get( int64_t h ) {
+ /* media time "now" (call with mx held or not; reads are racy but monotonic enough) */
+ static double vid_clock( VIDEO * v ) {
+     if ( v->has_audio && g_audio_owner == v ) {
++        /* no sound has been decoded yet (some streams are silent or have no audio for their first seconds):
++           the audio clock cannot start, so keep time with the wall clock until the first sound arrives */
++        if ( v->playing && !v->paused && !v->a_got )
++            return v->clk_base + ( SDL_GetTicks() - v->clk_t0 ) / 1000.0;
+         double queued = ( double ) v->an / ( double ) ( v->a_rate * v->a_ch * v->a_bps );
+         double t = v->a_pts_end - queued;
+         return t < 0 ? 0 : t;
+@@ -209,6 +232,18 @@ static void mix_hook( void * udata, Uint8 * stream, int len ) {
+         v->ar = ( v->ar + n ) % v->acap;
+         v->an -= n;
+ 
++        if ( v->a_bps == 2 && v->a_ch > 0 ) {            /* keep the chunk (mono) so VIDEO_SPECTRUM / VIDEO_WAVE can look at what is playing */
++            const int16_t * sm = ( const int16_t * ) stream;
++            int ns = ( int ) ( n / ( 2 * ( size_t ) v->a_ch ) );
++            if ( ns > 8192 ) ns = 8192;
++            for ( int i = 0; i < ns; i++ ) {
++                int acc = 0;
++                for ( int c = 0; c < v->a_ch; c++ ) acc += sm[i * v->a_ch + c];
++                v->vis[i] = ( int16_t ) ( acc / v->a_ch );
++            }
++            v->vis_len = ns; v->vis_t0 = SDL_GetTicks();
++        }
++
+         if ( v->volume < 0.999 && v->a_bps == 2 ) {
+             int16_t * s = ( int16_t * ) stream; int cnt = ( int ) ( n / 2 );
+             int vol = ( int ) ( v->volume * 256.0 );
+@@ -481,6 +516,10 @@ static void vq_clear( VIDEO * v ) {
+ /* NV12 / 16-bit NV12 rows into a slot (Y then interleaved UV); source pitches in bytes */
+ static void copy_rows_parallel( uint8_t * d, size_t dp, const uint8_t * s, size_t sp, size_t bytes, int rows, int down );
+ 
++/* closes the current audio decoder/resampler and opens 'newstream' instead - called from
++   decode_thread only, which is the thread that owns actx/swr (defined below av_fmt_for) */
++static void audio_switch_track( VIDEO * v, int newstream );
++
+ static void pack_nv( VIDEO * v, uint8_t * d, const uint8_t * y, int ypitch, const uint8_t * uv, int uvpitch, int down ) {
+     size_t ys = ( size_t ) v->ypw * 4, cs = ( size_t ) v->cpw * 4;
+     size_t yb = v->hwmode == 2 ? ( size_t ) v->w * 2 : ( size_t ) v->w;
+@@ -495,6 +534,9 @@ static void pack_nv( VIDEO * v, uint8_t * d, const uint8_t * y, int ypitch, cons
+     }
+ }
+ 
++/* lets a blocked network read return as soon as the video is being closed (otherwise closing could hang on a dead server) */
++static int vid_interrupt( void * p ) { return ( ( VIDEO * ) p )->quit; }
++
+ static int vq_reserve( VIDEO * v ) {                      /* free slot, or -1 (quit / seek) */
+     double tw = now_s( CLOCK_MONOTONIC );
+     SDL_LockMutex( v->mx );
+@@ -504,9 +546,17 @@ static int vq_reserve( VIDEO * v ) {                      /* free slot, or -1 (q
+     v->wait_ms += ( now_s( CLOCK_MONOTONIC ) - tw ) * 1000.0;
+     return slot;
+ }
++/* streams that start late (a trimmed HLS list, a seek) have pictures at pts >> 0: align the wall clock with the first one,
++   or the picture would wait for the clock to reach it (call with mx held) */
++static void vclock_align( VIDEO * v, double pts ) {
++    if ( v->vpts_init ) return;
++    v->vpts_init = 1;
++    if ( !v->a_got && v->clk_base + 0.5 < pts ) { v->clk_base = pts; v->clk_t0 = SDL_GetTicks(); }
++}
+ static void vq_commit( VIDEO * v, int slot, double pts ) {
+     v->vq[slot].pts = pts;
+     SDL_LockMutex( v->mx );
++    vclock_align( v, pts );
+     if ( !v->seek_req ) v->vq_n++;
+     SDL_UnlockMutex( v->mx );
+ }
+@@ -643,6 +693,7 @@ static int push_video_frame( VIDEO * v, AVFrame * f ) {
+     v->vq[slot].pts = pts;
+ 
+     SDL_LockMutex( v->mx );
++    vclock_align( v, pts );
+     if ( !v->seek_req ) v->vq_n++;
+     SDL_UnlockMutex( v->mx );
+     return 1;
+@@ -662,6 +713,10 @@ static void push_audio( VIDEO * v, AVFrame * f ) {
+     size_t bytes = ( size_t ) got * v->a_ch * v->a_bps;
+ 
+     double pts = ( f->best_effort_timestamp == AV_NOPTS_VALUE ) ? v->a_pts_end : f->best_effort_timestamp * v->atb;
++    if ( !v->a_got ) {            /* sound that ends before the picture starts (audio list starting a little early): skip it */
++        double ref = vid_clock( v ); if ( ref < v->vstart ) ref = v->vstart;
++        if ( pts + ( double ) got / v->a_rate < ref - 0.02 ) { free( tmp ); return; }
++    }
+ 
+     size_t off = 0;
+     while ( off < bytes && !v->quit ) {
+@@ -677,6 +732,8 @@ static void push_audio( VIDEO * v, AVFrame * f ) {
+     }
+     SDL_LockMutex( v->mx );
+     v->a_pts_end = pts + ( double ) got / v->a_rate;
++    if ( !v->a_got ) vtrace( "first audio data %u ms after open (pts %.2f)", SDL_GetTicks() - g_open_t0, pts );
++    v->a_got = 1;
+     SDL_UnlockMutex( v->mx );
+     free( tmp );
+ }
+@@ -713,6 +770,8 @@ static void hw_switch_software( VIDEO * v ) {
+ static int decode_thread( void * arg ) {
+     VIDEO * v = ( VIDEO * ) arg;
+     AVPacket * pkt = av_packet_alloc();
++    int tr_pk = 0;
++    vtrace( "decode_thread: running" );
+ 
+     while ( !v->quit ) {
+         if ( v->hw && v->hw_fail ) hw_switch_software( v );
+@@ -728,14 +787,23 @@ static int decode_thread( void * arg ) {
+             if ( v->actx ) avcodec_flush_buffers( v->actx );
+             SDL_LockMutex( v->mx );
+             vq_clear( v );
+-            v->eof = 0; v->finished = 0; v->a_pts_end = to;
++            v->eof = 0; v->finished = 0; v->a_pts_end = to; v->a_got = 0; v->vpts_init = 0;
+             v->clk_base = to; v->clk_t0 = SDL_GetTicks();
+             v->shown_first = 0;
+             SDL_UnlockMutex( v->mx );
+             continue;
+         }
++        /* audio track switch requests (VIDEO_AUDIO_SELECT) - same thread that owns actx/swr,
++           so no cross-thread AVCodecContext mutation */
++        if ( v->audio_switch_req ) {
++            int newstream = v->audio_switch_to;
++            v->audio_switch_req = 0;
++            SDL_UnlockMutex( v->mx );
++            audio_switch_track( v, newstream );
++            continue;
++        }
+         /* nothing to do while stopped/paused and the first frame is already queued */
+-        if ( ( !v->playing || v->paused || v->eof ) && ( v->vq_n > 0 || v->eof ) ) {
++        if ( ( !v->playing || v->paused || v->eof ) && ( v->vq_n > 0 || v->eof || v->audio_only ) ) {
+             SDL_CondWaitTimeout( v->cond, v->mx, 20 );
+             SDL_UnlockMutex( v->mx );
+             continue;
+@@ -743,6 +811,8 @@ static int decode_thread( void * arg ) {
+         SDL_UnlockMutex( v->mx );
+ 
+         int r = av_read_frame( v->fmt, pkt );
++        if ( r >= 0 && tr_pk < 4 ) { tr_pk++; vtrace( "decode_thread: packet #%d stream=%d size=%d", tr_pk, pkt->stream_index, pkt->size ); }
++        if ( r < 0 && v->quit ) break;                      /* closing: the read was interrupted, do not flush the decoders */
+         if ( r < 0 ) {
+             /* flush decoders, then end / loop */
+             if ( v->hw && !v->hw_fail ) { hwdec_flush( v->hw, hw_picture, v ); hwdec_reset( v->hw ); if ( v->bsf ) av_bsf_flush( v->bsf ); v->hw_skip_rasl = 1; }
+@@ -779,6 +849,7 @@ static int decode_thread( void * arg ) {
+ 
+ static void vid_upload_slot( VIDEO * v, int slot ) {
+     v->shown_count++;
++    if ( v->shown_count == 2 ) vtrace( "second picture shown %u ms after open", SDL_GetTicks() - g_open_t0 );
+     if ( !v->graph || !v->graph->tex ) return;
+     if ( v->gpu ) yuv_render( v, v->vq[slot].rgba );
+     else GPU_UpdateImageBytes( v->graph->tex, NULL, v->vq[slot].rgba, v->w * 4 );
+@@ -792,7 +863,7 @@ static void vid_tick( VIDEO * v ) {
+     v->last_time = now;
+ 
+     if ( !v->shown_first && v->vq_n > 0 ) {            /* poster frame before play() */
+-        pick = v->vq_r; v->shown_first = 1;
++        pick = v->vq_r; v->shown_first = 1; vtrace( "first picture %u ms after open", SDL_GetTicks() - g_open_t0 );
+         vid_upload_slot( v, pick );
+         pick = -1;
+     }
+@@ -832,7 +903,24 @@ static enum AVSampleFormat av_fmt_for( Uint16 f, int * bps ) {
+     }
+ }
+ 
++/* temporary crash tracing: appends a line to a file and syncs it, so it survives a crash */
++static void vtrace( const char * fmt, ... ) {
++    if ( !g_trace_path[0] ) return;
++    FILE * f = fopen( g_trace_path, "ab" );
++    if ( !f ) return;
++    va_list ap; va_start( ap, fmt ); vfprintf( f, fmt, ap ); va_end( ap );
++    fputc( '\n', f ); fflush( f ); fsync( fileno( f ) ); fclose( f );
++}
++int64_t libmod_video_http_trace( INSTANCE * my, int64_t * params ) {
++    const char * s = ( const char * ) string_get( params[0] );
++    if ( s && !strncmp( s, "PATH:", 5 ) ) { snprintf( g_trace_path, sizeof g_trace_path, "%s", s + 5 ); }
++    else vtrace( "%s", s ? s : "" );
++    string_discard( params[0] );
++    return 1;
++}
++
+ static void vid_free( VIDEO * v ) {
++    vtrace( "vid_free: start thr=%p hw=%p", ( void * ) v->thr, ( void * ) v->hw );
+     if ( v->wall0 > 0 )
+         fprintf( stderr, "libmod_video: %dx%d %s: process CPU %.2f s in %.2f s wall (%.0f%% of one core)\n", v->w, v->h,
+                  v->hw ? "hardware decoder" : "software decoder",
+@@ -843,13 +931,17 @@ static void vid_free( VIDEO * v ) {
+         SDL_WaitThread( v->thr, NULL );
+         v->thr = NULL;
+     }
++    vtrace( "vid_free: thread joined" );
+     audio_release( v );
++    vtrace( "vid_free: audio released" );
+     for ( int i = 0; i < VQ_MAX; i++ ) free( v->vq[i].rgba );
+     free( v->abuf );
+     if ( v->sws ) sws_freeContext( v->sws );
+     if ( v->sws_fake ) sws_freeContext( v->sws_fake );
+     free( v->fk_y ); free( v->fk_uv );
+-    if ( v->hw ) hwdec_close( v->hw );
++    vtrace( "vid_free: before hwdec_close" );
++    if ( v->hw ) { hwdec_close( v->hw ); SDL_Delay( 120 ); }   /* let the console release the decoder before another one is created */
++    vtrace( "vid_free: after hwdec_close" );
+     if ( v->bsf ) av_bsf_free( &v->bsf );
+     if ( v->bsf_pkt ) av_packet_free( &v->bsf_pkt );
+     if ( v->swr ) swr_free( &v->swr );
+@@ -859,13 +951,16 @@ static void vid_free( VIDEO * v ) {
+     for ( int i = 0; i < MAX_SUBS; i++ ) if ( v->sub_ctx[i] ) avcodec_free_context( &v->sub_ctx[i] );
+     for ( int i = 0; i < v->ncues; i++ ) free( v->cues[i].text );
+     free( v->cues );
++    vtrace( "vid_free: before close_input" );
+     if ( v->fmt ) avformat_close_input( &v->fmt );
++    vtrace( "vid_free: after close_input" );
+     if ( v->graph_code ) zombie_add( v->graph_code );
+     /* the target belongs to the graph's texture: freeing that image frees it, never free it twice */
+     zimg_add( v->img_y, NULL ); zimg_add( v->img_u, NULL ); zimg_add( v->img_v, NULL );
+     if ( v->cond ) SDL_DestroyCond( v->cond );
+     if ( v->mx ) SDL_DestroyMutex( v->mx );
+     memset( v, 0, sizeof( *v ) );
++    vtrace( "vid_free: done" );
+ }
+ 
+ static AVCodecContext * open_codec( AVFormatContext * fmt, int idx ) {
+@@ -882,8 +977,34 @@ static AVCodecContext * open_codec( AVFormatContext * fmt, int idx ) {
+     return c;
+ }
+ 
++static void audio_switch_track( VIDEO * v, int newstream ) {
++    if ( v->actx ) avcodec_free_context( &v->actx );
++    if ( v->swr ) swr_free( &v->swr );
++    v->astream = newstream;
++    v->actx = open_codec( v->fmt, v->astream );
++    int ok = 0;
++    if ( v->actx ) {
++        v->atb = av_q2d( v->fmt->streams[v->astream]->time_base );
++        enum AVSampleFormat sf = av_fmt_for( g_mix_fmt, &v->a_bps );
++        AVChannelLayout out_l; av_channel_layout_default( &out_l, v->a_ch );
++        if ( swr_alloc_set_opts2( &v->swr, &out_l, sf, v->a_rate, &v->actx->ch_layout, v->actx->sample_fmt, v->actx->sample_rate, 0, NULL ) >= 0
++             && swr_init( v->swr ) >= 0 ) ok = 1;
++        else if ( v->swr ) swr_free( &v->swr );
++        av_channel_layout_uninit( &out_l );
++    }
++    if ( !ok && v->actx ) avcodec_free_context( &v->actx );
++
++    SDL_LockMutex( v->mx );
++    vid_clock_freeze( v ); v->a_got = 0;                /* keep time on the wall clock until the new track's sound arrives */
++    v->an = 0; v->ar = 0;                              /* drop whatever was queued from the old track */
++    v->has_audio = ok && v->abuf != NULL;
++    SDL_UnlockMutex( v->mx );
++}
++
+ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
+     const char * path = ( const char * ) string_get( params[0] );
++    g_open_t0 = SDL_GetTicks();
++    vtrace( "video_open: %.100s", path );
+     int h;
+     for ( h = 1; h <= MAX_VIDEOS; h++ ) if ( !g_vid[h].used ) break;
+     if ( h > MAX_VIDEOS ) { string_discard( params[0] ); fprintf( stderr, "VIDEO_OPEN: too many open videos\n" ); return 0; }
+@@ -892,17 +1013,65 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
+     memset( v, 0, sizeof( *v ) );
+     v->used = 1; v->volume = 1.0; v->vstream = v->astream = -1;
+ 
+-    if ( avformat_open_input( &v->fmt, path, NULL, NULL ) < 0 ) { fprintf( stderr, "VIDEO_OPEN: cannot open %s\n", path ); goto fail; }
++    {   /* network URLs: bounded waits (a dead server must not freeze the script) and automatic reconnects */
++        AVDictionary * nopts = NULL;
++        if ( strstr( path, "://" ) && strncmp( path, "file:", 5 ) ) {
++            av_dict_set( &nopts, "rw_timeout", "10000000", 0 );          /* 10 s, in microseconds */
++            av_dict_set( &nopts, "reconnect", "1", 0 );
++            av_dict_set( &nopts, "reconnect_streamed", "1", 0 );
++            av_dict_set( &nopts, "reconnect_delay_max", "5", 0 );
++        }
++        else {                                                              /* a local .m3u8 whose segments are on the network (saved by a script that needed headers) */
++            size_t pl = strlen( path );
++            if ( pl > 5 && !strcasecmp( path + pl - 5, ".m3u8" ) )
++                av_dict_set( &nopts, "protocol_whitelist", "file,crypto,data,http,https,tls,tcp,udp", 0 );
++                /* an edit list in the audio init segment makes the demuxer drop the first seconds of samples *it reads*; with a
++                   playlist that starts mid-stream (after a seek) that would eat real sound */
++                av_dict_set( &nopts, "seg_format_options", "ignore_editlist=1", 0 );
++                /* the audio list may start a few seconds before the video one: probe long enough to see both */
++                av_dict_set( &nopts, "analyzeduration", "15000000", 0 );
++        }
++        v->fmt = avformat_alloc_context();
++        if ( v->fmt ) { v->fmt->interrupt_callback.callback = vid_interrupt; v->fmt->interrupt_callback.opaque = v; }
++        int orc = avformat_open_input( &v->fmt, path, NULL, &nopts );
++        av_dict_free( &nopts );
++        if ( orc < 0 ) { fprintf( stderr, "VIDEO_OPEN: cannot open %s\n", path ); goto fail; }
++    }
++    vtrace( "video_open: input opened" );
+     if ( avformat_find_stream_info( v->fmt, NULL ) < 0 ) { fprintf( stderr, "VIDEO_OPEN: no stream info in %s\n", path ); goto fail; }
++    vtrace( "video_open: stream info done (%u ms)", SDL_GetTicks() - g_open_t0 );
+ 
+     v->vstream = av_find_best_stream( v->fmt, AVMEDIA_TYPE_VIDEO, -1, -1, NULL, 0 );
+     v->astream = av_find_best_stream( v->fmt, AVMEDIA_TYPE_AUDIO, -1, -1, NULL, 0 );
+-    if ( v->vstream < 0 ) { fprintf( stderr, "VIDEO_OPEN: %s has no video stream\n", path ); goto fail; }
++    if ( v->vstream < 0 ) {
++        if ( v->astream < 0 ) { fprintf( stderr, "VIDEO_OPEN: %s has no video or audio stream\n", path ); goto fail; }
++        v->audio_only = 1;                              /* a music file: no picture, only sound (and the visualiser data) */
++    }
+ 
++    /* every audio track (VIDEO_AUDIO_TRACKS/_LANG/_SELECT); v->astream above is just the
++       "best" one av_find_best_stream picked as the initial default */
++    for ( unsigned i = 0; i < v->fmt->nb_streams && v->naudio < MAX_ATRACKS; i++ )
++        if ( v->fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_AUDIO )
++            v->audio_stream[v->naudio++] = i;
++
++    /* other video streams (HLS offers each quality as a stream): never read them, so the demuxer does not download them */
++    for ( unsigned i = 0; i < v->fmt->nb_streams; i++ )
++        if ( ( int ) i != v->vstream && v->fmt->streams[i]->codecpar->codec_type == AVMEDIA_TYPE_VIDEO
++             && !( v->fmt->streams[i]->disposition & AV_DISPOSITION_ATTACHED_PIC ) )
++            v->fmt->streams[i]->discard = AVDISCARD_ALL;
++
++    if ( v->audio_only ) {
++        v->duration = v->fmt->duration > 0 ? v->fmt->duration / ( double ) AV_TIME_BASE : 0;
++        goto after_video;
++    }
++    vtrace( "video_open: best streams v=%d a=%d, opening video codec", v->vstream, v->astream );
+     v->vctx = open_codec( v->fmt, v->vstream );
++    vtrace( "video_open: video codec opened (%p)", ( void * ) v->vctx );
+     if ( !v->vctx ) { fprintf( stderr, "VIDEO_OPEN: no decoder for the video in %s\n", path ); goto fail; }
++    if ( v->vctx->pix_fmt == AV_PIX_FMT_NONE || v->vctx->width <= 0 ) { fprintf( stderr, "VIDEO_OPEN: no picture format in %s (no video data found while probing)\n", path ); goto fail; }
+     v->w = v->vctx->width; v->h = v->vctx->height;
+     v->vtb = av_q2d( v->fmt->streams[v->vstream]->time_base );
++    { int64_t st = v->fmt->streams[v->vstream]->start_time; v->vstart = st != AV_NOPTS_VALUE ? st * v->vtb : 0; if ( v->vstart < 0 ) v->vstart = 0; v->clk_base = v->vstart; }
+     v->duration = v->fmt->duration > 0 ? v->fmt->duration / ( double ) AV_TIME_BASE : 0;
+ 
+     /* colour conversion on the GPU: 8-bit 4:2:0 from libavcodec, or NV12 / 16-bit NV12 from the console's decoder */
+@@ -911,13 +1080,15 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
+         int fmt8 = pf == AV_PIX_FMT_YUV420P || pf == AV_PIX_FMT_YUVJ420P;
+         int fmt10 = pf == AV_PIX_FMT_YUV420P10LE;
+         int is_h264 = v->vctx->codec_id == AV_CODEC_ID_H264, is_hevc = v->vctx->codec_id == AV_CODEC_ID_HEVC;
+-        int want_hw = g_use_hw && ( ( is_h264 && fmt8 ) || ( is_hevc && ( fmt8 || fmt10 ) ) );
++        int want_hw = g_use_hw && !( v->fmt->streams[v->vstream]->disposition & AV_DISPOSITION_ATTACHED_PIC ) && ( ( is_h264 && fmt8 ) || ( is_hevc && ( fmt8 || fmt10 ) ) );
+         if ( ( g_use_gpu && fmt8 ) || want_hw || ( g_fake_hw && ( fmt8 || fmt10 ) ) ) {
+             if ( !g_yuv_tried ) yuv_program_build();
+         }
+         if ( g_yuv_prog ) {
+             if ( want_hw && hwdec_available() ) {
++                vtrace( "video_open: creating hw decoder %dx%d", v->w, v->h );
+                 v->hw = hwdec_open( is_hevc, v->w, v->h );
++                vtrace( "video_open: hw decoder created (%p)", ( void * ) v->hw );
+                 if ( v->hw ) {
+                     const AVBitStreamFilter * bf = av_bsf_get_by_name( is_hevc ? "hevc_mp4toannexb" : "h264_mp4toannexb" );
+                     if ( bf && av_bsf_alloc( bf, &v->bsf ) >= 0 ) {
+@@ -974,6 +1145,8 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
+     if ( v->vq_size > VQ_MAX ) v->vq_size = VQ_MAX;
+     if ( v->vq_size < 3 ) v->vq_size = 3;
+     for ( int i = 0; i < v->vq_size; i++ ) { v->vq[i].rgba = ( uint8_t * ) calloc( 1, v->slot_bytes ); if ( !v->vq[i].rgba ) goto fail; }
++after_video:
++    vtrace( "video_open: after_video (hw=%p)", ( void * ) v->hw );
+     v->frame = av_frame_alloc();
+ 
+     /* audio, if SDL_mixer is up */
+@@ -1008,7 +1181,7 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
+ 
+     /* the graph that shows the video */
+     {
+-        SDL_Surface * s = SDL_CreateRGBSurfaceWithFormat( 0, v->w, v->h, 32, SDL_PIXELFORMAT_ABGR8888 );
++        SDL_Surface * s = SDL_CreateRGBSurfaceWithFormat( 0, v->audio_only ? 1 : v->w, v->audio_only ? 1 : v->h, 32, SDL_PIXELFORMAT_ABGR8888 );
+         if ( !s ) goto fail;
+         SDL_memset( s->pixels, 0, ( size_t ) s->pitch * s->h );
+         v->graph = bitmap_new( 0, 0, 0, s );
+@@ -1019,6 +1192,7 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
+         grlib_add_map( 0, v->graph );
+     }
+     if ( v->gpu ) {
++        vtrace( "video_open: creating gpu images %dx%d", v->ypw, v->h );
+         v->img_y = GPU_CreateImage( v->ypw, v->h,  GPU_FORMAT_RGBA );
+         v->img_u = GPU_CreateImage( v->cpw, v->ch, GPU_FORMAT_RGBA );
+         if ( v->hwmode == 0 ) v->img_v = GPU_CreateImage( v->cpw, v->ch, GPU_FORMAT_RGBA );
+@@ -1027,7 +1201,9 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
+             GPU_SetImageFilter( v->img_u, GPU_FILTER_NEAREST );
+             if ( v->img_v ) GPU_SetImageFilter( v->img_v, GPU_FILTER_NEAREST );
+             GPU_SetBlending( v->img_y, 0 );
++            vtrace( "video_open: loading gpu target" );
+             v->tgt = GPU_LoadTarget( v->graph->tex );
++            vtrace( "video_open: gpu target loaded" );
+         }
+         if ( !v->tgt ) {                              /* GPU path unavailable: back to the CPU converter */
+             fprintf( stderr, "libmod_video: GPU conversion unavailable, using software\n" );
+@@ -1051,8 +1227,18 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
+ 
+     v->mx = SDL_CreateMutex(); v->cond = SDL_CreateCond();
+     if ( !g_obj_id ) g_obj_id = gr_new_object( 0, obj_info, NULL, NULL );
++    /* cover art (an mp3 / flac / m4a with an embedded picture): the demuxer never delivers that "stream"
++       as packets, so decode the stored picture once and show it as the poster frame */
++    if ( v->vctx && ( v->fmt->streams[v->vstream]->disposition & AV_DISPOSITION_ATTACHED_PIC ) ) {
++        AVPacket * ap = &v->fmt->streams[v->vstream]->attached_pic;
++        if ( ap->size > 0 && avcodec_send_packet( v->vctx, ap ) >= 0 ) {
++            avcodec_send_packet( v->vctx, NULL );
++            drain_decoder( v, v->vctx, 1 );
++        }
++    }
+     #if SDL_VERSION_ATLEAST( 2, 0, 9 )
+     v->cpu0 = now_s( CLOCK_PROCESS_CPUTIME_ID ); v->wall0 = now_s( CLOCK_MONOTONIC );
++    vtrace( "video_open: starting decode thread" );
+     v->thr = SDL_CreateThreadWithStackSize( decode_thread, "video", ( size_t ) 8 << 20, v );   /* the console's decoder needs a big stack */
+ #else
+     v->thr = SDL_CreateThread( decode_thread, "video", v );
+@@ -1079,6 +1265,94 @@ int64_t libmod_video_hw( INSTANCE * my, int64_t * params ) { VIDEO * v = vid_get
+ /* VIDEO_GPU(handle): 1 if that video converts on the GPU */
+ int64_t libmod_video_gpu( INSTANCE * my, int64_t * params ) { VIDEO * v = vid_get( params[0] ); return v ? v->gpu : 0; }
+ 
++/* ---- visualiser data ------------------------------------------------------ */
++
++#define SPEC_N 1024
++
++static void fft_inplace( double * re, double * im, int n ) {
++    for ( int i = 1, j = 0; i < n; i++ ) {                 /* bit reversal */
++        int bit = n >> 1;
++        for ( ; j & bit; bit >>= 1 ) j ^= bit;
++        j ^= bit;
++        if ( i < j ) { double t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
++    }
++    for ( int len = 2; len <= n; len <<= 1 ) {
++        double ang = -2.0 * M_PI / len, wr = cos( ang ), wi = sin( ang );
++        for ( int i = 0; i < n; i += len ) {
++            double cr = 1.0, ci = 0.0;
++            for ( int k = 0; k < len / 2; k++ ) {
++                int a = i + k, b = i + k + len / 2;
++                double xr = re[b] * cr - im[b] * ci, xi = re[b] * ci + im[b] * cr;
++                re[b] = re[a] - xr; im[b] = im[a] - xi;
++                re[a] += xr;        im[a] += xi;
++                double nr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = nr;
++            }
++        }
++    }
++}
++
++/* window of the mixer chunk that is being heard right now (the chunk is handed over in one piece, so the
++   position inside it is estimated from the time elapsed since) */
++static int vis_window( VIDEO * v, int16_t * out, int n ) {
++    int ok = 0;
++    SDL_LockMutex( v->mx );
++    if ( v->vis_len > 0 && v->a_rate > 0 && v->playing && !v->paused ) {
++        Uint32 el = SDL_GetTicks() - v->vis_t0;
++        int end = ( int ) ( ( double ) el * v->a_rate / 1000.0 );
++        if ( end > v->vis_len ) end = v->vis_len;
++        if ( end < n ) end = n < v->vis_len ? n : v->vis_len;
++        for ( int i = 0; i < n; i++ ) { int idx = end - n + i; out[i] = ( idx >= 0 && idx < v->vis_len ) ? v->vis[idx] : 0; }
++        ok = 1;
++    }
++    SDL_UnlockMutex( v->mx );
++    return ok;
++}
++
++static void spec_update( VIDEO * v ) {
++    Uint32 now = SDL_GetTicks();
++    if ( v->spec_tick == now ) return;
++    v->spec_tick = now;
++    int16_t win[SPEC_N];
++    if ( !vis_window( v, win, SPEC_N ) ) { for ( int b = 0; b < 32; b++ ) v->spec[b] = 0; return; }
++    double re[SPEC_N], im[SPEC_N];
++    for ( int i = 0; i < SPEC_N; i++ ) {
++        double w = 0.5 - 0.5 * cos( 2.0 * M_PI * i / ( SPEC_N - 1 ) );          /* Hann */
++        re[i] = win[i] / 32768.0 * w; im[i] = 0;
++    }
++    fft_inplace( re, im, SPEC_N );
++    double lo = 40.0, hi = 16000.0; if ( hi > v->a_rate / 2.0 - 100 ) hi = v->a_rate / 2.0 - 100;
++    for ( int b = 0; b < 32; b++ ) {
++        double f0 = lo * pow( hi / lo, b / 32.0 ), f1 = lo * pow( hi / lo, ( b + 1 ) / 32.0 );
++        int b0 = ( int ) ( f0 * SPEC_N / v->a_rate ), b1 = ( int ) ( f1 * SPEC_N / v->a_rate );
++        if ( b0 < 1 ) b0 = 1;
++        if ( b1 <= b0 ) b1 = b0 + 1;
++        if ( b1 > SPEC_N / 2 ) b1 = SPEC_N / 2;
++        double m = 0;
++        for ( int k = b0; k < b1; k++ ) { double mag = sqrt( re[k] * re[k] + im[k] * im[k] ) / ( SPEC_N / 4.0 ); if ( mag > m ) m = mag; }
++        double db = 20.0 * log10( m + 1e-9 );
++        double lvl = ( db + 62.0 ) / 62.0;
++        v->spec[b] = lvl < 0 ? 0 : ( lvl > 1 ? 1 : lvl );
++    }
++}
++
++/* VIDEO_SPECTRUM(handle, band): level 0..255 of one of 32 log-spaced bands (40 Hz - 16 kHz) of what is playing; 0 when paused */
++int64_t libmod_video_spectrum( INSTANCE * my, int64_t * params ) {
++    VIDEO * v = vid_get( params[0] ); if ( !v || params[1] < 0 || params[1] > 31 ) return 0;
++    spec_update( v );
++    return ( int64_t ) ( v->spec[params[1]] * 255.0 );
++}
++
++/* VIDEO_WAVE(handle, i): i = 0..255, signed sample -128..127 of the waveform that is playing (oscilloscope) */
++int64_t libmod_video_wave( INSTANCE * my, int64_t * params ) {
++    VIDEO * v = vid_get( params[0] ); if ( !v || params[1] < 0 || params[1] > 255 ) return 0;
++    int16_t win[SPEC_N];
++    if ( !vis_window( v, win, SPEC_N ) ) return 0;
++    return win[params[1] * 4] / 256;
++}
++
++/* VIDEO_IS_AUDIO_ONLY(handle): 1 when the file has no picture (music) */
++int64_t libmod_video_is_audio_only( INSTANCE * my, int64_t * params ) { VIDEO * v = vid_get( params[0] ); return v ? v->audio_only : 0; }
++
+ int64_t libmod_video_graph( INSTANCE * my, int64_t * params ) { VIDEO * v = vid_get( params[0] ); return v ? v->graph_code : 0; }
+ int64_t libmod_video_width( INSTANCE * my, int64_t * params ) { VIDEO * v = vid_get( params[0] ); return v ? v->w : 0; }
+ int64_t libmod_video_height( INSTANCE * my, int64_t * params ) { VIDEO * v = vid_get( params[0] ); return v ? v->h : 0; }
+@@ -1176,6 +1450,38 @@ int64_t libmod_video_subtitle_select( INSTANCE * my, int64_t * params ) {
+     return v->sub_sel >= 0;
+ }
+ 
++/* ---- audio track API ----------------------------------------------------- */
++
++int64_t libmod_video_audio_tracks( INSTANCE * my, int64_t * params ) {
++    VIDEO * v = vid_get( params[0] ); if ( !v ) return 0;
++    return v->naudio;
++}
++
++int64_t libmod_video_audio_lang( INSTANCE * my, int64_t * params ) {
++    VIDEO * v = vid_get( params[0] );
++    char buf[256] = "";
++    int i = ( int ) params[1];
++    if ( v && i >= 0 && i < v->naudio ) sub_lang( v->fmt, v->audio_stream[i], buf, sizeof( buf ) );
++    int64_t str = string_new( buf );
++    string_use( str );
++    return str;
++}
++
++/* switch to audio track 't' (0-based, see VIDEO_AUDIO_TRACKS/VIDEO_AUDIO_LANG). The actual
++   decoder/resampler swap happens in decode_thread (audio_switch_track()) - this just posts
++   the request, since only that thread may touch actx/swr. May be heard as a brief gap. */
++int64_t libmod_video_audio_select( INSTANCE * my, int64_t * params ) {
++    VIDEO * v = vid_get( params[0] ); if ( !v ) return 0;
++    int t = ( int ) params[1];
++    if ( t < 0 || t >= v->naudio ) return 0;
++    SDL_LockMutex( v->mx );
++    if ( v->audio_stream[t] == v->astream ) { SDL_UnlockMutex( v->mx ); return 1; }   /* already selected */
++    v->audio_switch_req = 1;
++    v->audio_switch_to = v->audio_stream[t];
++    SDL_UnlockMutex( v->mx );
++    return 1;
++}
++
+ /* load an external subtitle file (.srt .ass .ssa .vtt ...) as an extra track, which becomes selected */
+ int64_t libmod_video_subtitle_load( INSTANCE * my, int64_t * params ) {
+     VIDEO * v = vid_get( params[0] );
+@@ -1270,4 +1576,146 @@ void __bgdexport( libmod_video, module_finalize )() {
+     if ( g_obj_id ) { gr_destroy_object( g_obj_id ); g_obj_id = 0; }
+ }
+ 
++
++/* ---- HTTP(S) requests for scripts ---------------------------------------- */
++/* Downloads a whole answer through FFmpeg's network layer (the same one that plays https streams), so
++   scripts get TLS without any extra library. Synchronous, bounded by a timeout. The body is kept in a
++   module buffer until the next call: HTTP_FETCH() -> HTTP_LENGTH() -> HTTP_READ(). */
++
++static char * g_http_body = NULL;
++static size_t g_http_len = 0;
++static char g_http_err[256] = "";
++
++static int http_hex( const char * s, size_t n, char * out ) {
++    static const char * h = "0123456789abcdef";
++    size_t i;
++    for ( i = 0; i < n; i++ ) { out[i * 2] = h[( unsigned char ) s[i] >> 4]; out[i * 2 + 1] = h[( unsigned char ) s[i] & 15]; }
++    out[n * 2] = 0;
++    return 1;
++}
++
++typedef struct { double deadline; } HttpInt;
++static int http_interrupt( void * p ) {
++    struct timespec t; clock_gettime( CLOCK_MONOTONIC, &t );
++    return ( t.tv_sec + t.tv_nsec / 1e9 ) > ( ( HttpInt * ) p )->deadline;
++}
++
++int64_t libmod_video_http_fetch( INSTANCE * my, int64_t * params ) {
++    char * url = strdup( ( const char * ) string_get( params[0] ) );
++    char * hdr = strdup( ( const char * ) string_get( params[1] ) );
++    char * method = strdup( ( const char * ) string_get( params[2] ) );
++    const char * bodyp = ( const char * ) string_get( params[3] );
++    size_t blen = strlen( bodyp );
++    char * body = strdup( bodyp );
++    int status = 0;
++    AVDictionary * o = NULL;
++    AVIOContext * io = NULL;
++    struct timespec t;
++    HttpInt hi;
++    AVIOInterruptCB cb;
++    int r;
++    static int net_ready = 0;
++    string_discard( params[0] ); string_discard( params[1] ); string_discard( params[2] ); string_discard( params[3] );
++
++    free( g_http_body ); g_http_body = NULL; g_http_len = 0; g_http_err[0] = 0;
++    if ( !url || !hdr || !method || !body ) { snprintf( g_http_err, sizeof g_http_err, "out of memory" ); goto done; }
++    if ( strncmp( url, "http://", 7 ) && strncmp( url, "https://", 8 ) ) { snprintf( g_http_err, sizeof g_http_err, "only http:// and https:// addresses" ); goto done; }
++    if ( !net_ready ) { avformat_network_init(); net_ready = 1; }
++
++    av_dict_set( &o, "rw_timeout", "15000000", 0 );
++    av_dict_set( &o, "user_agent", "BennuGD2-MediaPlayer-Addon/1.0", 0 );
++    av_dict_set( &o, "seekable", "0", 0 );
++    if ( hdr[0] ) av_dict_set( &o, "headers", hdr, 0 );
++    if ( method[0] && strcmp( method, "GET" ) ) av_dict_set( &o, "method", method, 0 );
++    if ( blen ) {
++        char * hx = ( char * ) malloc( blen * 2 + 1 );
++        if ( !hx ) { snprintf( g_http_err, sizeof g_http_err, "out of memory" ); goto done; }
++        http_hex( body, blen, hx );
++        av_dict_set( &o, "post_data", hx, 0 );                  /* binary options are given as hex text */
++        free( hx );
++        if ( !method[0] || !strcmp( method, "GET" ) ) av_dict_set( &o, "method", "POST", 0 );
++    }
++
++    clock_gettime( CLOCK_MONOTONIC, &t );
++    hi.deadline = t.tv_sec + t.tv_nsec / 1e9 + 40.0;            /* hard limit for the whole request */
++    cb.callback = http_interrupt; cb.opaque = &hi;
++    r = avio_open2( &io, url, AVIO_FLAG_READ, &cb, &o );
++    av_dict_free( &o );
++    if ( r < 0 ) {
++        if ( r == AVERROR_HTTP_BAD_REQUEST ) status = 400;
++        else if ( r == AVERROR_HTTP_UNAUTHORIZED ) status = 401;
++        else if ( r == AVERROR_HTTP_FORBIDDEN ) status = 403;
++        else if ( r == AVERROR_HTTP_NOT_FOUND ) status = 404;
++        else if ( r == AVERROR_HTTP_OTHER_4XX ) status = 400;
++        else if ( r == AVERROR_HTTP_SERVER_ERROR ) status = 500;
++        else { char e[128]; av_strerror( r, e, sizeof e ); snprintf( g_http_err, sizeof g_http_err, "%s", e ); }
++        goto done;
++    }
++    {
++        size_t cap = 64 << 10, n = 0, max = 8u << 20;
++        char * buf = ( char * ) malloc( cap + 1 );
++        while ( buf ) {
++            int k;
++            if ( n + 16384 > cap ) {
++                char * nb;
++                if ( cap >= max ) break;
++                cap *= 2; nb = ( char * ) realloc( buf, cap + 1 );
++                if ( !nb ) { free( buf ); buf = NULL; break; }
++                buf = nb;
++            }
++            k = avio_read( io, ( unsigned char * ) buf + n, 16384 );
++            if ( k <= 0 ) break;
++            n += ( size_t ) k;
++        }
++        avio_closep( &io );
++        if ( !buf ) { snprintf( g_http_err, sizeof g_http_err, "out of memory" ); goto done; }
++        buf[n] = 0; g_http_body = buf; g_http_len = n; status = 200;
++    }
++done:
++    free( url ); free( hdr ); free( method ); free( body );
++    return status;
++}
++
++int64_t libmod_video_http_length( INSTANCE * my, int64_t * params ) { return ( int64_t ) g_http_len; }
++
++/* HTTP_READ(pointer, max): copies up to max bytes of the last answer; returns the bytes copied */
++int64_t libmod_video_http_read( INSTANCE * my, int64_t * params ) {
++    size_t n = g_http_len, mx = ( size_t ) params[1];
++    if ( !g_http_body || !params[0] ) return 0;
++    if ( n > mx ) n = mx;
++    memcpy( ( void * )( intptr_t ) params[0], g_http_body, n );
++    return ( int64_t ) n;
++}
++
++/* HTTP_SAVE(path): writes the last answer to a real file (the same view of the disk FFmpeg uses); 1 = ok */
++int64_t libmod_video_http_save( INSTANCE * my, int64_t * params ) {
++    const char * path = ( const char * ) string_get( params[0] );
++    int ok = 0;
++    if ( g_http_body && path && path[0] ) {
++        FILE * f = fopen( path, "wb" );
++        if ( f ) { ok = fwrite( g_http_body, 1, g_http_len, f ) == g_http_len; if ( fclose( f ) != 0 ) ok = 0; }
++    }
++    string_discard( params[0] );
++    return ok;
++}
++
++/* HTTP_WRITE(path, text): writes a text to a real file (same view of the disk as FFmpeg); 1 = ok */
++int64_t libmod_video_http_write( INSTANCE * my, int64_t * params ) {
++    const char * path = ( const char * ) string_get( params[0] );
++    const char * text = ( const char * ) string_get( params[1] );
++    int ok = 0;
++    if ( path && path[0] && text ) {
++        FILE * f = fopen( path, "wb" );
++        if ( f ) { size_t n = strlen( text ); ok = fwrite( text, 1, n, f ) == n; if ( fclose( f ) != 0 ) ok = 0; }
++    }
++    string_discard( params[0] ); string_discard( params[1] );
++    return ok;
++}
++
++int64_t libmod_video_http_error( INSTANCE * my, int64_t * params ) {
++    int64_t str = string_new( g_http_err );
++    string_use( str );
++    return str;
++}
++
+ #include "libmod_video_exports.h"
+diff --git a/modules/libmod_video/libmod_video.h b/modules/libmod_video/libmod_video.h
+index 0ee4269b..88bd1a2d 100644
+--- a/modules/libmod_video/libmod_video.h
++++ b/modules/libmod_video/libmod_video.h
+@@ -30,6 +30,22 @@
+  *    VIDEO_SUBTITLE_SELECT(handle, track)    -> select a track, -1 turns subtitles off (off by default)
+  *    VIDEO_SUBTITLE_LOAD(handle, file)       -> load an external subtitle file as a new track (selected)
+  *    VIDEO_SUBTITLE_TEXT(handle)             -> text to show right now ("" when none), lines joined by \n
++ *
++ *  Audio tracks (multiple language tracks in the same file). Switching re-opens the audio
++ *  decoder/resampler and may be heard as a brief gap; the video keeps playing.
++ *    VIDEO_AUDIO_TRACKS(handle)              -> number of audio tracks
++ *    HTTP_FETCH(url, headers, method, body) -> status (200 ok, 400/401/403/404/500 http errors, 0 = no connection; see HTTP_ERROR())
++ *    HTTP_LENGTH() -> bytes of the answer; HTTP_READ(pointer, max) -> copies them; HTTP_ERROR() -> text of the last failure
++ *    HTTP_WRITE(path, text) -> 1 if the text was written to that file
++ *    HTTP_SAVE(path) -> 1 if the last answer was written to that file
++ *    (http:// and https://, redirects followed, 15 s timeouts; headers = "Name: value\r\n" lines)
++ *    VIDEO_AUDIO_LANG(handle, track)         -> "eng", "eng - Title", ... ("" if unknown)
++ *    VIDEO_AUDIO_SELECT(handle, track)       -> switch to that track
++ *
++ *  Music: files with no picture open as audio-only (VIDEO_GRAPH is then a 1x1 graph). For visualisers:
++ *    VIDEO_IS_AUDIO_ONLY(handle)             -> 1 if there is no video stream
++ *    VIDEO_SPECTRUM(handle, band)            -> 0..255 level of band 0..31 (40 Hz - 16 kHz, log spaced); 0 when paused
++ *    VIDEO_WAVE(handle, i)                   -> -128..127 waveform sample, i = 0..255
+  */
+ #ifndef __LIBMOD_VIDEO_H
+ #define __LIBMOD_VIDEO_H
+@@ -37,6 +53,9 @@
+ #include "bgddl.h"
+ #include <stdint.h>
+ 
++extern int64_t libmod_video_spectrum( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_wave( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_is_audio_only( INSTANCE * my, int64_t * params );
+ extern int64_t libmod_video_open( INSTANCE * my, int64_t * params );
+ extern int64_t libmod_video_graph( INSTANCE * my, int64_t * params );
+ extern int64_t libmod_video_play( INSTANCE * my, int64_t * params );
+@@ -63,4 +82,15 @@ extern int64_t libmod_video_subtitle_select( INSTANCE * my, int64_t * params );
+ extern int64_t libmod_video_subtitle_load( INSTANCE * my, int64_t * params );
+ extern int64_t libmod_video_subtitle_text( INSTANCE * my, int64_t * params );
+ 
++extern int64_t libmod_video_audio_tracks( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_audio_lang( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_http_fetch( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_http_length( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_http_read( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_http_error( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_http_save( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_http_write( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_http_trace( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_audio_select( INSTANCE * my, int64_t * params );
++
+ #endif
+diff --git a/modules/libmod_video/libmod_video_exports.h b/modules/libmod_video/libmod_video_exports.h
+index 19a828bd..3bcb21f8 100644
+--- a/modules/libmod_video/libmod_video_exports.h
++++ b/modules/libmod_video/libmod_video_exports.h
+@@ -35,6 +35,22 @@ DLSYSFUNCS __bgdexport( libmod_video, functions_exports )[] = {
+     FUNC( "VIDEO_SUBTITLE_LOAD"  , "IS" , TYPE_INT   , libmod_video_subtitle_load   ),
+     FUNC( "VIDEO_SUBTITLE_TEXT"  , "I"  , TYPE_STRING, libmod_video_subtitle_text   ),
+ 
++    FUNC( "VIDEO_AUDIO_TRACKS"   , "I"  , TYPE_INT   , libmod_video_audio_tracks    ),
++    FUNC( "VIDEO_AUDIO_LANG"     , "II" , TYPE_STRING, libmod_video_audio_lang      ),
++    FUNC( "VIDEO_AUDIO_SELECT"   , "II" , TYPE_INT   , libmod_video_audio_select    ),
++
++    FUNC( "VIDEO_IS_AUDIO_ONLY"  , "I"  , TYPE_INT   , libmod_video_is_audio_only  ),
++    FUNC( "VIDEO_SPECTRUM"       , "II" , TYPE_INT   , libmod_video_spectrum        ),
++    FUNC( "VIDEO_WAVE"           , "II" , TYPE_INT   , libmod_video_wave            ),
++
++    FUNC( "HTTP_FETCH"           , "SSSS", TYPE_INT   , libmod_video_http_fetch     ),
++    FUNC( "HTTP_LENGTH"          , ""   , TYPE_INT   , libmod_video_http_length    ),
++    FUNC( "HTTP_READ"            , "PI" , TYPE_INT   , libmod_video_http_read      ),
++    FUNC( "HTTP_SAVE"            , "S"  , TYPE_INT   , libmod_video_http_save      ),
++    FUNC( "HTTP_WRITE"           , "SS" , TYPE_INT   , libmod_video_http_write     ),
++    FUNC( "HTTP_TRACE"           , "S"  , TYPE_INT   , libmod_video_http_trace     ),
++    FUNC( "HTTP_ERROR"           , ""   , TYPE_STRING, libmod_video_http_error     ),
++
+     FUNC( 0                   , 0     , 0       , 0                        )
+ };
+ 

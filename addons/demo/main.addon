@@ -1,0 +1,39 @@
+addon "Language demo"
+id demo
+version 1.0
+author "BennuGD2 Media Player"
+description "A tiny addon that shows asking for text, messages, waiting and saving settings."
+
+setting server is text, label "Server", default "http://127.0.0.1:32400"
+setting nickname is text, label "Nickname"
+
+page home:
+    show folder "Log in with a code" opening login
+    show folder "Slow page (press circle to cancel)" opening slow
+    show folder "Ask my name" opening askname
+
+page login:
+    fetch json from "{server}/pin" with body {}
+    set pin to result
+    message "Go to the website and type the code {pin.code}"
+    set token to nothing
+    repeat 20 times:
+        wait 1 seconds
+        fetch json from "{server}/pin/{pin.id}"
+        if result.authToken is not nothing:
+            set token to result.authToken
+            exit loop
+    if token is nothing:
+        fail "The code was not entered in time"
+    save nickname as "logged-in with {token}"
+    show video "Logged in: {token}" playing "http://example.com/x.mp4"
+
+page slow:
+    message "Waiting for a slow server..."
+    fetch json from "{server}/slow"
+    show video "It answered" playing "http://example.com/x.mp4"
+
+page askname:
+    ask "What is your name?" into who default nickname
+    save nickname as who
+    show video "Hello {who}" playing "http://example.com/x.mp4"

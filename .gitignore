@@ -1,0 +1,4 @@
+*.dcb
+samples/
+mediaplayer_data/
+*.cfg

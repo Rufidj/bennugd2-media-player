@@ -1,0 +1,52 @@
+# Radio Browser addon - thousands of free internet radios (https://www.radio-browser.info)
+# It only reads public data, so it needs no account and no settings except the server address.
+
+addon "Radio Browser"
+id radio-browser
+version 1.0
+author "BennuGD2 Media Player"
+description "Search thousands of internet radios by name, country or popularity."
+
+setting server is text, label "Server", default "http://all.api.radio-browser.info"
+
+page home:
+    show folder "Most voted" opening stations with path is "stations/topvote/100"
+    show folder "Most listened now" opening stations with path is "stations/topclick/100"
+    show folder "Search by name..." opening search
+    show folder "By country" opening countries
+
+# a list of stations from any radio-browser address, e.g. "stations/topvote/100"
+page stations with path:
+    fetch json from "{server}/json/{path}"
+    list_stations(result)
+
+page search:
+    ask "Station name (for example: jazz)" into name
+    fetch json from "{server}/json/stations/byname/{url_encode(name)}?limit=200&hidebroken=true&order=votes&reverse=true"
+    if result is empty:
+        fail "No station found with that name"
+    list_stations(result)
+
+page countries:
+    fetch json from "{server}/json/countries?order=stationcount&reverse=true&limit=80"
+    for each country in result:
+        show folder "{country.name} ({country.stationcount})" opening by_country with code is country.iso_3166_1
+
+page by_country with code:
+    fetch json from "{server}/json/stations/bycountrycodeexact/{code}?limit=300&hidebroken=true&order=votes&reverse=true"
+    list_stations(result)
+
+define list_stations(stations):
+    for each station in stations:
+        if station.url_resolved is empty:
+            skip
+        show radio station.name playing station.url_resolved logo station.favicon info station_info(station)
+    give back 0
+
+define station_info(station):
+    set text_info to "{station.country}"
+    if station.codec is not empty:
+        set text_info to "{text_info} - {station.codec} {station.bitrate} kbps"
+    if station.tags is not empty:
+        set text_info to "{text_info} - {shorten(station.tags, 60)}"
+    give back text_info

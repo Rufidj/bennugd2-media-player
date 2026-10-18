@@ -1,0 +1,20 @@
+#EXTM3U
+# Radios por internet de libre acceso y musica con licencia Creative Commons
+#EXTINF:-1 tvg-logo="https://somafm.com/img3/groovesalad-400.jpg",SomaFM - Groove Salad (chill)
+https://ice1.somafm.com/groovesalad-128-mp3
+#EXTINF:-1 tvg-logo="https://somafm.com/img3/spacestation-400.jpg",SomaFM - Space Station (ambient)
+https://ice1.somafm.com/spacestation-128-mp3
+#EXTINF:-1 tvg-logo="https://somafm.com/img3/lush-400.jpg",SomaFM - Lush (vocal electronica)
+https://ice2.somafm.com/lush-128-mp3
+#EXTINF:-1 tvg-logo="https://upload.wikimedia.org/wikipedia/commons/7/78/Radio_Paradise_logo.png",Radio Paradise - Mix eclectico
+https://stream.radioparadise.com/mp3-192
+#EXTINF:-1 tvg-logo="https://upload.wikimedia.org/wikipedia/commons/7/78/Radio_Paradise_logo.png",Radio Paradise - Rock
+https://stream.radioparadise.com/rock-192
+#EXTINF:-1 tvg-logo="https://upload.wikimedia.org/wikipedia/commons/thumb/8/8c/FluxFM.svg/330px-FluxFM.svg.png",FluxFM - Chillhop
+https://streams.fluxfm.de/Chillhop/mp3-128/
+#EXTINF:-1 tvg-logo="https://upload.wikimedia.org/wikipedia/commons/thumb/1/16/FIP_logo_2021.svg/330px-FIP_logo_2021.svg.png",FIP (Radio France)
+https://icecast.radiofrance.fr/fip-midfi.mp3
+#EXTINF:-1,Kevin MacLeod - Sneaky Snitch (CC BY)
+https://incompetech.com/music/royalty-free/mp3-royaltyfree/Sneaky%20Snitch.mp3
+#EXTINF:-1,Kevin MacLeod - Monkeys Spinning Monkeys (CC BY)
+https://incompetech.com/music/royalty-free/mp3-royaltyfree/Monkeys%20Spinning%20Monkeys.mp3

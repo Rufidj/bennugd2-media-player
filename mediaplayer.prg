@@ -1,0 +1,2043 @@
+// MediaPlayer - reproductor multimedia para BennuGD2 (libmod_video)
+//   explorador de archivos + reproductor con iconos que se ocultan solos.
+// Mando (PS5): cruceta = mover, X = aceptar, O = atras, triangulo = subtitulos, touchpad/A = idioma de audio,
+//   cuadrado = silenciar, L1/R1 = -/+10 s, START = pausa.   Teclado: flechas, Enter, Esc, S, M, espacio.
+// Variables de entorno: MEDIA_DIR (carpeta inicial), MP_OPEN (abrir un archivo directamente),
+//   MP_SHOT (ruta .png: guarda una captura tras unos fotogramas y sale; solo para pruebas).
+
+import "libmod_gfx";
+import "libmod_input";
+import "libmod_misc";
+import "libmod_sound";
+import "libmod_net";
+import "libmod_video";
+
+const
+    SW = 1280;            // el diseño se piensa en 1280x720 (coordenadas "logicas")...
+    SH = 720;
+    RW = 1920;            // ...y se dibuja a 1920x1080: todo sale x1.5 (nitido en una TV)
+    RH = 1080;
+    UIN = 3; UID = 2;     // factor logico -> real = 3/2
+
+    // acciones de entrada
+    A_UP = 0; A_DOWN = 1; A_LEFT = 2; A_RIGHT = 3;
+    A_OK = 4; A_BACK = 5; A_SUBS = 6; A_PAUSE = 7; A_SEEKB = 8; A_SEEKF = 9; A_MUTE = 10;
+    A_AUDIO = 11; A_COUNT = 12;
+
+    // botones del reproductor (orden en pantalla)
+    B_PREV = 0; B_RW = 1; B_PLAY = 2; B_STOP = 3; B_FF = 4; B_NEXT = 5; B_SUBS = 6; B_AUDIO = 7; B_VOL = 8;
+    B_COUNT = 9;
+
+    // casillas de sprites
+    S_VIDEO = 0; S_SHADE_BOT = 1; S_SHADE_TOP = 2; S_BTN = 3;          // 3..11
+    S_FOCUS = 12; S_BAR_BG = 13; S_BAR_FG = 14; S_KNOB = 15;
+    S_BROWSE_BG = 16; S_SEL = 17; S_ROWICON = 18;                      // 18..29
+    S_HEADER = 30; S_PREVIEW = 31; S_PANEL = 32; S_VIZ = 33; S_MSEL = 34; S_BG = 35; S_WAVE = 36; S_HICON = 39; S_COUNT = 45;
+    HINT_Y = 684;
+    GK_MAX = 8192;
+    VIZ_W = 660; VIZ_H = 340; VIZ_BASE = 270; VIZ_MAXH = 260;
+
+    ROWS = 12;
+    ROW_H = 46;
+    ROW_Y0 = 118;
+    HIDE_AFTER = 200;       // fotogramas sin tocar nada hasta ocultar los iconos
+    MAX_ENTRIES = 2047;
+
+    ST_BROWSE = 0; ST_PLAY = 1;
+    K_FILE = 0; K_DIR = 1; K_LIST = 2; K_URL = 3; K_MYLISTS = 4; K_ADDONS = 5; K_ADDON = 6; K_AFOLDER = 7;    // tipos de entrada del explorador
+    M_NONE = 0; M_MENU = 1; M_KB = 2; M_CREDITS = 3;                             // pantallas modales (menu / teclado)
+    KB_NEWLIST = 1; KB_RENAME_LIST = 2; KB_URL = 3; KB_NEW_TITLE = 4; KB_ENTRY_TITLE = 5; KB_LOGO = 6; KB_ADDON = 7; KB_ASET = 8;
+    MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
+    MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_ASET = 300; MA_PICK = 100;
+end
+
+global
+    int fnt_ui, fnt_sub;                          // fuentes de mapa de bits (solo la cuadricula del teclado)
+    int sf_id[4], sf_cur = -1;                    // fuentes de subtitulos por escritura: 0 latino/cirilico, 1 japones, 2 chino, 3 coreano
+    int fnt_t, texts_ready; string cur_font = "";    // fuentes TrueType de la interfaz y de los subtitulos
+    int g_icon[20];                      // 0 play 1 pause 2 stop 3 next 4 prev 5 ff 6 rw 7 subs 8 vol 9 mute 10 folder 11 video 12 back
+    int g_shade, g_shade_top, g_knob, g_white, g_barbg, g_sel, g_ring;
+
+    // sprites genericos controlados desde el bucle principal
+    int   spr_graph[S_COUNT];
+    int   spr_x[S_COUNT];
+    int   spr_y[S_COUNT];
+    int   spr_sizey[S_COUNT];
+    int   spr_sizex[S_COUNT];
+    int   spr_alpha[S_COUNT];
+    int   spr_z[S_COUNT];
+
+    // entrada
+    int act_hold[A_COUNT];
+    int act_press[A_COUNT];
+    int act_rep[A_COUNT];
+    int any_input;
+
+    // explorador
+    string cur_dir;
+    string entries[MAX_ENTRIES];
+    int    entry_dir[MAX_ENTRIES];
+    int    entry_size[MAX_ENTRIES];
+    string entry_url[MAX_ENTRIES];
+    string entry_logo[MAX_ENTRIES];          // logo de la emisora (tvg-logo del .m3u), "" si no hay
+    string pending_logo = "";
+    int    logo_h;                           // video (imagen) abierto con el logo de la emision actual
+    string cur_list = "";                // lista .m3u abierta ("" = explorando una carpeta)
+    string load_path = "", load_title = "", pending_title = "";
+    int    load_wait;
+    // previsualizacion (un fotograma aleatorio + informacion)
+    int    pv_h, pv_idx = -1, pv_rest, pv_wait, pv_phase;
+    string s_info[7];
+    int    txt_info[7];
+    int    n_entries;
+    int    sel, top_row;
+    string row_label[ROWS];
+    int    txt_row[ROWS];
+    int    txt_path, txt_hint, txt_empty;
+    string s_path, s_hint, s_empty;
+
+    // reproductor
+    int state = ST_BROWSE;
+    int vh = 0;                          // manejador de video
+    int cur_file_idx;                    // indice en entries del video actual
+    string cur_file;
+    int overlay_a, overlay_t, focus;
+    int vol = 100, muted;
+    int sub_sel = -1;                    // -1 desactivados
+    int sub_tracks;
+    int audio_tracks, audio_sel;
+    int txt_time, txt_title, txt_toast, txt_sub[6];
+    string s_time, s_title, s_toast, s_sub[3];
+    int toast_t;
+    int vid_w, vid_h;
+    int frame_n;
+
+    string shot_path;
+    int dir_ver, lbl_ver = -1, lbl_top = -1;     // cache de textos del explorador
+    int last_sec = -1, last_dur = -1;            // cache del contador de tiempo
+    int sub_lines;
+    // modo musica + visualizador (draw_rectangles_filled lee estos arrays cada fotograma)
+    int music_mode, viz_mode;                    // viz_mode: 0 barras, 1 onda
+    int g_viz;
+    string hls_url = "", hls_hdr = "", hls_dir = "", hls_title = "";   // stream HLS con cabeceras abierto desde un addon: se salta regenerando la lista local
+    string cr_s[48]; int cr_st[48], cr_id[48], cr_n, cr_pos, cr_fast, cr_from;          // creditos: lineas, estilo, texto, avance (x100)
+    string info_fit[7];                                                   // ultima version ajustada al ancho de cada linea de informacion
+    string hls_vurl = "", hls_aurl = "", hls_ct_url[2], hls_ct_txt[2];            // listas del maestro y copia de sus textos
+    int hls_seek_to = -1, hls_seek_t = 0, hls_streak = 0;                  // saltos pendientes (se juntan las pulsaciones seguidas)
+    int hls_base = 0, hls_total = 0;                                     // ms de inicio de la lista local dentro del total, y duracion total
+    int g_k[GK_MAX];                             // por grafico: escala a aplicar (ver sprite_proc)
+    int viz_cur[32]; int viz_peak[32]; int viz_phase;
+    int pv_audio;
+    int txt_cache[128];
+    int txt_want[128];
+    // almacen y editor de listas
+    string store_dir = "", lists_dir = "", home_dir = "";
+    string wl_t[2048]; string wl_u[2048]; string wl_l[2048]; int wl_n;     // lista de trabajo
+    int modal, modal_ver, mlbl_ver = -1;
+    string menu_title = "", menu_opt[10]; int menu_act[10], menu_n, menu_sel; string pick_name[10];
+    int kb_secret, kb_secret_next;
+    string kb_title = "", kb_text = "", kb_rows[5], kb_sp[6]; int kb_spx[6], kb_spw[6];
+    int kb_purpose, kb_r, kb_c, kb_shift, kb_dirty;
+    string op_title = "", op_url = "", op_logo = "", op_path = ""; int op_after, op_idx;
+    string s_mtitle, s_mopt[10], s_mhint, s_kbtitle, s_kbin, s_kbrow[5], s_kbs[6];
+    int txt_mtitle, txt_mopt[10], txt_mhint, txt_kbin, txt_kbrow[5], txt_kbs[6];
+    // idioma y aspecto
+    string lang_cur = "es"; string lang_k[200]; string lang_v[200]; int lang_n, lang_ver;
+    int skin = 1;                                 // 0 clasico, 1 PlayStation
+    int g_bg_ps, g_wave[3], g_pill, g_sym[4];
+    int hint_key = -1, hint_n, hint_ic[6], hint_icx[6]; string s_h[6]; int txt_h[6];
+    int sc_f[200], sc_a[200], sc_n;               // entrada guiada para pruebas (MP_SCRIPT)
+    string last_sub_raw = "";                    // cache del subtitulo
+    int shot_frame = 150;
+end
+
+declare function string ext_of(string f) end
+declare function string parent_of(string p) end
+declare function string join_path(string d, string f) end
+declare function string base_name(string p) end
+declare function string fmt_time(int ms) end
+declare function string addon_signed_playlist(string url, string hdr) end
+declare function int hls_reseek(int ms) end
+declare function string pad2(int n) end
+declare function string utf8_to_latin1(string s) end
+declare function string tr(string k) end
+declare function string next_choice(string choices, string cur) end
+declare function int sub_font_id(int k) end
+declare function int lang_script() end
+declare function string next_lang() end
+declare function string extinf_title(string ln) end
+declare function string disp_name(int i) end
+declare function string sub_name() end
+declare function string entry_path(int i) end
+declare function string lang_or_dash(string l) end
+declare function string fmt_size(int b) end
+declare function string cut_text(string t, int n) end
+declare function string fit_text(string t, int maxw) end
+declare function string tail_fit(string t, int maxw) end
+declare function string utf8_chop(string t) end
+
+// Entrada guiada para pruebas: MP_SCRIPT="fotograma:accion,fotograma:accion,..." (up down left right ok back subs pause seekb seekf mute audio)
+function load_script()
+private string sc, tok; int p, q, f, a;
+begin
+    sc = getenv("MP_SCRIPT"); sc_n = 0;
+    while (sc != "" && sc_n < 200)
+        p = find(sc, ",");
+        if (p < 0) tok = sc; sc = ""; else tok = substr(sc, 0, p); sc = substr(sc, p + 1); end
+        q = find(tok, ":");
+        if (q > 0)
+            f = atoi(substr(tok, 0, q)); tok = substr(tok, q + 1); a = -1;
+            if (tok == "up") a = A_UP; end        if (tok == "down") a = A_DOWN; end
+            if (tok == "left") a = A_LEFT; end    if (tok == "right") a = A_RIGHT; end
+            if (tok == "ok") a = A_OK; end        if (tok == "back") a = A_BACK; end
+            if (tok == "subs") a = A_SUBS; end    if (tok == "pause") a = A_PAUSE; end
+            if (tok == "seekb") a = A_SEEKB; end  if (tok == "seekf") a = A_SEEKF; end
+            if (tok == "mute") a = A_MUTE; end    if (tok == "audio") a = A_AUDIO; end
+            if (a >= 0) sc_f[sc_n] = f; sc_a[sc_n] = a; sc_n++; end
+        end
+    end
+end
+
+function apply_script()
+private int i;
+begin
+    for (i = 0; i < sc_n; i++)
+        if (sc_f[i] == frame_n) act_press[sc_a[i]] = 1; any_input = 1; end
+    end
+end
+
+include "addon.prg";
+include "addon_ui.prg";
+
+process main()
+private
+    string open_file;
+    int i;
+begin
+    soundsys_init();
+    set_mode(RW, RH);
+    set_fps(60, 0);
+
+    load_assets();
+    for (i = 0; i < S_COUNT; i++) sprite_proc(i); end
+    create_viz();
+
+    storage_init();
+    cfg_load();
+    lang_load(lang_cur);          // carga el idioma, abre sus fuentes TrueType y crea los textos
+    load_script();
+    cur_dir = getenv("MEDIA_DIR");
+    if (cur_dir == "")
+        // por defecto la carpeta "videos" junto al programa (en la PS5: /app0/videos)
+        cur_dir = join_path(cd(), "videos"); home_dir = cur_dir;
+        read_dir();
+        if (n_entries <= (store_dir != "" ? 2 : 1)) cur_dir = cd(); home_dir = cur_dir; read_dir(); end
+    else
+        home_dir = cur_dir;
+        read_dir();
+    end
+    if (getenv("MP_SELECT") != "") sel = atoi(getenv("MP_SELECT")); if (sel >= n_entries) sel = n_entries - 1; end end   // solo pruebas
+    if (getenv("MP_VIZ") != "") viz_mode = atoi(getenv("MP_VIZ")); end   // solo pruebas
+    say("MediaPlayer: carpeta " + cur_dir + ", " + n_entries + " entradas");
+
+    shot_path = getenv("MP_SHOT");
+    if (getenv("MP_SHOTF") != "") shot_frame = atoi(getenv("MP_SHOTF")); end
+    open_file = getenv("MP_OPEN");
+    if (open_file != "") start_video(open_file); end
+
+    while (!wm_info.exit_status)
+        frame_n++;
+        read_input();
+        apply_script();
+        if (act_press[A_BACK] && state == ST_BROWSE && key(_ESC)) exit(); end
+
+        if (getenv("MP_ENTER") != "" && frame_n == 10) activate_entry(sel); end                       // solo pruebas
+        if (getenv("MP_SEL2") != "" && frame_n == 12) sel = atoi(getenv("MP_SEL2")); end
+        if (getenv("MP_ENTER2") != "" && frame_n == 40) sel = atoi(getenv("MP_ENTER2")); activate_entry(sel); end
+        if (getenv("MP_AUDIO_AT") != "" && frame_n == atoi(getenv("MP_AUDIO_AT")) && vh) cycle_audio(); end   // solo pruebas
+        if (load_wait > 0)
+            load_wait--;
+            if (load_wait == 0) s_toast = ""; toast_t = 0; start_video(load_path); load_path = ""; end
+        end
+        if (modal != M_NONE) update_modal(); elseif (state == ST_BROWSE) update_browser(); else update_player(); end
+        layout_all();
+        apply_texts();
+
+        if (shot_path != "" && frame_n == shot_frame)
+            map_save(0, screen_get(), shot_path);
+            if (music_mode) map_save(0, g_viz, shot_path + ".viz.png"); end
+            say("captura guardada: " + shot_path);
+            exit();
+        end
+        frame;
+    end
+end
+
+// ------------------------------------------------------------------ recursos
+// marca un grafico como "ya a resolucion real" (1920x1080): no hay que ampliarlo
+function hires(int g)
+begin
+    if (g > 0 && g < GK_MAX) g_k[g] = 100; end
+end
+
+// logico -> real
+function int ur(int v)
+begin
+    return v * UIN / UID;
+end
+
+// anchura de un texto en unidades logicas (la fuente se dibuja a x1.5)
+function int tw(string t)
+begin
+    return text_width(fnt_t, t) * UID / UIN;
+end
+
+function load_assets()
+private
+    string names[17] = "play", "pause", "stop", "next", "prev", "ff", "rw", "subs", "vol", "mute", "folder", "video", "back", "lang", "cloud", "note", "addon";
+    int i;
+begin
+    for (i = 0; i < GK_MAX; i++) g_k[i] = 150; end
+    for (i = 0; i <= 16; i++)
+        g_icon[i] = map_load("res/" + names[i] + ".png");
+        center_set(0, g_icon[i], 72, 72); hires(g_icon[i]);
+    end
+    fnt_ui  = fnt_new(0, map_load("res/font_ui.png"), CHARSET_ISO8859, 24, 51, 0, 255, 0);
+    fnt_sub = fnt_new(0, map_load("res/font_sub.png"), CHARSET_ISO8859, 38, 78, 0, 255, 0);
+
+    g_shade     = map_load("res/shade_bot.png");
+    g_shade_top = map_load("res/shade_top.png");
+    g_ring      = map_load("res/ring.png"); center_set(0, g_ring, 72, 72); hires(g_ring);
+    g_knob      = map_load("res/knob.png"); center_set(0, g_knob, 20, 20); hires(g_knob);
+    g_white = map_new(8, 8);   map_clear(0, g_white, rgba(255, 255, 255, 255));
+    g_barbg = map_new(8, 8);   map_clear(0, g_barbg, rgba(255, 255, 255, 70));
+    g_sel   = map_new(8, 8);   map_clear(0, g_sel, rgba(70, 130, 255, 120));
+    g_bg_ps = map_load("res/bg_ps.png"); hires(g_bg_ps);
+    for (i = 0; i < 3; i++) g_wave[i] = map_load("res/wave" + i + ".png"); hires(g_wave[i]); end
+    g_pill  = map_load("res/sel_pill.png"); hires(g_pill);
+    g_sym[0] = map_load("res/sym_cross.png"); g_sym[1] = map_load("res/sym_circle.png");
+    g_sym[2] = map_load("res/sym_triangle.png"); g_sym[3] = map_load("res/sym_square.png");
+    for (i = 0; i < 4; i++) center_set(0, g_sym[i], 36, 36); hires(g_sym[i]); end
+end
+
+// Visualizador: se dibuja en un mapa propio (map_clear + drawing_map + draw_*) que se muestra como un sprite
+function create_viz()
+begin
+    g_viz = map_new(ur(VIZ_W), ur(VIZ_H));
+    center_set(0, g_viz, ur(VIZ_W) / 2, ur(VIZ_H) / 2); hires(g_viz);
+end
+
+// dibujo del visualizador en unidades logicas sobre un mapa a resolucion real
+function vrect(int px, int py, int w, int h)
+begin
+    draw_rectangle_filled(ur(px), ur(py), ur(w) > 0 ? ur(w) : 1, ur(h) > 0 ? ur(h) : 1);
+end
+function vline(int x0, int y0, int x1, int y1)
+begin
+    draw_line(ur(x0), ur(y0), ur(x1), ur(y1));
+end
+
+// Actualiza el visualizador a partir de VIDEO_SPECTRUM / VIDEO_WAVE
+function update_viz()
+private int b, t, h, hg, hy, hr, xb, y0;
+begin
+    if (!vh || !music_mode) return 0; end
+    map_clear(0, g_viz, rgba(0, 0, 0, 0));
+    drawing_map(0, g_viz);
+    y0 = VIZ_BASE;
+    if (viz_mode == 0)
+        for (b = 0; b < 32; b++)
+            t = video_spectrum(vh, b) * VIZ_MAXH * 13 / 2550;
+            if (t > VIZ_MAXH) t = VIZ_MAXH; end
+            if (t > viz_cur[b]) viz_cur[b] = (viz_cur[b] * 2 + t * 3) / 5; else viz_cur[b] = viz_cur[b] * 82 / 100; end
+            if (viz_cur[b] > viz_peak[b]) viz_peak[b] = viz_cur[b]; else viz_peak[b] -= 2; if (viz_peak[b] < 0) viz_peak[b] = 0; end end
+            h = viz_cur[b];
+            hg = h < VIZ_MAXH * 6 / 10 ? h : VIZ_MAXH * 6 / 10;
+            hy = h > VIZ_MAXH * 6 / 10 ? (h < VIZ_MAXH * 85 / 100 ? h - VIZ_MAXH * 6 / 10 : VIZ_MAXH * 25 / 100) : 0;
+            hr = h > VIZ_MAXH * 85 / 100 ? h - VIZ_MAXH * 85 / 100 : 0;
+            xb = 10 + b * 20;
+            if (hg > 0) drawing_rgba(60, 220, 90, 255);   vrect(xb, y0 - hg, 16, hg); end
+            if (hy > 0) drawing_rgba(245, 210, 40, 255);  vrect(xb, y0 - hg - hy, 16, hy); end
+            if (hr > 0) drawing_rgba(245, 70, 55, 255);   vrect(xb, y0 - hg - hy - hr, 16, hr); end
+            drawing_rgba(255, 255, 255, 230);             vrect(xb, y0 - viz_peak[b] - 6, 16, 3);
+            if (h > 3) drawing_rgba(90, 160, 255, 80);    vrect(xb, y0 + 6, 16, h / 4); end
+        end
+    else
+        drawing_rgba(120, 255, 190, 255);
+        for (b = 0; b < 255; b++)
+            vline(10 + b * 640 / 255, VIZ_H / 2 + video_wave(vh, b) * 18 / 10, 10 + (b + 1) * 640 / 255, VIZ_H / 2 + video_wave(vh, b + 1) * 18 / 10);
+        end
+    end
+    drawing_map(0, 0);
+end
+
+function create_texts()
+private int i; string e = "";
+begin
+    // z negativo = por encima de los sprites
+    for (i = 0; i < ROWS; i++)
+        txt_row[i] = write_var(fnt_t, ur(110), ur(ROW_Y0 + i * ROW_H + ROW_H / 2), -20, 3, row_label[i]);
+    end
+    txt_path  = write_var(fnt_t, ur(76), ur(40), -20, 3, s_path);
+    txt_hint  = write_var(fnt_t, ur(SW / 2), ur(SH - 24), -20, 4, s_hint);
+    txt_empty = write_var(fnt_t, ur(SW / 2), ur(SH / 2), -20, 4, s_empty);
+    txt_time  = write_var(fnt_t, ur(60), ur(SH - 72), -20, 3, s_time);
+    txt_title = write_var(fnt_t, ur(60), ur(50), -20, 3, s_title);
+    for (i = 0; i < 7; i++) txt_info[i] = write_var(fnt_t, ur(770), ur(420 + i * 34), -20, 3, s_info[i]); end
+    txt_mtitle = write_var(fnt_t, ur(80), ur(70), -30, 3, s_mtitle);
+    txt_mhint  = write_var(fnt_t, ur(SW / 2), ur(SH - 30), -30, 4, s_mhint);
+    for (i = 0; i < 10; i++) txt_mopt[i] = write_var(fnt_t, ur(120), ur(170 + i * 52), -30, 3, s_mopt[i]); end
+    txt_kbin   = write_var(fnt_t, ur(110), ur(170), -30, 3, s_kbin);
+    for (i = 0; i < 5; i++) txt_kbrow[i] = write_var(fnt_ui, ur(SW / 2), ur(250 + i * 56), -30, 4, s_kbrow[i]); end
+    for (i = 0; i < 6; i++) txt_kbs[i] = write_var(fnt_t, ur(0), ur(250 + 5 * 56), -30, 3, s_kbs[i]); end
+    for (i = 0; i < 6; i++) txt_h[i] = write_var(fnt_t, ur(0), ur(HINT_Y), -30, 3, s_h[i]); end
+    txt_toast = write_var(fnt_t, ur(SW / 2), ur(120), -20, 4, s_toast);
+    txt_amsg = write_var(fnt_t, ur(SW / 2), ur(SH / 2), -25, 4, s_amsg);
+    create_sub_texts(sub_font_id(lang_script()));
+end
+
+// cada casilla es un proceso que copia el estado de los arrays
+process sprite_proc(int slot)
+private int gk;
+begin
+    loop
+        graph  = spr_graph[slot];
+        gk = (graph > 0 && graph < GK_MAX) ? g_k[graph] : 150;      // 100 = imagen ya a resolucion real, 150 = hay que ampliarla x1.5
+        x      = spr_x[slot] * UIN / UID;
+        y      = spr_y[slot] * UIN / UID;
+        size_y = spr_sizey[slot] * gk / 100;
+        size_x = spr_sizex[slot] * gk / 100;
+        alpha  = spr_alpha[slot];
+        z      = spr_z[slot];
+        frame;
+    end
+end
+
+// ------------------------------------------------------------------ entrada
+function read_input()
+private
+    int i, n, ax, ay;
+    int h[A_COUNT];
+begin
+    for (i = 0; i < A_COUNT; i++) h[i] = 0; end
+    if (getenv("MP_NOPAD") != "") for (i = 0; i < A_COUNT; i++) act_press[i] = 0; end return 0; end
+    // el mando hay que seleccionarlo explicitamente: usa el primero conectado
+    for (i = 0; i < 4; i++)
+        if (joy_is_attached(i)) joy_select(i); break; end
+    end
+    ax = joy_getaxis(JOY_AXIS_LEFTX); ay = joy_getaxis(JOY_AXIS_LEFTY);
+
+    h[A_UP]    = key(_UP)    || joy_getbutton(JOY_BUTTON_DPAD_UP)    || ay < -16000;
+    h[A_DOWN]  = key(_DOWN)  || joy_getbutton(JOY_BUTTON_DPAD_DOWN)  || ay >  16000;
+    h[A_LEFT]  = key(_LEFT)  || joy_getbutton(JOY_BUTTON_DPAD_LEFT)  || ax < -16000;
+    h[A_RIGHT] = key(_RIGHT) || joy_getbutton(JOY_BUTTON_DPAD_RIGHT) || ax >  16000;
+    h[A_OK]    = key(_ENTER) || joy_getbutton(JOY_BUTTON_A);
+    h[A_BACK]  = key(_ESC)   || key(_BACKSPACE) || joy_getbutton(JOY_BUTTON_B);
+    h[A_SUBS]  = key(_S)     || joy_getbutton(JOY_BUTTON_Y);
+    h[A_PAUSE] = key(_SPACE) || joy_getbutton(JOY_BUTTON_START);
+    h[A_SEEKB] = key(_N) || joy_getbutton(JOY_BUTTON_LEFTSHOULDER);
+    h[A_SEEKF] = key(_P)|| joy_getbutton(JOY_BUTTON_RIGHTSHOULDER);
+    h[A_AUDIO] = key(_A) || joy_getbutton(JOY_BUTTON_TOUCHPAD);
+    h[A_MUTE]  = key(_M)     || joy_getbutton(JOY_BUTTON_X);
+
+    any_input = 0;
+    for (i = 0; i < A_COUNT; i++)
+        act_press[i] = 0;
+        if (h[i])
+            if (!act_hold[i])
+                act_press[i] = 1; act_rep[i] = 0;
+            else
+                act_rep[i]++;
+                // repeticion solo para direcciones: tras 22 fotogramas, cada 5
+                if (i <= A_RIGHT && act_rep[i] > 22 && (act_rep[i] % 5) == 0) act_press[i] = 1; end
+            end
+            any_input = 1;
+        end
+        act_hold[i] = h[i];
+    end
+    // prueba de estres (MP_FUZZ=1): pulsaciones pseudoaleatorias
+    if (getenv("MP_FUZZ") != "" && (frame_n % 6) == 0)
+        i = rand(0, 5);
+        if (getenv("MP_FUZZ") == "2") i = rand(0, 2); end
+        for (n = 0; n < A_COUNT; n++) act_press[n] = 0; end
+        switch (i)
+            case 0: act_press[A_UP] = 1; end
+            case 1, 2: act_press[A_DOWN] = 1; end
+            case 3: act_press[A_OK] = 1; end
+            case 4: act_press[A_OK] = 1; end
+            case 5: act_press[A_BACK] = 1; end
+        end
+        any_input = 1;
+    end
+    // el stick/rueda tambien cuenta como "tocar el mando"
+    if (abs(joy_getaxis(JOY_AXIS_RIGHTX)) > 12000 || abs(joy_getaxis(JOY_AXIS_RIGHTY)) > 12000) any_input = 1; end
+end
+
+// ------------------------------------------------------------------ explorador
+function read_dir()
+private
+    int dh, i, j, d;
+    string nm, t_s; int t_d, t_z;
+begin
+    n_entries = 0; addon_mode = 0;
+    sel = 0; top_row = 0; dir_ver++;
+    if (parent_of(cur_dir) != cur_dir)
+        entries[0] = ".."; entry_dir[0] = 1; n_entries = 1;
+    end
+    if (cur_dir == home_dir && cur_dir != lists_dir)
+        entries[n_entries] = tr("s_addons"); entry_dir[n_entries] = K_ADDONS; entry_size[n_entries] = 0; entry_logo[n_entries] = ""; n_entries++;
+    end
+    if (store_dir != "" && cur_dir == home_dir && cur_dir != lists_dir)
+        entries[n_entries] = tr("m_mylists"); entry_dir[n_entries] = K_MYLISTS; entry_size[n_entries] = 0; entry_logo[n_entries] = ""; n_entries++;
+    end
+    dh = diropen(join_path(cur_dir, "*"));
+    if (dh)
+        nm = dirread(dh);
+        while (nm != "" && n_entries < MAX_ENTRIES)
+            if (nm != "." && nm != ".." && substr(nm, 0, 1) != ".")
+                d = fileinfo.directory;
+                if (!d && (lcase(ext_of(nm)) == "m3u" || lcase(ext_of(nm)) == "m3u8")) d = K_LIST; end
+                if (d || is_video(nm) || is_audio(nm))
+                    entries[n_entries] = nm; entry_dir[n_entries] = d; entry_size[n_entries] = fileinfo.size; entry_logo[n_entries] = ""; n_entries++;
+                end
+            end
+            nm = dirread(dh);
+        end
+        dirclose(dh);
+    end
+    // ordenar: ".." primero, carpetas, luego videos; alfabetico sin distinguir mayusculas
+    for (i = 1; i < n_entries; i++)
+        t_s = entries[i]; t_d = entry_dir[i]; t_z = entry_size[i]; j = i - 1;
+        while (j >= (entries[0] == ".." ? 1 : 0) && entry_less(t_s, t_d, entries[j], entry_dir[j]))
+            entries[j + 1] = entries[j]; entry_dir[j + 1] = entry_dir[j]; entry_size[j + 1] = entry_size[j]; j--;
+        end
+        entries[j + 1] = t_s; entry_dir[j + 1] = t_d; entry_size[j + 1] = t_z;
+    end
+end
+
+// Lista de enlaces M3U: "#EXTINF:-1,Titulo" seguido de la URL (las lineas "#..." sin mas se ignoran)
+function read_list()
+private int i;
+begin
+    n_entries = 0; sel = 0; top_row = 0; dir_ver++;
+    entries[0] = ".."; entry_dir[0] = K_DIR; entry_url[0] = ""; entry_size[0] = 0; entry_logo[0] = ""; n_entries = 1;
+    wl_load(cur_list);
+    for (i = 0; i < wl_n && n_entries < MAX_ENTRIES; i++)
+        entries[n_entries] = wl_t[i]; entry_dir[n_entries] = K_URL; entry_url[n_entries] = wl_u[i]; entry_size[n_entries] = 0; entry_logo[n_entries] = wl_l[i];
+        n_entries++;
+    end
+end
+
+function entry_less(string a, int ad, string b, int bd)
+begin
+    if (ad != bd) return ad > bd; end
+    return lcase(a) < lcase(b);
+end
+
+function is_audio(string f)
+private string e;
+begin
+    e = lcase(ext_of(f));
+    return e == "mp3" || e == "flac" || e == "wav" || e == "m4a" || e == "aac" || e == "opus" || e == "wma" || e == "mka" || e == "oga" || e == "ape";
+end
+
+function is_video(string f)
+private string e;
+begin
+    e = lcase(ext_of(f));
+    return e == "mp4" || e == "mkv" || e == "avi" || e == "webm" || e == "mov" || e == "m4v"
+        || e == "ogv" || e == "ogg" || e == "mpg" || e == "mpeg" || e == "ts" || e == "wmv" || e == "flv";
+end
+
+function string ext_of(string f)
+private int i;
+begin
+    for (i = len(f) - 1; i > 0; i--)
+        if (substr(f, i, 1) == ".") return substr(f, i + 1); end
+    end
+    return "";
+end
+
+function string parent_of(string p)
+private int i;
+begin
+    for (i = len(p) - 1; i > 0; i--)
+        if (substr(p, i, 1) == "/") return substr(p, 0, i); end
+    end
+    if (len(p) > 1 && substr(p, 0, 1) == "/") return "/"; end
+    return p;
+end
+
+function string join_path(string d, string f)
+begin
+    if (d == "/") return "/" + f; end
+    return d + "/" + f;
+end
+
+function string base_name(string p)
+private int i;
+begin
+    for (i = len(p) - 1; i >= 0; i--)
+        if (substr(p, i, 1) == "/") return substr(p, i + 1); end
+    end
+    return p;
+end
+
+function update_browser()
+private int old;
+begin
+    if (act_press[A_MUTE]) open_context_menu(); return 0; end
+    if (n_entries > 0)
+        old = sel;
+        if (act_press[A_UP])    sel--; end
+        if (act_press[A_DOWN])  sel++; end
+        if (act_press[A_LEFT])  sel -= ROWS - 1; end
+        if (act_press[A_RIGHT]) sel += ROWS - 1; end
+        if (sel < 0) sel = (old == 0 && act_press[A_UP]) ? n_entries - 1 : 0; end
+        if (sel >= n_entries) sel = (old == n_entries - 1 && act_press[A_DOWN]) ? 0 : n_entries - 1; end
+        if (sel < top_row) top_row = sel; end
+        if (sel >= top_row + ROWS) top_row = sel - ROWS + 1; end
+
+        if (act_press[A_OK]) activate_entry(sel); end
+        update_preview();
+    end
+    if (act_press[A_BACK] || act_press[A_SUBS])
+        go_up();
+    end
+end
+
+function string fmt_size(int b)
+begin
+    if (b <= 0) return "-"; end
+    if (b >= 1073741824) return (b / 1073741824) + "." + ((b / 107374182) % 10) + " GB"; end
+    if (b >= 1048576) return (b / 1048576) + "." + ((b / 104857) % 10) + " MB"; end
+    return (b / 1024) + " KB";
+end
+
+function string lang_or_dash(string l)
+begin
+    if (l == "") return "?"; end
+    return l;
+end
+
+function string cut_text(string t, int n)
+begin
+    return fit_text(t, n * 14);
+end
+
+// cierra la previsualizacion actual (si la hay)
+function close_preview()
+begin
+    if (pv_h) video_close(pv_h); end
+    pv_h = 0; pv_phase = 0;
+    spr_graph[S_PREVIEW] = 0;
+end
+
+// Si te quedas un momento sobre un video: se abre en silencio (decodificador por software, para no tocar el del hardware),
+// salta a un punto aleatorio y se queda en pausa con ese fotograma, junto a su informacion.
+function update_preview()
+private int d, n, k, goto_skip_info; string t;
+begin
+    for (k = 0; k < 7; k++)                              // salvaguarda: ninguna linea de informacion se sale del panel
+        if (s_info[k] != info_fit[k]) s_info[k] = fit_text(s_info[k], 420); info_fit[k] = s_info[k]; end
+    end
+    if (sel != pv_idx)
+        close_preview();
+        pv_idx = sel; pv_rest = 0;
+        for (k = 0; k < 7; k++) s_info[k] = ""; end
+        if (sel >= 0 && sel < n_entries && entries[sel] != "..")
+            s_info[0] = cut_text(disp_name(sel), 28);
+            switch (entry_dir[sel])
+                case K_DIR:  s_info[1] = tr("s_folder"); end
+                case K_LIST: s_info[1] = tr("s_linklist"); end
+                case K_MYLISTS:
+                    wrap_text(tr("s_mylists_info"), 420, 2);
+                    for (k = 0; k < wrap_n; k++) s_info[1 + k] = wrap_l[k]; end
+                    s_info[1 + wrap_n] = tr("s_mylists_hint");
+                end
+                case K_ADDONS:
+                    wrap_text(tr("s_addons_info"), 420, 5);
+                    for (k = 0; k < wrap_n; k++) s_info[1 + k] = wrap_l[k]; end
+                end
+                case K_ADDON:
+                    wrap_text(entry_info[sel], 420, 5);
+                    for (k = 0; k < wrap_n; k++) s_info[1 + k] = wrap_l[k]; end
+                    s_info[6] = tr("s_addon_hint");
+                end
+                case K_AFOLDER:
+                    s_info[1] = tr("s_folder");
+                    wrap_text(entry_info[sel], 420, 4);
+                    for (k = 0; k < wrap_n; k++) s_info[2 + k] = wrap_l[k]; end
+                end
+                case K_URL:
+                    if (addon_mode == 2)
+                        wrap_text(entry_info[sel], 420, 6);
+                        for (k = 0; k < wrap_n; k++) s_info[1 + k] = wrap_l[k]; end
+                    else
+                        if (find(entry_url[sel], "://") < 0) s_info[1] = tr("s_localfile"); else s_info[1] = tr("s_netvideo"); end
+                        s_info[2] = cut_text(substr(entry_url[sel], find(entry_url[sel], "://") + 3), 28);
+                        if (find(entry_url[sel], "://") >= 0) s_info[3] = tr("s_streaming"); end
+                    end
+                end
+                default: s_info[1] = tr("s_size") + fmt_size(entry_size[sel]); end
+            end
+        end
+    end
+    pv_rest++;
+    if (pv_phase == 0 && pv_rest == (entry_dir[sel] == K_URL || entry_dir[sel] == K_AFOLDER ? 45 : 25) && sel >= 0 && sel < n_entries && (entry_dir[sel] == K_FILE || entry_dir[sel] == K_URL || ((entry_dir[sel] == K_AFOLDER || entry_dir[sel] == K_ADDON) && entry_logo[sel] != "")) && entries[sel] != "..")
+        video_use_hw(0);
+        // emisoras con logo: se abre la imagen del logo; el resto de enlaces: el propio video por red (puede tardar un poco)
+        if ((entry_dir[sel] == K_URL || entry_dir[sel] == K_AFOLDER || entry_dir[sel] == K_ADDON) && entry_logo[sel] != "") pv_h = video_open(entry_logo[sel]); else pv_h = video_open(entry_path(sel)); end
+        video_use_hw(1);
+        pv_phase = 3;                                   // 3 = no se pudo abrir
+        if (pv_h)
+            video_volume(pv_h, 0);
+            d = video_duration(pv_h);
+            if (video_is_audio_only(pv_h))
+                pv_phase = 2;                           // musica sin portada: se muestra una nota, no hace falta decodificar
+            else
+                video_play(pv_h, 0);
+                if (d > 2000) video_seek(pv_h, rand(d * 15 / 100, d * 75 / 100)); end
+                pv_phase = 1; pv_wait = 0;
+            end
+            if (entry_dir[sel] == K_AFOLDER || entry_dir[sel] == K_ADDON || (entry_dir[sel] == K_URL && (entry_logo[sel] != "" || addon_mode == 2))) goto_skip_info = 1; else goto_skip_info = 0; end
+            if (!goto_skip_info)
+            if (video_is_audio_only(pv_h)) s_info[1] = tr("s_music"); else s_info[1] = tr("s_res") + video_width(pv_h) + "x" + video_height(pv_h); end
+            if (d > 0) s_info[2] = tr("s_dur") + fmt_time(d); else s_info[2] = tr("s_dur_live"); end
+            if (entry_dir[sel] == K_URL) s_info[3] = tr("s_net_streaming"); else s_info[3] = tr("s_size") + fmt_size(entry_size[sel]); end
+            n = video_audio_tracks(pv_h);
+            t = "";
+            for (k = 0; k < n && k < 4; k++) t += (k > 0 ? ", " : "") + lang_or_dash(video_audio_lang(pv_h, k)); end
+            s_info[4] = tr("s_audio_n") + n + "): " + cut_text(utf8_to_latin1(t), 16);
+            n = video_subtitle_tracks(pv_h);
+            t = "";
+            for (k = 0; k < n && k < 4; k++) t += (k > 0 ? ", " : "") + lang_or_dash(video_subtitle_lang(pv_h, k)); end
+            s_info[5] = tr("s_subs_n") + n + "): " + cut_text(utf8_to_latin1(t), 12);
+            end
+        end
+    end
+    if (pv_phase == 1)
+        pv_wait++;
+        // espera a que haya fotogramas de verdad (el decodificador puede tardar mas en la consola); como maximo 3 s
+        if ((video_frames(pv_h) > 0 && pv_wait >= 30) || pv_wait >= (entry_dir[sel] == K_URL ? 420 : 180))
+            video_pause(pv_h, 1);
+            pv_phase = video_frames(pv_h) > 0 ? 2 : 3;
+        end
+    end
+end
+
+function go_up()
+begin
+    if (addon_mode == 2)
+        addon_back();
+    elseif (addon_mode == 1)
+        addon_mode = 0; cur_dir = home_dir; read_dir();
+    elseif (cur_list != "")
+        cur_list = ""; read_dir();
+    elseif (store_dir != "" && cur_dir == lists_dir)
+        cur_dir = home_dir; read_dir();
+    elseif (parent_of(cur_dir) != cur_dir)
+        cur_dir = parent_of(cur_dir); read_dir();
+    end
+end
+
+// ruta/URL real de una entrada
+function string entry_path(int i)
+begin
+    if (entry_dir[i] == K_URL) return entry_url[i]; end
+    return join_path(cur_dir, entries[i]);
+end
+
+// Las URL se abren en el fotograma siguiente: asi se ve tr("s_connecting") mientras el programa espera a la red
+function request_open(int i)
+begin
+    cur_file_idx = i;
+    hls_url = ""; hls_base = 0; hls_total = 0; hls_vurl = ""; hls_aurl = ""; hls_ct_url[0] = ""; hls_ct_url[1] = ""; hls_seek_to = -1;
+    pending_title = entries[i]; pending_logo = entry_logo[i]; hls_title = entries[i];
+    if (entry_dir[i] == K_URL)
+        s_toast = tr("s_connecting"); toast_t = 600;
+        load_path = entry_url[i]; load_wait = 3;
+        if (addon_mode > 0 && entry_aargs[i] != "") load_path = addon_signed_playlist(entry_url[i], entry_aargs[i]); if (load_path == "") load_wait = 0; s_toast = ""; toast_t = 0; end end
+    else
+        start_video(entry_path(i));
+    end
+end
+
+function activate_entry(int i)
+begin
+    if (entries[i] == "..")
+        go_up();
+    elseif (entry_dir[i] == K_DIR)
+        cur_dir = join_path(cur_dir, entries[i]); read_dir();
+    elseif (entry_dir[i] == K_MYLISTS)
+        cur_dir = lists_dir; read_dir();
+    elseif (entry_dir[i] == K_ADDONS)
+        read_addons();
+    elseif (entry_dir[i] == K_ADDON)
+        addon_open(entry_url[i]);
+    elseif (entry_dir[i] == K_AFOLDER)
+        addon_goto(entry_url[i], entry_aargs[i]);
+    elseif (entry_dir[i] == K_LIST)
+        cur_list = join_path(cur_dir, entries[i]); read_list();
+    else
+        request_open(i);
+    end
+end
+
+
+// ====================================================================== aspecto (skin)
+// Fondo degradado con tres olas que se desplazan despacio (solo con el aspecto PlayStation)
+function draw_bg()
+private int k, ox;
+begin
+    if (!skin) return 0; end
+    put(S_BG, g_bg_ps, SW / 2, SH / 2, 100, 255, 30);
+    for (k = 0; k < 3; k++)
+        ox = (frame_n * (k + 1) / 4) % 1280;
+        put(S_WAVE + k, g_wave[k], 1280 - ox, SH / 2, 100, 255, 28 - k);
+    end
+end
+
+// Selector: pastilla redondeada (PlayStation) o barra azul (clasico); w x h en pixeles
+function put_sel(int slot, int px, int py, int w, int h, int zz)
+begin
+    if (skin)
+        put(slot, g_pill, px, py, 100, 255, zz);
+        spr_sizex[slot] = w * 100 / 704; spr_sizey[slot] = h * 100 / 48;
+    else
+        put(slot, g_sel, px, py, 100, 255, zz);
+        spr_sizex[slot] = w * 100 / 8; spr_sizey[slot] = h * 100 / 8;
+    end
+end
+
+// Barra de ayuda con los simbolos de botones de colores. ctx: 1 explorador, 2 menu, 3 teclado
+function hint_set(int ctx)
+private int k, hk, wtot, x0, w;
+begin
+    hk = ctx + lang_ver * 10 + skin * 1000;
+    if (hk != hint_key)
+        hint_key = hk;
+        for (k = 0; k < 6; k++) s_h[k] = ""; hint_ic[k] = -1; end
+        switch (ctx)
+            case 1: hint_n = 3; hint_ic[0] = 0; s_h[0] = tr("h_open"); hint_ic[1] = 1; s_h[1] = tr("h_back"); hint_ic[2] = 3; s_h[2] = tr("h_options"); end
+            case 4: hint_n = 1; hint_ic[0] = 1; s_h[0] = tr("h_back"); end
+            case 2: hint_n = 2; hint_ic[0] = 0; s_h[0] = tr("h_choose"); hint_ic[1] = 1; s_h[1] = tr("h_cancel"); end
+            default:
+                hint_n = 6;
+                hint_ic[0] = 0; s_h[0] = tr("h_type"); hint_ic[1] = 3; s_h[1] = tr("h_delete"); hint_ic[2] = 2; s_h[2] = tr("h_space");
+                s_h[3] = "L1 " + tr("h_shift"); s_h[4] = "START " + tr("h_accept"); hint_ic[5] = 1; s_h[5] = tr("h_cancel");
+            end
+        end
+        wtot = 0;
+        for (k = 0; k < hint_n; k++) wtot += (hint_ic[k] >= 0 ? 44 : 0) + tw(s_h[k]) + (k < hint_n - 1 ? 44 : 0); end
+        x0 = (SW - wtot) / 2;
+        for (k = 0; k < hint_n; k++)
+            w = hint_ic[k] >= 0 ? 44 : 0;
+            hint_icx[k] = x0 + 22;
+            write_move(txt_h[k], ur(x0 + w), ur(HINT_Y));
+            x0 += w + tw(s_h[k]) + 44;
+        end
+    end
+    for (k = 0; k < hint_n; k++)
+        txt_want[txt_h[k]] = 8589934336 + (210);
+        if (hint_ic[k] >= 0) put(S_HICON + k, g_sym[hint_ic[k]], hint_icx[k], HINT_Y + 2, 80, 255, -12); end
+    end
+end
+
+// ====================================================================== fuentes TrueType y medida de textos
+// quita el ultimo caracter UTF-8
+function string utf8_chop(string t)
+private int i;
+begin
+    i = len(t) - 1;
+    while (i > 0 && (asc(substr(t, i, 1)) & 192) == 128) i--; end
+    if (i < 0) i = 0; end
+    return substr(t, 0, i);
+end
+
+// recorta con "..." para que el texto quepa en maxw pixeles (con la fuente de la interfaz)
+function string fit_text(string t, int maxw)
+begin
+    if (fnt_t <= 0 || tw(t) <= maxw) return t; end
+    while (len(t) > 1 && tw(t + "...") > maxw) t = utf8_chop(t); end
+    return t + "...";
+end
+
+// la cola de un texto largo (para la linea del teclado)
+function string tail_fit(string t, int maxw)
+private int i, n;
+begin
+    if (fnt_t <= 0 || tw(t) <= maxw) return t; end
+    n = len(t);
+    for (i = 1; i < n; i++)
+        if ((asc(substr(t, i, 1)) & 192) != 128 && tw("..." + substr(t, i)) <= maxw) return "..." + substr(t, i); end
+    end
+    return t;
+end
+
+// Abre la fuente del idioma actual (clave lang_font) y vuelve a crear todos los textos con ella
+function apply_lang_font()
+private string f; int i;
+begin
+    f = tr("lang_font");
+    if (f == "lang_font") f = "res/fonts/ui_latin.ttf"; end
+    if (f == cur_font && texts_ready) return 0; end
+    if (texts_ready) write_delete(ALL_TEXT); for (i = 0; i < 6; i++) txt_sub[i] = 0; end sf_cur = -1; end
+    if (f != cur_font)
+        if (fnt_t > 0) fnt_unload(fnt_t); end
+        fnt_t = ttf_load(f);
+        if (fnt_t > 0) ttf_set_size(fnt_t, 42); end
+        cur_font = f;
+    end
+    for (i = 0; i < 128; i++) txt_cache[i] = 0; txt_want[i] = 0; end
+    create_texts();
+    texts_ready = 1;
+    hint_key = -1; mlbl_ver = -1; lbl_ver = -1;
+end
+
+// ---- fuentes de subtitulos: se elige la que cubre la escritura del texto (se cargan al primer uso)
+function sub_font_id(int k)
+begin
+    if (k < 0 || k > 3) k = 0; end
+    if (sf_id[k] <= 0)
+        sf_id[k] = ttf_load(k == 1 ? "res/fonts/ui_ja.otf" : (k == 2 ? "res/fonts/ui_zh.otf" : (k == 3 ? "res/fonts/ui_ko.otf" : "res/fonts/ui_latin.ttf")));
+        if (sf_id[k] > 0) ttf_set_size(sf_id[k], 60); end
+    end
+    sf_cur = k;
+    return sf_id[k];
+end
+
+// escritura de la interfaz segun el idioma
+function lang_script()
+begin
+    if (lang_cur == "ja") return 1; end
+    if (lang_cur == "zh") return 2; end
+    if (lang_cur == "ko") return 3; end
+    return 0;
+end
+
+// escritura de un texto UTF-8: 3 coreano, 1 japones (si hay kana), 2 chino (hanzi sin kana), 0 resto
+function script_of(string t)
+private int i, n, b0, b1, b2, cp, han;
+begin
+    n = len(t); han = 0;
+    for (i = 0; i < n; i++)
+        b0 = asc(substr(t, i, 1));
+        if (b0 >= 224 && b0 < 240 && i + 2 < n)
+            b1 = asc(substr(t, i + 1, 1)); b2 = asc(substr(t, i + 2, 1));
+            cp = ((b0 & 15) << 12) | ((b1 & 63) << 6) | (b2 & 63);
+            if ((cp >= 44032 && cp <= 55203) || (cp >= 4352 && cp <= 4607) || (cp >= 12592 && cp <= 12687)) return 3; end
+            if (cp >= 12352 && cp <= 12543) return 1; end
+            if (cp >= 19968 && cp <= 40959) han = 1; end
+            i += 2;
+        elseif (b0 >= 192 && b0 < 224) i++;
+        elseif (b0 >= 240) i += 3;
+        end
+    end
+    if (han) return (lang_cur == "ja" ? 1 : 2); end        // solo caracteres chinos: japones si la interfaz esta en japones, si no chino
+    return 0;
+end
+
+// (re)crea las 6 etiquetas de subtitulos (3 lineas x sombra) con la fuente indicada
+function create_sub_texts(int fid)
+private int i;
+begin
+    for (i = 0; i < 6; i++)
+        if (txt_sub[i] > 0) write_delete(txt_sub[i]); txt_cache[txt_sub[i]] = 0; end
+    end
+    for (i = 0; i < 3; i++)
+        txt_sub[i * 2]     = write_var(fid, ur(SW / 2 + 2), 0, -21, 7, s_sub[i]);
+        txt_sub[i * 2 + 1] = write_var(fid, ur(SW / 2), 0, -22, 7, s_sub[i]);
+        write_set_rgba(txt_sub[i * 2], 0, 0, 0, 255);
+    end
+end
+
+// ====================================================================== idioma y ajustes
+// Devuelve el texto de la clave en el idioma actual (ya en ISO-8859-1 para la fuente); si falta, la propia clave
+function string tr(string k)
+private int i;
+begin
+    for (i = 0; i < lang_n; i++)
+        if (lang_k[i] == k) return lang_v[i]; end
+    end
+    return k;
+end
+
+function string disp_name(int i)
+begin
+    return entries[i];
+end
+
+// carga lang/<codigo>.txt (lineas clave=valor, UTF-8)
+function lang_load(string code)
+private int fh, p; string ln;
+begin
+    fh = fopen("lang/" + code + ".txt", O_READ);
+    if (!fh) return 0; end
+    lang_n = 0;
+    while (!feof(fh) && lang_n < 200)
+        ln = fgets(fh);
+        p = find(ln, "=");
+        if (p > 0 && substr(ln, 0, 1) != "#")
+            lang_k[lang_n] = substr(ln, 0, p); lang_v[lang_n] = substr(ln, p + 1); lang_n++;
+        end
+    end
+    fclose(fh);
+    lang_cur = code; lang_ver++;
+    // fuerza que los textos ya construidos se rehagan
+    lbl_ver = -1; pv_idx = -1; mlbl_ver = -1; kb_dirty = 1; last_sec = -1;
+    apply_lang_font();
+    return 1;
+end
+
+// idiomas disponibles (un archivo lang/<codigo>.txt cada uno)
+function is_lang(string c)
+begin
+    return c == "es" || c == "en" || c == "ru" || c == "ja" || c == "zh" || c == "ko";
+end
+
+function string next_lang()
+begin
+    if (lang_cur == "es") return "en"; end
+    if (lang_cur == "en") return "ru"; end
+    if (lang_cur == "ru") return "ja"; end
+    if (lang_cur == "ja") return "zh"; end
+    if (lang_cur == "zh") return "ko"; end
+    return "es";
+end
+
+function cfg_load()
+private int fh, p; string ln, k, v;
+begin
+    if (store_dir == "") return 0; end
+    fh = fopen(join_path(store_dir, "config.cfg"), O_READ);
+    if (!fh) return 0; end
+    while (!feof(fh))
+        ln = fgets(fh);
+        p = find(ln, "=");
+        if (p > 0)
+            k = substr(ln, 0, p); v = substr(ln, p + 1);
+            if (k == "lang" && is_lang(v)) lang_cur = v; end
+            if (k == "skin") skin = atoi(v) ? 1 : 0; end
+        end
+    end
+    fclose(fh);
+end
+
+function cfg_save()
+private int fh;
+begin
+    if (store_dir == "") return 0; end
+    fh = fopen(join_path(store_dir, "config.cfg"), O_WRITE);
+    if (!fh) return 0; end
+    fputs(fh, "lang=" + lang_cur);
+    fputs(fh, "skin=" + skin);
+    fclose(fh);
+end
+
+function open_settings_menu(int keep)
+begin
+    menu_clear();
+    menu_add(tr("m_lang") + tr("lang_name"), MA_LANG);
+    menu_add(tr("m_skin") + (skin ? tr("skin_ps") : tr("skin_classic")), MA_SKIN);
+    menu_add(tr("m_about"), MA_ABOUT);
+    menu_add(tr("m_back"), MA_CANCEL);
+    menu_show(tr("mt_settings"));
+    menu_sel = keep;
+end
+
+// ====================================================================== almacen, listas y editor
+// Carpeta donde se guardan las listas: la primera de las candidatas en la que se pueda escribir
+function storage_init()
+private string c[5]; int i;
+begin
+    c[0] = getenv("MP_STORE");
+    c[1] = "/data/mediaplayer";
+    c[2] = "/mnt/usb0/mediaplayer";
+    c[3] = "/download0/mediaplayer";
+    c[4] = join_path(cd(), "mediaplayer_data");
+    store_dir = "";
+    for (i = 0; i < 5; i++)
+        if (c[i] != "")
+            mkdir(c[i]);
+            mkdir(join_path(c[i], "listas"));
+            if (is_writable(join_path(c[i], "listas")))
+                store_dir = c[i]; lists_dir = join_path(c[i], "listas"); break;
+            end
+        end
+    end
+    if (store_dir != "") mkdir(join_path(store_dir, "addons")); mkdir(join_path(store_dir, "addons_data")); end
+    say("MediaPlayer: almacen = [" + store_dir + "]");
+end
+
+function is_writable(string d)
+private int fh;
+begin
+    fh = fopen(join_path(d, ".probe"), O_WRITE);
+    if (!fh) return 0; end
+    fputs(fh, "ok"); fclose(fh);
+    return 1;
+end
+
+// ISO-8859-1 -> UTF-8 (un caracter)
+function string latin1_to_utf8(string ch)
+private int c;
+begin
+    c = asc(ch);
+    if (c < 128) return ch; end
+    return chr(194 + (c >> 6)) + chr(128 + (c & 63));
+end
+
+// ---- lista de trabajo (titulo/url/logo de cada entrada de un .m3u)
+// texto tras la primera coma fuera de comillas de una linea #EXTINF
+function string extinf_title(string ln)
+private int i, n, inq;
+begin
+    n = len(ln); inq = 0;
+    for (i = 8; i < n; i++)
+        if (substr(ln, i, 1) == "\"") inq = !inq; end
+        if (!inq && substr(ln, i, 1) == ",") return substr(ln, i + 1); end
+    end
+    return "";
+end
+
+function wl_load(string path)
+private
+    int fh, q1, q2; string ln, title, logo;
+begin
+    wl_n = 0;
+    fh = fopen(path, O_READ);
+    if (!fh) return 0; end
+    title = ""; logo = "";
+    while (!feof(fh) && wl_n < 2047)
+        ln = fgets(fh);
+        if (len(ln) >= 3 && asc(substr(ln, 0, 1)) == 239) ln = substr(ln, 3); end      // marca BOM de UTF-8
+        if (len(ln) > 0)
+            if (substr(ln, 0, 8) == "#EXTINF:")
+                // #EXTINF:-1 tvg-logo="https://...",Titulo   (el titulo va tras la primera coma que no este entre comillas)
+                logo = "";
+                q1 = find(ln, "tvg-logo=\"");
+                if (q1 >= 0)
+                    q2 = find(ln, "\"", q1 + 10);
+                    if (q2 > q1) logo = substr(ln, q1 + 10, q2 - q1 - 10); end
+                end
+                title = extinf_title(ln);
+            elseif (substr(ln, 0, 1) != "#")
+                wl_t[wl_n] = title != "" ? title : ln; wl_u[wl_n] = ln; wl_l[wl_n] = logo;
+                wl_n++; title = ""; logo = "";
+            end
+        end
+    end
+    fclose(fh);
+    return 1;
+end
+
+function wl_save(string path)
+private int fh, i;
+begin
+    fh = fopen(path, O_WRITE);
+    if (!fh) toast(tr("t_save_fail")); return 0; end
+    fputs(fh, "#EXTM3U");
+    for (i = 0; i < wl_n; i++)
+        if (wl_l[i] != "") fputs(fh, "#EXTINF:-1 tvg-logo=\"" + wl_l[i] + "\"," + wl_t[i]); else fputs(fh, "#EXTINF:-1," + wl_t[i]); end
+        fputs(fh, wl_u[i]);
+    end
+    fclose(fh);
+    return 1;
+end
+
+function string safe_name(string n)
+private string r = ""; int i, c;
+begin
+    for (i = 0; i < len(n); i++)
+        c = asc(substr(n, i, 1));
+        if (c == 47 || c == 92 || c == 58 || c == 42 || c == 63 || c == 34 || c == 60 || c == 62 || c == 124 || c < 32) r += "_"; else r += substr(n, i, 1); end
+    end
+    return r;
+end
+
+function string list_path(string name)
+begin
+    return join_path(lists_dir, safe_name(name) + ".m3u");
+end
+
+function add_to_list(string path, string title, string url, string logo)
+begin
+    wl_load(path);
+    if (wl_n >= 2047) toast(tr("t_list_full")); return 0; end
+    wl_t[wl_n] = title; wl_u[wl_n] = url; wl_l[wl_n] = logo; wl_n++;
+    return wl_save(path);
+end
+
+// ---- menus (pantalla completa) ----------------------------------------
+function menu_clear()
+begin
+    menu_n = 0; menu_sel = 0;
+end
+
+function menu_add(string text, int act)
+begin
+    if (menu_n < 10) menu_opt[menu_n] = text; menu_act[menu_n] = act; menu_n++; end
+end
+
+function menu_show(string title)
+begin
+    menu_title = title; modal = M_MENU; modal_ver++;
+end
+
+function open_context_menu()
+private string nm;
+begin
+    menu_clear();
+    if (addon_mode > 0)
+        if (addon_mode == 2 || (sel > 0 && sel < n_entries && entry_dir[sel] == K_ADDON)) menu_add(tr("m_addon_settings"), MA_ASETTINGS); end
+        menu_add(tr("m_settings"), MA_SETTINGS);
+        menu_add(tr("m_cancel"), MA_CANCEL);
+        menu_show(tr("s_addons"));
+        return 0;
+    end
+    if (store_dir == "") toast(tr("t_no_store")); open_settings_menu(0); return 0; end
+    if (cur_list != "")
+        if (sel > 0 && sel < n_entries)
+            menu_add(tr("m_rename_entry"), MA_RENAME_ENTRY);
+            menu_add(tr("m_logo"), MA_LOGO);
+            menu_add(tr("m_up"), MA_UP);
+            menu_add(tr("m_down"), MA_DOWN);
+            menu_add(tr("m_remove"), MA_REMOVE);
+        end
+        menu_add(tr("m_add_url"), MA_ADD_URL);
+    else
+        if (sel >= 0 && sel < n_entries && entry_dir[sel] == K_LIST)
+            menu_add(tr("m_rename_list"), MA_RENAME_LIST);
+            menu_add(tr("m_delete_list"), MA_DELETE_LIST);
+        elseif (sel >= 0 && sel < n_entries && entry_dir[sel] == K_FILE)
+            menu_add(tr("m_add_to"), MA_ADD_TO);
+        end
+        menu_add(tr("m_new_list"), MA_NEW_LIST);
+        menu_add(tr("m_goto_lists"), MA_GOTO_LISTS);
+    end
+    menu_add(tr("m_settings"), MA_SETTINGS);
+    menu_add(tr("m_cancel"), MA_CANCEL);
+    menu_show(cur_list != "" ? tr("mt_edit_list") : tr("mt_options"));
+end
+
+// elegir una lista para anadir lo pendiente (op_title / op_url)
+function open_pick_list()
+private int dh, k; string nm;
+begin
+    menu_clear();
+    dh = diropen(join_path(lists_dir, "*"));
+    if (dh)
+        nm = dirread(dh);
+        while (nm != "" && menu_n < 9)
+            if (lcase(ext_of(nm)) == "m3u") pick_name[menu_n] = nm; menu_add(utf8_to_latin1(substr(nm, 0, len(nm) - 4)), MA_PICK + menu_n); end
+            nm = dirread(dh);
+        end
+        dirclose(dh);
+    end
+    if (menu_n < 9) menu_add(tr("m_new_list_pick"), MA_NEW_AND_ADD); end
+    menu_add(tr("m_cancel"), MA_CANCEL);
+    menu_show(tr("mt_add_to_list"));
+end
+
+function menu_run(int act)
+begin
+    modal = M_NONE;
+    switch (act)
+        case MA_CANCEL: end
+        case MA_SETTINGS: open_settings_menu(0); end
+        case MA_ASETTINGS:
+            if (addon_mode == 1) addon_open_settings(entry_url[sel]); else addon_open_settings(addon_dir); end
+        end
+        case MA_LANG:
+            lang_load(next_lang()); cfg_save(); open_settings_menu(0);
+        end
+        case MA_ABOUT: credits_open(); end
+        case MA_SKIN:
+            skin = !skin; cfg_save(); open_settings_menu(1);
+        end
+        case MA_NEW_LIST:   op_after = 0; kb_open(tr("k_new_list"), "", KB_NEWLIST); end
+        case MA_GOTO_LISTS: cur_list = ""; cur_dir = lists_dir; read_dir(); end
+        case MA_ADD_TO:
+            op_title = entries[sel]; op_url = entry_path(sel); op_logo = "";
+            open_pick_list();
+        end
+        case MA_NEW_AND_ADD: op_after = 1; kb_open(tr("k_new_list"), "", KB_NEWLIST); end
+        case MA_RENAME_LIST:
+            op_path = join_path(cur_dir, entries[sel]);
+            kb_open(tr("k_rename_list"), substr(entries[sel], 0, len(entries[sel]) - 4), KB_RENAME_LIST);
+        end
+        case MA_DELETE_LIST:
+            op_path = join_path(cur_dir, entries[sel]);
+            menu_clear(); menu_add(tr("m_yes_delete") + " \"" + cut_text(utf8_to_latin1(entries[sel]), 24) + "\"", MA_DELETE_YES); menu_add(tr("m_no"), MA_CANCEL);
+            menu_show(tr("mt_sure"));
+        end
+        case MA_DELETE_YES: fremove(op_path); toast(tr("t_list_deleted")); read_dir(); end
+        case MA_ADD_URL:    kb_open(tr("k_url"), "https://", KB_URL); end
+        case MA_RENAME_ENTRY: wl_load(cur_list); op_idx = sel - 1; kb_open(tr("k_title"), utf8_to_latin1(wl_t[op_idx]), KB_ENTRY_TITLE); end
+        case MA_LOGO:         wl_load(cur_list); op_idx = sel - 1; kb_open(tr("k_logo"), wl_l[op_idx] != "" ? wl_l[op_idx] : "https://", KB_LOGO); end
+        case MA_REMOVE:
+            wl_load(cur_list); op_idx = sel - 1; list_remove(op_idx); wl_save(cur_list); read_list(); toast(tr("t_removed"));
+        end
+        case MA_UP:   wl_load(cur_list); op_idx = sel - 1; list_swap(op_idx, op_idx - 1); wl_save(cur_list); read_list(); reselect(op_idx > 0 ? op_idx : 1); end
+        case MA_DOWN: wl_load(cur_list); op_idx = sel - 1; list_swap(op_idx, op_idx + 1); wl_save(cur_list); read_list(); reselect(op_idx + 1 < wl_n ? op_idx + 2 : op_idx + 1); end
+        default:
+            if (act >= MA_ASET && act < MA_ASET + 24) addon_edit_setting(act - MA_ASET); end
+            if (act >= MA_PICK && act < MA_PICK + 9)
+                if (add_to_list(join_path(lists_dir, pick_name[act - MA_PICK]), op_title, op_url, op_logo)) toast(tr("t_added")); end
+            end
+        end
+    end
+end
+
+function reselect(int i)
+begin
+    if (i < 0) i = 0; end
+    if (i >= n_entries) i = n_entries - 1; end
+    sel = i; top_row = 0;
+    if (sel >= ROWS) top_row = sel - ROWS + 1; end
+end
+
+function list_remove(int i)
+private int k;
+begin
+    if (i < 0 || i >= wl_n) return 0; end
+    for (k = i; k < wl_n - 1; k++) wl_t[k] = wl_t[k + 1]; wl_u[k] = wl_u[k + 1]; wl_l[k] = wl_l[k + 1]; end
+    wl_n--;
+end
+
+function list_swap(int a, int b)
+private string t, u, l;
+begin
+    if (a < 0 || b < 0 || a >= wl_n || b >= wl_n) return 0; end
+    t = wl_t[a]; u = wl_u[a]; l = wl_l[a];
+    wl_t[a] = wl_t[b]; wl_u[a] = wl_u[b]; wl_l[a] = wl_l[b];
+    wl_t[b] = t; wl_u[b] = u; wl_l[b] = l;
+end
+
+// ---- teclado en pantalla ------------------------------------------------
+function kb_open(string title, string initial, int purpose)
+private int r, k; string s;
+begin
+    kb_title = title; kb_text = initial; kb_purpose = purpose; kb_secret = kb_secret_next; kb_secret_next = 0;
+    kb_rows[0] = "1234567890"; kb_rows[1] = "qwertyuiop";
+    kb_rows[2] = "asdfghjkl" + chr(241); kb_rows[3] = "zxcvbnm.-_"; kb_rows[4] = ":/?=&%+@,~";
+    kb_sp[0] = tr("kb_shift"); kb_sp[1] = tr("kb_space"); kb_sp[2] = tr("kb_del"); kb_sp[3] = "https://"; kb_sp[4] = tr("kb_ok"); kb_sp[5] = tr("m_cancel");
+    // posiciones (en pixeles) de las teclas de la fila especial, centradas
+    k = 0;
+    for (r = 0; r < 6; r++) kb_spw[r] = tw(kb_sp[r]); k += kb_spw[r] + 44; end
+    k -= 44;
+    kb_spx[0] = (SW - k) / 2;
+    for (r = 1; r < 6; r++) kb_spx[r] = kb_spx[r - 1] + kb_spw[r - 1] + 44; end
+    kb_r = 0; kb_c = 0; kb_shift = 0; kb_dirty = 1;
+    modal = M_KB; modal_ver++;
+end
+
+function kb_rebuild_rows()
+private int r, c; string s, ch;
+begin
+    for (r = 0; r < 5; r++)
+        s = "";
+        for (c = 0; c < 10; c++)
+            ch = substr(kb_rows[r], c, 1);
+            if (kb_shift) ch = ucase(ch); end
+            s += ch;
+            if (c < 9) s += "  "; end
+        end
+        s_kbrow[r] = s;
+    end
+    s = "";
+    for (r = 0; r < 6; r++)
+        s += kb_sp[r];
+        if (r < 5) s += "   "; end
+    end
+    for (r = 0; r < 6; r++) s_kbs[r] = kb_sp[r]; write_move(txt_kbs[r], ur(kb_spx[r]), ur(250 + 5 * 56)); end
+    // lo escrito (se ve la cola si es largo) + cursor
+    if (kb_secret)
+        s = "";
+        for (r = 0; r < len(kb_text) && r < 60; r++) s += "*"; end
+        s_kbin = s + "_";
+    else
+        s_kbin = tail_fit(kb_text, 1000) + "_";
+    end
+    s_kbtitle = kb_title;
+    kb_dirty = 0;
+end
+
+function kb_press()
+private string ch;
+begin
+    if (kb_r < 5)
+        ch = substr(kb_rows[kb_r], kb_c, 1);
+        if (kb_shift) ch = ucase(ch); end
+        if (len(kb_text) < 220) kb_text += latin1_to_utf8(ch); end
+    else
+        switch (kb_c)
+            case 0: kb_shift = !kb_shift; end
+            case 1: if (len(kb_text) < 220) kb_text += " "; end end
+            case 2: kb_backspace(); end
+            case 3: if (len(kb_text) < 200) kb_text += "https://"; end end
+            case 4: kb_accept(); return 0; end
+            case 5: modal = M_NONE; return 0; end
+        end
+    end
+    kb_dirty = 1;
+end
+
+function kb_backspace()
+begin
+    if (len(kb_text) == 0) return 0; end
+    kb_text = utf8_chop(kb_text);
+    kb_dirty = 1;
+end
+
+function kb_accept()
+private string nm, path; int ok;
+begin
+    modal = M_NONE;
+    switch (kb_purpose)
+        case KB_NEWLIST:
+            nm = safe_name(kb_text);
+            if (nm == "") toast(tr("t_name_empty")); return 0; end
+            path = list_path(nm);
+            if (fexists(path)) toast(tr("t_exists")); return 0; end
+            wl_n = 0;
+            if (wl_save(path))
+                toast(tr("t_list_created") + nm);
+                if (op_after) add_to_list(path, op_title, op_url, op_logo); toast(tr("t_created_added")); end
+                if (lcase(cur_dir) == lcase(lists_dir) && cur_list == "") read_dir(); end
+            end
+        end
+        case KB_RENAME_LIST:
+            nm = safe_name(kb_text);
+            if (nm == "") return 0; end
+            fmove(op_path, list_path(nm)); toast(tr("t_renamed")); read_dir();
+        end
+        case KB_URL:
+            if (find(kb_text, "://") < 0 && substr(kb_text, 0, 1) != "/") toast(tr("t_bad_url")); return 0; end
+            op_url = kb_text;
+            op_title = substr(kb_text, find(kb_text, "://") + 3);
+            kb_open(tr("k_entry_title"), utf8_to_latin1(cut_text(op_title, 40)), KB_NEW_TITLE);
+        end
+        case KB_NEW_TITLE:
+            if (add_to_list(cur_list, kb_text != "" ? kb_text : op_url, op_url, "")) read_list(); reselect(n_entries - 1); toast(tr("t_added")); end
+        end
+        case KB_ENTRY_TITLE:
+            wl_t[op_idx] = kb_text; if (wl_save(cur_list)) read_list(); reselect(op_idx + 1); end
+        end
+        case KB_ADDON: ask_ok = 1; ask_text = kb_text; end
+        case KB_ASET: host_setting_set(ad_st_name[aset_idx], kb_text); addon_settings_menu(aset_idx); end
+        case KB_LOGO:
+            wl_l[op_idx] = (kb_text == "https://") ? "" : kb_text; if (wl_save(cur_list)) read_list(); reselect(op_idx + 1); toast(tr("t_logo_updated")); end
+        end
+    end
+end
+
+// ---- control y dibujo del modal -------------------------------------------
+// ---------------------------------------------------------------- creditos (tipo pelicula)
+function cr_add(string t, int style)
+private int k;
+begin
+    if (t == "") cr_s[cr_n] = ""; cr_st[cr_n] = style; cr_n++; return 0; end
+    wrap_text(t, 980, 2);
+    for (k = 0; k < wrap_n && cr_n < 46; k++) cr_s[cr_n] = wrap_l[k]; cr_st[cr_n] = style; cr_n++; end
+end
+
+function credits_open()
+private int i;
+begin
+    cr_n = 0;
+    cr_add(tr("cr_title"), 1); cr_add("", 0);
+    cr_add(tr("cr_created"), 1); cr_add(tr("cr_names"), 0); cr_add("", 0);
+    cr_add(tr("cr_h_thanks"), 1); cr_add(tr("cr_t1"), 0); cr_add(tr("cr_t2"), 0); cr_add("", 0);
+    cr_add(tr("cr_h_also"), 1);
+    for (i = 1; i <= 7; i++) cr_add(tr("cr_a" + i), 0); end
+    cr_add("", 0); cr_add(tr("cr_end"), 1);
+    for (i = 0; i < cr_n; i++)
+        cr_id[i] = 0;
+        if (cr_s[i] != "")
+            cr_id[i] = write_var(fnt_t, ur(SW / 2), ur(SH + 40 + i * 56), -5, 4, cr_s[i]);   // detras de las sombras (-10) y de la ayuda (-12/-30)
+            if (cr_st[i] == 1) write_set_rgba(cr_id[i], 255, 210, 90, 255); else write_set_rgba(cr_id[i], 255, 255, 255, 255); end
+        end
+    end
+    cr_pos = 0; cr_fast = 0; modal = M_CREDITS; modal_ver++;
+end
+
+function credits_close()
+private int i;
+begin
+    for (i = 0; i < cr_n; i++)
+        if (cr_id[i] > 0) write_delete(cr_id[i]); cr_id[i] = 0; end
+    end
+    cr_n = 0;
+    open_settings_menu(2);
+end
+
+function update_modal()
+begin
+    if (modal == M_MENU)
+        if (act_press[A_UP])   menu_sel = (menu_sel + menu_n - 1) % menu_n; end
+        if (act_press[A_DOWN]) menu_sel = (menu_sel + 1) % menu_n; end
+        if (act_press[A_OK])   menu_run(menu_act[menu_sel]); end
+        if (act_press[A_BACK] || act_press[A_MUTE]) modal = M_NONE; end
+    elseif (modal == M_CREDITS)
+        cr_pos += cr_fast ? 300 : 80;
+        if (act_press[A_OK]) cr_fast = !cr_fast; end
+        if (act_press[A_BACK] || act_press[A_MUTE]) credits_close(); return 0; end
+        if (cr_n > 0 && SH + 40 + (cr_n - 1) * 56 - cr_pos / 100 < -30) credits_close(); end
+    elseif (modal == M_KB)
+        if (act_press[A_UP])
+            if (kb_r == 5) kb_c = kb_c * 10 / 6; if (kb_c > 9) kb_c = 9; end end
+            kb_r = (kb_r + 5) % 6;
+            if (kb_r == 5) kb_c = kb_c * 6 / 10; end
+        end
+        if (act_press[A_DOWN])
+            if (kb_r == 5) kb_c = kb_c * 10 / 6; if (kb_c > 9) kb_c = 9; end end
+            kb_r = (kb_r + 1) % 6;
+            if (kb_r == 5) kb_c = kb_c * 6 / 10; end
+        end
+        if (act_press[A_LEFT])  kb_c = (kb_c + (kb_r == 5 ? 5 : 9)) % (kb_r == 5 ? 6 : 10); end
+        if (act_press[A_RIGHT]) kb_c = (kb_c + 1) % (kb_r == 5 ? 6 : 10); end
+        if (act_press[A_OK])     kb_press(); end
+        if (act_press[A_MUTE])   kb_backspace(); end
+        if (act_press[A_SUBS])   if (len(kb_text) < 220) kb_text += " "; kb_dirty = 1; end end
+        if (act_press[A_SEEKB])  kb_shift = !kb_shift; kb_dirty = 1; end
+        if (act_press[A_PAUSE])  kb_accept(); end
+        if (act_press[A_BACK])   modal = M_NONE; end
+    end
+end
+
+function draw_modal()
+private int i, bx, by, k; string t;
+begin
+    // fondo de pantalla completa
+    if (skin)
+        draw_bg();
+    else
+        put(S_BROWSE_BG, g_sel, SW / 2, SH / 2, 100, 255, 20);
+        spr_sizex[S_BROWSE_BG] = SW / 8 * 100; spr_sizey[S_BROWSE_BG] = SH / 8 * 100;
+    end
+    if (modal == M_CREDITS)
+        for (i = 0; i < cr_n; i++)
+            if (cr_id[i] > 0) write_move(cr_id[i], ur(SW / 2), ur(SH + 40 + i * 56 - cr_pos / 100)); end
+        end
+        put(S_SHADE_TOP, g_shade_top, SW / 2, 64, 100, 255, -10);
+        spr_sizex[S_SHADE_TOP] = SW / 64 * 100; spr_sizey[S_SHADE_TOP] = 150;
+        put(S_SHADE_BOT, g_shade, SW / 2, SH - 128, 100, 255, -10);
+        spr_sizex[S_SHADE_BOT] = SW / 64 * 100; spr_sizey[S_SHADE_BOT] = 100;
+        if (skin) hint_set(4); else txt_want[txt_mhint] = 8589934336 + (170); end
+        return 0;
+    end
+    if (mlbl_ver != modal_ver)                      // los textos solo se rehacen al abrir/cambiar de pantalla
+        if (modal == M_MENU)
+            s_mtitle = menu_title;
+            for (i = 0; i < 10; i++) s_mopt[i] = i < menu_n ? fit_text(menu_opt[i], 1040) : ""; end
+            s_mhint = tr("h_menu");
+        else
+            s_mtitle = kb_title;
+            s_mhint = tr("h_kb");
+        end
+        mlbl_ver = modal_ver;
+    end
+    txt_want[txt_mtitle] = 8589934336 + (255);
+    if (skin) hint_set(modal == M_MENU ? 2 : 3); else txt_want[txt_mhint] = 8589934336 + (170); end
+    if (modal == M_MENU)
+        for (i = 0; i < menu_n; i++)
+            txt_want[txt_mopt[i]] = 8589934336 + (i == menu_sel ? 255 : 190);
+        end
+        k = tw(menu_opt[menu_sel]) + 100; if (k < 640) k = 640; end
+        put_sel(S_MSEL, 80 + k / 2, 170 + menu_sel * 52, k, 46, 15);
+    elseif (modal == M_KB)
+        if (kb_dirty) kb_rebuild_rows(); end
+        txt_want[txt_kbin] = 8589934336 + (255);
+        put(S_PANEL, g_barbg, SW / 2, 170, 100, 255, 12);
+        spr_sizex[S_PANEL] = 1100 / 8 * 100; spr_sizey[S_PANEL] = 44 * 100 / 8;
+        for (i = 0; i < 5; i++) txt_want[txt_kbrow[i]] = 8589934336 + (230); end
+        for (i = 0; i < 6; i++) txt_want[txt_kbs[i]] = 8589934336 + (230); end
+        if (kb_r < 5)
+            bx = SW / 2 - (28 * 1556) / 200 + ((kb_c * 6 + 1) * 1556) / 200; by = 250 + kb_r * 56;   // 15,56 px de avance por caracter de la fuente
+            put_sel(S_MSEL, bx, by, 40, 44, 15);
+        else
+            bx = kb_spx[kb_c] + kb_spw[kb_c] / 2; by = 250 + 5 * 56;
+            put_sel(S_MSEL, bx, by, kb_spw[kb_c] + 28, 44, 15);
+        end
+    end
+end
+
+// ------------------------------------------------------------------ reproductor
+function start_video(string path)
+private int i;
+begin
+    http_trace("start_video: close_preview");
+    close_preview(); pv_idx = -1;
+    http_trace("start_video: video_close");
+    if (vh) video_close(vh); vh = 0; end
+    http_trace("start_video: video_open");
+    vh = video_open(path);
+    http_trace("start_video: abierto " + vh);
+    if (!vh)
+        toast(tr("t_open_fail"));
+        state = ST_BROWSE;
+        return 0;
+    end
+    cur_file = path;
+    vid_w = video_width(vh); vid_h = video_height(vh);
+    spr_graph[S_VIDEO] = video_graph(vh);
+
+    // subtitulo externo con el mismo nombre (.srt)
+    i = len(path) - len(ext_of(path));
+    if (find(path, "://") < 0 && fexists(substr(path, 0, i) + "srt")) video_subtitle_load(vh, substr(path, 0, i) + "srt"); end
+    sub_tracks = video_subtitle_tracks(vh);
+    sub_sel = sub_tracks > 0 ? 0 : -1;
+    video_subtitle_select(vh, sub_sel);
+
+    music_mode = video_is_audio_only(vh) || is_audio(path);
+    for (i = 0; i < 32; i++) viz_cur[i] = 0; viz_peak[i] = 0; end
+    if (logo_h) video_close(logo_h); logo_h = 0; end
+    if (music_mode && pending_logo != "")           // el logo se abre como un "video" de un solo fotograma (FFmpeg lee la imagen por red)
+        video_use_hw(0);
+        logo_h = video_open(pending_logo);
+        video_use_hw(1);
+        if (logo_h) video_play(logo_h, 0); end
+    end
+    pending_logo = "";
+    if (hls_url != "" && hls_total == 0) hls_total = video_duration(vh); end
+    audio_tracks = video_audio_tracks(vh);
+    audio_sel = 0;
+    video_volume(vh, muted ? 0 : vol * 128 / 100);
+    video_play(vh, 0);
+    state = ST_PLAY;
+    overlay_a = 255; overlay_t = 0; focus = B_PLAY;
+    s_title = pending_title != "" ? utf8_to_latin1(pending_title) : base_name(path);
+    pending_title = "";
+    if (sub_tracks > 0) toast(tr("t_subs") + sub_name()); end
+    return 1;
+end
+
+function stop_video()
+begin
+    if (vh) video_close(vh); end
+    vh = 0;
+    spr_graph[S_VIDEO] = 0;
+    music_mode = 0;
+    if (logo_h) video_close(logo_h); logo_h = 0; end
+    s_sub[0] = ""; s_sub[1] = ""; s_sub[2] = "";
+    state = ST_BROWSE;
+    lbl_ver = -1; last_sec = -1; pv_idx = -1;
+end
+
+function toast(string t)
+begin
+    s_toast = t; toast_t = 150;
+end
+
+function string sub_name()
+begin
+    if (sub_sel < 0) return tr("t_off"); end
+    return video_subtitle_lang(vh, sub_sel);
+end
+
+function cycle_subs()
+begin
+    if (sub_tracks == 0) toast(tr("t_no_subs")); return 0; end
+    sub_sel++;
+    if (sub_sel >= sub_tracks) sub_sel = -1; end
+    video_subtitle_select(vh, sub_sel);
+    toast(tr("t_subs") + sub_name());
+end
+
+function cycle_audio()
+begin
+    if (audio_tracks < 2)
+        toast(audio_tracks == 0 ? tr("t_no_audio") : tr("t_one_audio"));
+        return 0;
+    end
+    audio_sel = (audio_sel + 1) % audio_tracks;
+    video_audio_select(vh, audio_sel);
+    toast(tr("t_audio") + video_audio_lang(vh, audio_sel));
+end
+
+function set_volume(int v)
+begin
+    vol = v < 0 ? 0 : (v > 100 ? 100 : v);
+    muted = 0;
+    video_volume(vh, vol * 128 / 100);
+    toast(tr("t_volume") + vol + "%");
+end
+
+function toggle_mute()
+begin
+    muted = !muted;
+    video_volume(vh, muted ? 0 : vol * 128 / 100);
+    toast(muted ? tr("t_muted") : tr("t_volume") + vol + "%");
+end
+
+// posicion y duracion totales (en una lista HLS regenerada la posicion del motor es relativa a hls_base)
+function int vpos()
+begin
+    if (hls_seek_to >= 0) return hls_seek_to; end
+    return video_position(vh) + hls_base;
+end
+
+function int vdur()
+begin
+    if (hls_total > 0) return hls_total; end
+    return video_duration(vh);
+end
+
+function seek_rel(int ms)
+private int p;
+begin
+    if (hls_url != "")
+        // cada salto reabre el stream: las pulsaciones seguidas se juntan en uno solo y el paso crece si se mantiene
+        if (get_timer() - hls_seek_t > 1500) hls_streak = 0; end
+        hls_streak++; hls_seek_t = get_timer();
+        p = hls_streak < 4 ? 1 : (hls_streak < 8 ? 3 : (hls_streak < 14 ? 6 : 12));
+        p = vpos() + ms * p;
+        if (p < 0) p = 0; end
+        if (vdur() > 0 && p > vdur() - 500) p = vdur() - 500; end
+        hls_seek_to = p;
+        return 0;
+    end
+    p = vpos() + ms;
+    if (p < 0) p = 0; end
+    if (vdur() > 0 && p > vdur() - 500) p = vdur() - 500; end
+    video_seek(vh, p - hls_base);
+end
+
+function toggle_pause()
+begin
+    if (video_is_playing(vh)) video_pause(vh, 1); else video_pause(vh, 0); end
+end
+
+function next_video(int dir)
+private int i;
+begin
+    i = cur_file_idx + dir;
+    while (i >= 0 && i < n_entries)
+        if ((entry_dir[i] == K_FILE || entry_dir[i] == K_URL) && entries[i] != "..")
+            request_open(i); return 1;
+        end
+        i += dir;
+    end
+    toast(dir > 0 ? tr("t_no_more") : tr("t_no_prev"));
+    return 0;
+end
+
+function press_button(int b)
+begin
+    switch (b)
+        case B_PREV: next_video(-1); end
+        case B_RW:   seek_rel(-10000); end
+        case B_PLAY: toggle_pause(); end
+        case B_STOP: stop_video(); end
+        case B_FF:   seek_rel(10000); end
+        case B_NEXT: next_video(1); end
+        case B_SUBS: cycle_subs(); end
+        case B_AUDIO: cycle_audio(); end
+        case B_VOL:  toggle_mute(); end
+    end
+end
+
+function update_player()
+private int shown, hs;
+begin
+    if (!vh) state = ST_BROWSE; return 0; end
+
+    // salto pendiente en un stream HLS: se ejecuta cuando se deja de pulsar
+    if (hls_seek_to >= 0 && get_timer() - hls_seek_t > 450)
+        hs = hls_seek_to; hls_seek_to = -1;
+        if (!hls_reseek(hs)) video_seek(vh, hs - hls_base); end
+    end
+
+    // fin del video: siguiente o volver al explorador
+    if (video_is_finished(vh))
+        if (!next_video(1)) stop_video(); end
+        return 0;
+    end
+
+    shown = overlay_a > 40;   // los iconos estan "tocables" mientras se ven
+
+    if (any_input && !(act_hold[A_UP] && !shown && 0)) overlay_t = 0; end
+
+    // atajos que funcionan siempre
+    if (act_press[A_SEEKB]) seek_rel(-10000); toast("-10 s"); end
+    if (act_press[A_SEEKF]) seek_rel(10000);  toast("+10 s"); end
+    if (act_press[A_PAUSE]) toggle_pause(); end
+    if (act_press[A_SUBS])
+        if (music_mode) viz_mode = !viz_mode; toast(viz_mode ? tr("t_viz_wave") : tr("t_viz_bars")); else cycle_subs(); end
+    end
+    if (act_press[A_AUDIO]) cycle_audio(); end
+    if (act_press[A_MUTE])  toggle_mute(); end
+    if (act_press[A_BACK])
+        if (shown && video_is_playing(vh) == 0) stop_video(); return 0; end
+        stop_video(); return 0;
+    end
+
+    if (shown)
+        // con iconos visibles: la cruceta mueve el foco
+        if (act_press[A_LEFT])  focus = (focus + B_COUNT - 1) % B_COUNT; end
+        if (act_press[A_RIGHT]) focus = (focus + 1) % B_COUNT; end
+        if (act_press[A_UP])    set_volume(vol + 5); end
+        if (act_press[A_DOWN])  set_volume(vol - 5); end
+        if (act_press[A_OK])    press_button(focus); end
+    else
+        // iconos ocultos: la cruceta salta/regula, X pausa
+        if (act_press[A_LEFT])  seek_rel(-10000); toast("-10 s"); end
+        if (act_press[A_RIGHT]) seek_rel(10000);  toast("+10 s"); end
+        if (act_press[A_UP])    set_volume(vol + 5); end
+        if (act_press[A_DOWN])  set_volume(vol - 5); end
+        if (act_press[A_OK])    toggle_pause(); end
+    end
+
+    // el overlay se queda si esta en pausa (y siempre en la musica)
+    if (!video_is_playing(vh) || music_mode) overlay_t = 0; end
+    if (overlay_t < HIDE_AFTER)
+        overlay_t++;
+        overlay_a += 24; if (overlay_a > 255) overlay_a = 255; end
+    else
+        overlay_a -= 10; if (overlay_a < 0) overlay_a = 0; end
+    end
+    if (toast_t > 0) toast_t--; end
+end
+
+// ------------------------------------------------------------------ composicion
+function string fmt_time(int ms)
+private int s;
+begin
+    s = ms / 1000;
+    if (s >= 3600) return (s / 3600) + ":" + pad2((s / 60) % 60) + ":" + pad2(s % 60); end
+    return pad2(s / 60) + ":" + pad2(s % 60);
+end
+
+function string pad2(int n)
+begin
+    if (n < 10) return "0" + n; end
+    return "" + n;
+end
+
+// UTF-8 -> ISO-8859-1 para las fuentes de mapa de bits
+// Antes convertia UTF-8 a ISO-8859-1 para la fuente de mapa de bits; la interfaz usa fuentes TrueType (UTF-8), asi que es la identidad
+function string utf8_to_latin1(string s)
+begin
+    return s;
+end
+
+function hide_sprites()
+private int i;
+begin
+    for (i = 0; i < S_COUNT; i++)
+        if (i != S_VIDEO) spr_alpha[i] = 0; spr_graph[i] = 0; end
+    end
+end
+
+function put(int slot, int g, int px, int py, int sz, int a, int zz)
+begin
+    spr_graph[slot] = g; spr_x[slot] = px; spr_y[slot] = py;
+    spr_sizey[slot] = sz; spr_sizex[slot] = sz; spr_alpha[slot] = a; spr_z[slot] = zz;
+end
+
+// Cambiar el color de un texto lo vuelve a generar y acumula memoria: layout_all solo anota lo que quiere
+// (txt_want) y aqui se aplica unicamente lo que ha cambiado de verdad
+function apply_texts()
+private int tid, k;
+begin
+    for (tid = 1; tid < 128; tid++)
+        k = txt_want[tid];
+        if (k != 0 && k != txt_cache[tid])
+            txt_cache[tid] = k;
+            write_set_rgba(tid, (k >> 24) & 255, (k >> 16) & 255, (k >> 8) & 255, k & 255);
+        end
+    end
+end
+
+function layout_all()
+private
+    int i, a, bx, by, n, pos, dur, pct, px, g, rowi, k, p1, p2, lines;
+    string t, l[3];
+begin
+    hide_sprites();
+    for (i = 0; i < ROWS; i++) txt_want[txt_row[i]] = 8589934336 + (0); end
+    txt_want[txt_path] = 8589934336 + (0); txt_want[txt_hint] = 8589934336 + (0); txt_want[txt_empty] = 8589934336 + (0);
+    txt_want[txt_time] = 8589934336 + (0); txt_want[txt_title] = 8589934336 + (0); txt_want[txt_toast] = 8589934336 + (0);
+    for (i = 0; i < 6; i++) txt_want[txt_sub[i]] = 8589934336 + (0); end
+    for (i = 0; i < 7; i++) txt_want[txt_info[i]] = 8589934336 + (0); end
+    txt_want[txt_amsg] = 8589934336 + (0);
+    txt_want[txt_mtitle] = 8589934336 + (0); txt_want[txt_mhint] = 8589934336 + (0); txt_want[txt_kbin] = 8589934336 + (0); for (i = 0; i < 6; i++) txt_want[txt_kbs[i]] = 8589934336 + (0); end
+    for (i = 0; i < 10; i++) txt_want[txt_mopt[i]] = 8589934336 + (0); end
+    for (i = 0; i < 5; i++) txt_want[txt_kbrow[i]] = 8589934336 + (0); end
+    for (i = 0; i < 6; i++) txt_want[txt_h[i]] = 8589934336 + (0); end
+    for (i = 0; i < 6; i += 2) txt_want[txt_sub[i]] = 4294967296; end
+
+    if (modal != M_NONE) draw_modal(); return 0; end
+
+    if (state == ST_BROWSE)
+        // ---- explorador
+        // los textos solo se rehacen al cambiar de carpeta o de pagina (crear cadenas cada fotograma es caro y las acumula)
+        if (lbl_ver != dir_ver || lbl_top != top_row)
+            if (addon_mode == 2) s_path = "  " + addon_name; elseif (addon_mode == 1) s_path = "  " + tr("s_addons"); elseif (cur_list != "") s_path = "  " + utf8_to_latin1(base_name(cur_list)) + "   " + tr("s_internet_tag"); else s_path = "  " + utf8_to_latin1(cur_dir); end
+                s_empty = tr("s_empty");
+            s_hint = tr("h_browser") + "    [" + (store_dir != "" ? cut_text(store_dir, 24) : tr("s_nostore")) + "]";
+            for (i = 0; i < ROWS; i++)
+                rowi = top_row + i;
+                if (rowi < n_entries)
+                    row_label[i] = disp_name(rowi);
+                    row_label[i] = fit_text(row_label[i], 590);
+                else
+                    row_label[i] = "";
+                end
+            end
+            lbl_ver = dir_ver; lbl_top = top_row;
+        end
+        txt_want[txt_path] = 8589934336 + (255);
+        put(S_HEADER, g_icon[10], 42, 40, 40, 200, -10);
+        draw_bg();
+        if (skin) hint_set(1); else txt_want[txt_hint] = 8589934336 + (150); end
+
+        if (n_entries == 0)
+            txt_want[txt_empty] = 8589934336 + (200);
+        end
+        for (i = 0; i < ROWS; i++)
+            rowi = top_row + i;
+            if (rowi < n_entries)
+                by = ROW_Y0 + i * ROW_H + ROW_H / 2;
+                txt_want[txt_row[i]] = 8589934336 + (rowi == sel ? 255 : 190);
+                switch (entry_dir[rowi])
+                    case K_DIR, K_MYLISTS, K_AFOLDER: g = g_icon[10]; end
+                    case K_ADDONS, K_ADDON: g = g_icon[16]; end
+                    case K_LIST: g = g_icon[14]; end
+                    case K_URL: g = (addon_mode == 2 && entry_akind[rowi] == 1) ? g_icon[11] : ((addon_mode == 2 && entry_akind[rowi] >= 2) ? g_icon[15] : g_icon[14]); end
+                    default: g = is_audio(entries[rowi]) ? g_icon[15] : g_icon[11]; end
+                end
+                if (entries[rowi] == "..") g = g_icon[12]; end
+                put(S_ROWICON + i, g, 70, by, 38, rowi == sel ? 255 : 170, -10);
+                if (rowi == sel)
+                    put_sel(S_SEL, 382, by, 700, ROW_H, 2);
+                end
+            end
+        end
+        // panel de previsualizacion: recuadro 460x260 + informacion
+        put(S_PANEL, g_barbg, 990, 260, 100, 255, 6);
+        spr_sizex[S_PANEL] = 460 / 8 * 100; spr_sizey[S_PANEL] = 260 / 8 * 100 + 1;
+        if (pv_phase == 2 && pv_h)
+            if (video_width(pv_h) > 0) k = 460 * 100 / video_width(pv_h); i = 260 * 100 / video_height(pv_h); else k = 100; i = 100; end
+            if (i < k) k = i; end
+            put(S_PREVIEW, video_graph(pv_h), 990, 260, k, 255, 5);
+            if (video_is_audio_only(pv_h)) put(S_PREVIEW, g_icon[15], 990, 260, 190, 230, 5); end
+        end
+        for (i = 0; i < 7; i++) txt_want[txt_info[i]] = 8589934336 + (i == 0 ? 255 : 200); end
+        if (pv_phase == 3) s_info[2] = tr("s_nopreview"); end
+        if (addon_busy) txt_want[txt_amsg] = 8589934336 + (255); end
+        if (toast_t > 0) toast_t--; end
+        if (toast_t > 0) txt_want[txt_toast] = 8589934336 + (255); end
+        return 0;
+    end
+
+    // ---- reproductor
+    if (music_mode)
+        // fondo oscuro, portada (si el archivo la trae) o nota, y el visualizador a la derecha
+        if (skin)
+            draw_bg();
+        else
+            put(S_BROWSE_BG, g_sel, SW / 2, SH / 2, 100, 255, 20);
+            spr_sizex[S_BROWSE_BG] = SW / 8 * 100; spr_sizey[S_BROWSE_BG] = SH / 8 * 100;
+        end
+        if (logo_h && video_width(logo_h) > 0)
+            // logo de la emisora sobre un fondo claro translucido (por si es de letras oscuras)
+            put(S_PANEL, g_barbg, 330, 290, 100, 255, 12);
+            spr_sizex[S_PANEL] = 380 / 8 * 100; spr_sizey[S_PANEL] = 380 / 8 * 100;
+            k = 360 * 100 / video_width(logo_h); i = 360 * 100 / video_height(logo_h);
+            if (i < k) k = i; end
+            put(S_VIDEO, video_graph(logo_h), 330, 290, k, 255, 10);
+        elseif (vid_w > 0 && vid_h > 0)
+            k = 360 * 100 / vid_w; i = 360 * 100 / vid_h;
+            if (i < k) k = i; end
+            put(S_VIDEO, spr_graph[S_VIDEO], 330, 290, k, 255, 10);
+        else
+            put(S_VIDEO, g_icon[15], 330, 290, 330, 230, 10);
+        end
+        update_viz();
+        put(S_VIZ, g_viz, 900, 330, 100, 255, -3);
+        txt_want[txt_title] = 8589934336 + (255);
+    elseif (vid_w > 0 && vid_h > 0)
+        k = SW * 100 / vid_w; i = SH * 100 / vid_h;
+        if (i < k) k = i; end
+        put(S_VIDEO, spr_graph[S_VIDEO], SW / 2, SH / 2, k, 255, 10);
+    end
+
+    a = overlay_a;
+    if (a > 0)
+        // sombras arriba y abajo
+        put(S_SHADE_BOT, g_shade, SW / 2, SH - 128, 100, a, 5);
+        spr_sizex[S_SHADE_BOT] = SW / 64 * 100; spr_sizey[S_SHADE_BOT] = 100;
+        put(S_SHADE_TOP, g_shade_top, SW / 2, 64, 100, a * 2 / 3, 5);
+        spr_sizex[S_SHADE_TOP] = SW / 64 * 100; spr_sizey[S_SHADE_TOP] = 100;
+
+        // botones
+        by = SH - 72;
+        for (i = 0; i < B_COUNT; i++)
+            switch (i)
+                case B_PREV: g = g_icon[4]; end
+                case B_RW:   g = g_icon[6]; end
+                case B_PLAY: g = video_is_playing(vh) ? g_icon[1] : g_icon[0]; end
+                case B_STOP: g = g_icon[2]; end
+                case B_FF:   g = g_icon[5]; end
+                case B_NEXT: g = g_icon[3]; end
+                case B_SUBS: g = g_icon[7]; end
+                case B_AUDIO: g = g_icon[13]; end
+                case B_VOL:  g = (muted || vol == 0) ? g_icon[9] : g_icon[8]; end
+            end
+            if (i <= B_NEXT) bx = SW / 2 - 250 + i * 100; else bx = SW - 290 + (i - B_SUBS) * 90; end
+            put(S_BTN + i, g, bx, by, i == focus ? 80 : 62, a * (i == focus ? 255 : 200) / 255, -10);
+            if (i == B_SUBS && sub_sel < 0) spr_alpha[S_BTN + i] = a * 110 / 255; end
+            if (i == focus)
+                put(S_FOCUS, g_ring, bx, by, 100, a, -5);
+            end
+        end
+
+        // barra de progreso
+        dur = vdur(); pos = vpos();
+        pct = dur > 0 ? pos * 1000 / dur : 0;
+        if (pct > 1000) pct = 1000; end
+        put(S_BAR_BG, g_barbg, 60 + 580, SH - 135, 100, a, -8);
+        spr_sizex[S_BAR_BG] = 1160 / 8 * 100; spr_sizey[S_BAR_BG] = 100;
+        put(S_BAR_FG, g_white, 60 + pct * 1160 / 1000 / 2, SH - 135, 100, a, -9);
+        spr_sizex[S_BAR_FG] = pct * 1160 / 1000 * 100 / 8 + 1; spr_sizey[S_BAR_FG] = 100;
+        put(S_KNOB, g_knob, 60 + pct * 1160 / 1000, SH - 135, 100, a, -10);
+
+        if (pos / 1000 != last_sec || dur != last_dur)
+            if (dur > 0) s_time = fmt_time(pos) + " / " + fmt_time(dur); else s_time = fmt_time(pos) + "  (en directo)"; end
+            last_sec = pos / 1000; last_dur = dur;
+        end
+        txt_want[txt_time] = 8589934336 + (a);
+        txt_want[txt_title] = 8589934336 + (a);
+    end
+    if (toast_t > 0) txt_want[txt_toast] = 8589934336 + (toast_t > 30 ? 255 : toast_t * 255 / 30); end
+
+    // subtitulos (por encima de los iconos cuando estos se ven)
+    if (sub_sel >= 0 && vh)
+        t = video_subtitle_text(vh);
+        if (t != last_sub_raw)               // solo se reparte en lineas cuando cambia el subtitulo
+            last_sub_raw = t;
+            k = script_of(t);
+            if (k != sf_cur) create_sub_texts(sub_font_id(k)); end
+            sub_lines = 0;
+            for (k = 0; k < 3; k++) s_sub[k] = ""; end
+            while (t != "" && sub_lines < 3)
+                p1 = find(t, chr(10));
+                if (p1 < 0) s_sub[sub_lines] = t; t = ""; else s_sub[sub_lines] = substr(t, 0, p1); t = substr(t, p1 + 1); end
+                sub_lines++;
+            end
+        end
+        lines = sub_lines;
+        // la ultima linea queda en la base; las anteriores encima
+        by = SH - 40 - (a > 0 ? 110 : 0);
+        for (k = 0; k < lines; k++)
+            // linea k (de arriba a abajo) -> posicion
+            write_move(txt_sub[k * 2],     ur(SW / 2 + 2), ur(by - (lines - 1 - k) * 56 + 2));
+            write_move(txt_sub[k * 2 + 1], ur(SW / 2), ur(by - (lines - 1 - k) * 56));
+            txt_want[txt_sub[k * 2]] = 4294967296 + 230;
+            txt_want[txt_sub[k * 2 + 1]] = 8589934336 + 255;
+        end
+    end
+end
