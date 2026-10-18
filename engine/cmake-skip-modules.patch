@@ -1,0 +1,15 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 68ace555..b3863021 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -48,7 +48,9 @@ set(MODULES_DIR modules)
+ file(GLOB MODULES_LIST "${MODULES_DIR}/lib*")
+ 
+ foreach(MODULE ${MODULES_LIST})
+-    if(IS_DIRECTORY "${MODULE}")
++    get_filename_component(MODULE_NAME "${MODULE}" NAME)
++    list(FIND SKIP_MODULES "${MODULE_NAME}" MODULE_SKIPPED)    # -DSKIP_MODULES="libmod_3d;..." leaves modules out of a build
++    if(IS_DIRECTORY "${MODULE}" AND MODULE_SKIPPED EQUAL -1)
+         add_subdirectory(${MODULE})
+     endif()
+ endforeach()
