@@ -138,6 +138,14 @@ t_auth_login=登录失败
 m_open_list=打开列表...
 k_open_list=列表文件路径
 t_no_file=该文件不存在
+
+k_xt_server=面板服务器
+xt_live=直播电视
+xt_vod=电影 (VOD)
+xt_series=剧集
+mt_xtream=Xtream
+t_xt_err=无法连接面板
+m_acc_open=打开
 m_addon_settings=附加组件设置
 m_addon_noset=此附加组件没有设置
 mt_addon_settings=设置

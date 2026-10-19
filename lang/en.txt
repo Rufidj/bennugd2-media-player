@@ -139,6 +139,14 @@ t_auth_login=The login failed
 m_open_list=Open list...
 k_open_list=List path
 t_no_file=That file does not exist
+
+k_xt_server=Panel server
+xt_live=Live TV
+xt_vod=Movies (VOD)
+xt_series=Series
+mt_xtream=Xtream
+t_xt_err=Could not reach the panel
+m_acc_open=Open
 m_addon_settings=Addon settings
 m_addon_noset=This addon has no settings
 mt_addon_settings=Settings

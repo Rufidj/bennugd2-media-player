@@ -138,6 +138,14 @@ t_auth_login=Не удалось войти
 m_open_list=Открыть список...
 k_open_list=Путь к списку
 t_no_file=Такого файла нет
+
+k_xt_server=Сервер панели
+xt_live=Прямое ТВ
+xt_vod=Фильмы (VOD)
+xt_series=Сериалы
+mt_xtream=Xtream
+t_xt_err=Не удалось связаться с панелью
+m_acc_open=Открыть
 m_addon_settings=Настройки дополнения
 m_addon_noset=У этого дополнения нет настроек
 mt_addon_settings=Настройки

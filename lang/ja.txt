@@ -138,6 +138,14 @@ t_auth_login=ログインに失敗しました
 m_open_list=リストを開く...
 k_open_list=リストのファイル
 t_no_file=そのファイルはありません
+
+k_xt_server=パネルのサーバー
+xt_live=ライブTV
+xt_vod=映画 (VOD)
+xt_series=シリーズ
+mt_xtream=Xtream
+t_xt_err=パネルに接続できませんでした
+m_acc_open=開く
 m_addon_settings=アドオンの設定
 m_addon_noset=このアドオンには設定がありません
 mt_addon_settings=設定

@@ -161,12 +161,18 @@ nombre | direccion | descripcion | mode=form;login=https://servidor/login;t=toke
 |---|---|
 | `mode=basic` | El usuario y la clave se mandan en la cabecera `Authorization: Basic`. |
 | `mode=form` | El reproductor hace un `POST` a `login=` y lee el token de la respuesta JSON. |
+| `mode=xtream` | El reproductor pregunta por el servidor, el usuario y la contraseña y muestra el árbol del panel (API de Xtream Codes). |
 | `login=` | Dirección del endpoint de login (solo para `form`). |
 | `u=`, `p=` | Nombres de los campos de usuario y clave (por defecto `username` y `password`). |
 | `t=` | Nombre del campo JSON con el token (por defecto `token`). |
 | `h=` | Cabecera con la que se manda el token (por defecto `Authorization`). |
 | `json=1` | El login se manda como JSON en vez de como formulario. |
 | `query=1` | El token se añade a la URL como parámetro en vez de mandarse como cabecera. |
+
+Con `mode=xtream` el reproductor habla con un panel IPTV que usa la API de Xtream Codes: pregunta por el servidor, el
+usuario y la contraseña, y muestra el árbol del panel (TV en vivo, películas y series por categorías). Los canales se reproducen
+con las URLs que espera el panel (`<servidor>/live/<usuario>/<clave>/<id>.ts`). El campo `server=` es opcional: el reproductor
+lo pregunta.
 
 Nunca escribas el usuario ni la clave en el catálogo: son de quien instala la lista y el reproductor los pregunta. Las
 credenciales se guardan en texto plano en el almacén del reproductor (`/data/mediaplayer` en la PS5).

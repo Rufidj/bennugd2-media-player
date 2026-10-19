@@ -188,12 +188,17 @@ name | url | description | mode=form;login=https://server/login;t=token
 |---|---|
 | `mode=basic` | The user and the password are sent as an `Authorization: Basic` header. |
 | `mode=form` | The player does a `POST` to `login=` and reads the token from the JSON answer. |
+| `mode=xtream` | The player asks for the server, the user and the password and shows the panel's tree (Xtream Codes API). |
 | `login=` | Address of the login endpoint (only for `form`). |
 | `u=`, `p=` | Names of the user and password fields (default `username` and `password`). |
 | `t=` | Name of the JSON field with the token (default `token`). |
 | `h=` | Header used to send the token (default `Authorization`). |
 | `json=1` | The login is sent as JSON instead of a form. |
 | `query=1` | The token is added to the URL as a parameter instead of being sent as a header. |
+
+With `mode=xtream` the player talks to an IPTV panel that uses the Xtream Codes API: it asks for the server, the user
+and the password, and shows the panel's tree (live TV, movies and series by category). The channels are played with the URLs
+the panel expects (`<server>/live/<user>/<pass>/<id>.ts`). The `server=` field is optional: the player asks for it.
 
 Never write the user or the password in the catalogue: they belong to the person who installs the list, and the player asks for
 them. The credentials are stored in plain text in the player's storage folder (`/data/mediaplayer` on the PS5).

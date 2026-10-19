@@ -138,6 +138,14 @@ t_auth_login=로그인에 실패했습니다
 m_open_list=목록 열기...
 k_open_list=목록 파일 경로
 t_no_file=파일이 없습니다
+
+k_xt_server=패널 서버
+xt_live=실시간 TV
+xt_vod=영화 (VOD)
+xt_series=시리즈
+mt_xtream=Xtream
+t_xt_err=패널에 연결할 수 없습니다
+m_acc_open=열기
 m_addon_settings=애드온 설정
 m_addon_noset=이 애드온에는 설정이 없습니다
 mt_addon_settings=설정

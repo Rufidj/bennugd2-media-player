@@ -775,11 +775,16 @@ begin
     // una lista que pide cuenta: antes de bajarla se pregunta el usuario y la clave (si no están guardados)
     if (entry_skind[i] == 1 && entry_sauth[i] != "")
         au_ask_file = store_list_path(entry_url[i]);
+        au_ask_name = store_list_name(entry_url[i]);
         if (!au_load(au_ask_file))
             au_ask_spec = entry_sauth[i];
             au_ask_row = i; au_ask_next = 1;
             au_set_spec(au_ask_spec);
-            kb_open(tr("k_auth_user"), au_test_val("MP_AUTH_USER", ""), KB_AUTH_USER);
+            if (au_mode == "xtream")
+                kb_open(tr("k_xt_server"), au_test_val("MP_AUTH_SERVER", au_server), KB_AUTH_SERVER);
+            else
+                kb_open(tr("k_auth_user"), au_test_val("MP_AUTH_USER", ""), KB_AUTH_USER);
+            end
             return 0;
         end
     end

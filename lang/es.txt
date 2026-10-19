@@ -139,6 +139,14 @@ t_auth_login=Falló el inicio de sesión
 m_open_list=Abrir lista...
 k_open_list=Ruta de la lista
 t_no_file=No existe ese fichero
+
+k_xt_server=Servidor del panel
+xt_live=TV en vivo
+xt_vod=Películas (VOD)
+xt_series=Series
+mt_xtream=Xtream
+t_xt_err=No se pudo hablar con el panel
+m_acc_open=Abrir
 m_addon_settings=Ajustes del addon
 m_addon_noset=Este addon no tiene ajustes
 mt_addon_settings=Ajustes

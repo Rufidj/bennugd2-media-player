@@ -89,6 +89,10 @@ player asks for the user and the password when the list is installed, keeps them
 and uses them to download it and to play its channels. Any list can have an account too (options of a list: *Account for this
 list*), and they are all listed in *Settings > Accounts*. The credentials are kept in plain text in the player's storage folder.
 
+With `mode=xtream` the player talks to an IPTV panel that uses the **Xtream Codes API**: it asks for the server, the user and
+the password, and shows the panel's own tree (live TV, movies and series by category). The channels are played with the URLs
+the panel expects (`<server>/live/<user>/<pass>/<id>.ts`).
+
 Addons go to the first folder the player can really write to: `/data/mediaplayer` on the PS5 and
 `mediaplayer_data` next to the player on the PC (it is created the first time). `MP_STORE=/folder` forces another one.
 

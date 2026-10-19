@@ -46,16 +46,17 @@ const
     MAX_ENTRIES = 2047;
 
     ST_BROWSE = 0; ST_PLAY = 1;
-    K_FILE = 0; K_DIR = 1; K_LIST = 2; K_URL = 3; K_MYLISTS = 4; K_ADDONS = 5; K_ADDON = 6; K_AFOLDER = 7; K_STORE = 8; K_SITEM = 9;    // tipos de entrada del explorador
+    K_FILE = 0; K_DIR = 1; K_LIST = 2; K_URL = 3; K_MYLISTS = 4; K_ADDONS = 5; K_ADDON = 6; K_AFOLDER = 7; K_STORE = 8; K_SITEM = 9;
+    K_XCAT = 12; K_XSTR = 13; K_XSER = 14;   // entradas de una pantalla de Xtream (categoría, canal, serie)
     // tienda de addons: repositorio oficial del reproductor (se puede apuntar a otro con MP_STORE_URL)
     STORE_URL = "https://raw.githubusercontent.com/Rufidj/bennugd2-media-player/main/addons";
     M_NONE = 0; M_MENU = 1; M_KB = 2; M_CREDITS = 3;                             // pantallas modales (menu / teclado)
     KB_NEWLIST = 1; KB_RENAME_LIST = 2; KB_URL = 3; KB_NEW_TITLE = 4; KB_ENTRY_TITLE = 5; KB_LOGO = 6; KB_ADDON = 7; KB_ASET = 8;
-    KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11;
+    KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11; KB_AUTH_SERVER = 12;
     MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
     MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_ASET = 300; MA_PICK = 100;
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
-    MA_OPEN_LIST = 25;
+    MA_OPEN_LIST = 25; MA_ACC_OPEN = 26;
 end
 
 global
@@ -198,6 +199,10 @@ declare function int au_set_spec(string spec) end
 declare function string au_json_str(string body, string field) end
 declare function string au_ask_value(string spec, string key, string def) end
 declare function int au_ask_account(string listfile) end
+declare function int xt_enter(string name) end
+declare function int xt_step() end
+declare function int xt_open_level(int level) end
+declare function string xt_stream_url(int i) end
 declare function int au_reset() end
 declare function string au_test_val(string env, string def) end
 declare function int open_accounts_menu() end
@@ -235,6 +240,7 @@ end
 
 include "addon.prg";
 include "auth.prg";
+include "xtream.prg";
 include "addon_ui.prg";
 
 process main()
@@ -621,6 +627,7 @@ end
 function update_browser()
 private int old;
 begin
+    if (xt_job) xt_step(); return 0; end                          // Xtream: cargando categorías o canales
     if (store_job == 1) store_step(); return 0; end                // instalando: no se atiende al mando
     if (store_load) store_fetch(); return 0; end                   // la tienda se pide en el fotograma siguiente (primero addons y después listas)
     if (act_press[A_MUTE]) if (store_mode == 1) open_store_menu(); else open_context_menu(); end return 0; end
@@ -780,6 +787,10 @@ end
 
 function go_up()
 begin
+    if (xt_screen == 1)
+        if (xt_level > 0) xt_level--; xt_job = 0; xt_open_level(xt_level); return 0; end
+        xt_screen = 0; cur_dir = home_dir; read_dir(); return 0;
+    end
     if (store_mode == 1)
         store_mode = 0; cur_dir = home_dir; read_dir();
     elseif (addon_mode == 2)
@@ -837,6 +848,17 @@ begin
         addon_goto(entry_url[i], entry_aargs[i]);
     elseif (entry_dir[i] == K_LIST)
         cur_list = join_path(cur_dir, entries[i]); read_list();
+    elseif (entry_dir[i] == K_XCAT)
+        if (xt_level == 0)
+            xt_type = (entry_url[i] == "vod") ? 1 : ((entry_url[i] == "series") ? 2 : 0);
+            xt_cat_sel = ""; xt_job = 1;
+        else
+            xt_cat_sel = entry_url[i]; xt_job = 2;
+        end
+    elseif (entry_dir[i] == K_XSER)
+        xt_ser_sel = entry_url[i]; xt_job = 3;
+    elseif (entry_dir[i] == K_XSTR)
+        start_video(xt_stream_url(i));
     else
         request_open(i);
     end
@@ -1360,6 +1382,9 @@ begin
         case MA_ACC_EDIT:
             au_ask_account(join_path(lists_dir, acc_name[acc_sel] + ".m3u"));
         end
+        case MA_ACC_OPEN:
+            xt_enter(acc_name[acc_sel]);
+        end
         case MA_ACC_DEL:
             au_clear(join_path(lists_dir, acc_name[acc_sel] + ".m3u"));
             toast(tr("t_auth_del"));
@@ -1404,7 +1429,7 @@ end
 function kb_open(string title, string initial, int purpose)
 private int r, k; string s;
 begin
-    kb_title = title; kb_text = initial; if (getenv("MP_KB_TEXT") != "") kb_text = getenv("MP_KB_TEXT"); end; kb_purpose = purpose; kb_secret = kb_secret_next; kb_secret_next = 0;
+    kb_title = title; kb_text = initial; if (getenv("MP_KB_TEXT") != "" && purpose != KB_AUTH_USER && purpose != KB_AUTH_PASS && purpose != KB_AUTH_SERVER) kb_text = getenv("MP_KB_TEXT"); end; kb_purpose = purpose; kb_secret = kb_secret_next; kb_secret_next = 0;
     kb_rows[0] = "1234567890"; kb_rows[1] = "qwertyuiop";
     kb_rows[2] = "asdfghjkl" + chr(241); kb_rows[3] = "zxcvbnm.-_"; kb_rows[4] = ":/?=&%+@,~";
     kb_sp[0] = tr("kb_shift"); kb_sp[1] = tr("kb_space"); kb_sp[2] = tr("kb_del"); kb_sp[3] = "https://"; kb_sp[4] = tr("kb_ok"); kb_sp[5] = tr("m_cancel");
@@ -1518,17 +1543,26 @@ begin
         end
         case KB_ADDON: ask_ok = 1; ask_text = kb_text; end
         case KB_ASET: host_setting_set(ad_st_name[aset_idx], kb_text); addon_settings_menu(aset_idx); end
+        case KB_AUTH_SERVER:
+            au_server = kb_text;
+            kb_open(tr("k_auth_user"), au_test_val("MP_AUTH_USER", au_user), KB_AUTH_USER);
+        end
         case KB_AUTH_USER:
             au_user = kb_text; kb_secret_next = 1;
             kb_open(tr("k_auth_pass"), au_test_val("MP_AUTH_PASS", ""), KB_AUTH_PASS);
         end
         case KB_AUTH_PASS:
             au_pass = kb_text;
-            if (au_finish() == -1)
-                show_error(tr("mt_account"), tr("t_auth_login"));
-                au_ask_next = 0;
+            if (au_mode == "xtream")
+                au_finish();
+                xt_enter(au_ask_name);
             else
-                if (au_ask_next == 1) store_install(au_ask_row); else toast(tr("t_auth_saved")); end
+                if (au_finish() == -1)
+                    show_error(tr("mt_account"), tr("t_auth_login"));
+                    au_ask_next = 0;
+                else
+                    if (au_ask_next == 1) store_install(au_ask_row); else toast(tr("t_auth_saved")); end
+                end
             end
         end
         case KB_LOGO:

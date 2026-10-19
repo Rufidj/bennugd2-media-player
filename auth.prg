@@ -10,7 +10,8 @@
 // ==========================================================================================================
 global
     string au_user = "", au_pass = "";
-    string au_mode = "";              // "basic" o "form"
+    string au_mode = "";              // "basic", "form" o "xtream"
+    string au_server = "";            // servidor del panel (modo xtream)
     string au_login_url = "";         // dirección del endpoint de login
     string au_ufield = "username", au_pfield = "password";
     string au_tfield = "token", au_hdr = "Authorization", au_token = "";
@@ -20,6 +21,7 @@ global
     int    au_ask_row = 0;            // fila de la tienda pendiente de pedir la cuenta
     string au_ask_file = "";          // fichero de lista donde se guardan las credenciales
     string au_ask_spec = "";          // especificación de la cuenta de esa lista
+    string au_ask_name = "";          // nombre de la lista (para abrir una cuenta Xtream)
     int    au_ask_next = 0;           // 1 = al terminar, seguir con la instalación de la tienda
     string acc_name[16]; int acc_n = 0, acc_sel = 0;   // menú de cuentas
 
@@ -65,6 +67,7 @@ function int au_set_spec(string spec)
 begin
     au_mode = lcase(au_ask_value(spec, "mode", "basic"));
     au_login_url = au_ask_value(spec, "login", "");
+    au_server = au_ask_value(spec, "server", "");
     au_ufield = au_ask_value(spec, "u", "username");
     au_pfield = au_ask_value(spec, "p", "password");
     au_tfield = au_ask_value(spec, "t", "token");
@@ -117,7 +120,7 @@ function int au_load(string listfile)
 private int fh, p; string ln, k, v;
 begin
     au_list = listfile;
-    au_user = ""; au_pass = ""; au_token = ""; au_mode = ""; au_login_url = "";
+    au_user = ""; au_pass = ""; au_token = ""; au_mode = ""; au_login_url = ""; au_server = "";
     au_ufield = "username"; au_pfield = "password"; au_tfield = "token"; au_hdr = "Authorization";
     au_json = 0; au_query = 0; au_has = 0;
     fh = fopen(au_sidecar(listfile), O_READ);
@@ -131,6 +134,7 @@ begin
             if (k == "pass") au_pass = v; end
             if (k == "token") au_token = v; end
             if (k == "mode") au_mode = lcase(v); end
+            if (k == "server") au_server = v; end
             if (k == "login") au_login_url = v; end
             if (k == "ufield") au_ufield = v; end
             if (k == "pfield") au_pfield = v; end
@@ -154,6 +158,7 @@ begin
     fputs(fh, "user=" + au_user + chr(10));
     fputs(fh, "pass=" + au_pass + chr(10));
     fputs(fh, "mode=" + au_mode + chr(10));
+    if (au_server != "") fputs(fh, "server=" + au_server + chr(10)); end
     if (au_login_url != "") fputs(fh, "login=" + au_login_url + chr(10)); end
     if (au_ufield != "username") fputs(fh, "ufield=" + au_ufield + chr(10)); end
     if (au_pfield != "password") fputs(fh, "pfield=" + au_pfield + chr(10)); end
@@ -264,6 +269,8 @@ begin
     if (i < 0 || i >= acc_n) return 0; end
     acc_sel = i;
     menu_clear();
+    au_load(join_path(lists_dir, acc_name[i] + ".m3u"));
+    if (au_mode == "xtream") menu_add(tr("m_acc_open"), MA_ACC_OPEN); end
     menu_add(tr("m_acc_edit"), MA_ACC_EDIT);
     menu_add(tr("m_acc_del"), MA_ACC_DEL);
     menu_add(tr("m_back"), MA_CANCEL);
