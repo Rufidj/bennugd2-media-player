@@ -596,7 +596,7 @@ function update_browser()
 private int old;
 begin
     if (store_job == 1) store_step(); return 0; end                // instalando: no se atiende al mando
-    if (store_load == 1) store_fetch(); return 0; end              // la lista de la tienda se pide en el fotograma siguiente
+    if (store_load) store_fetch(); return 0; end                   // la tienda se pide en el fotograma siguiente (primero addons y después listas)
     if (act_press[A_MUTE]) if (store_mode == 1) open_store_menu(); else open_context_menu(); end return 0; end
     if (n_entries > 0)
         old = sel;
@@ -681,7 +681,11 @@ begin
                 end
                 case K_SITEM:
                     s_info[1] = store_state(sel);
-                    wrap_text(entry_info[sel], 420, 4);
+                    if (entry_skind[sel] == 1)
+                        wrap_text(tr("s_store_list") + ": " + entry_info[sel], 420, 3);   // lista de TV/radio
+                    else
+                        wrap_text(entry_info[sel], 420, 4);                               // addon
+                    end
                     for (k = 0; k < wrap_n; k++) s_info[2 + k] = wrap_l[k]; end
                 end
                 case K_AFOLDER:
@@ -1939,7 +1943,7 @@ begin
                     case K_DIR, K_MYLISTS, K_AFOLDER: g = g_icon[10]; end
                     case K_ADDONS, K_ADDON: g = g_icon[16]; end
                     case K_STORE: g = g_icon[14]; end
-                    case K_SITEM: g = entry_siver[rowi] != "" ? g_icon[16] : g_icon[14]; end
+                    case K_SITEM: if (entry_skind[rowi] == 1) g = entry_siver[rowi] != "" ? g_icon[11] : g_icon[14]; else g = entry_siver[rowi] != "" ? g_icon[16] : g_icon[14]; end end
                     case K_LIST: g = g_icon[14]; end
                     case K_URL: g = (addon_mode == 2 && entry_akind[rowi] == 1) ? g_icon[11] : ((addon_mode == 2 && entry_akind[rowi] >= 2) ? g_icon[15] : g_icon[14]); end
                     default: g = is_audio(entries[rowi]) ? g_icon[15] : g_icon[11]; end

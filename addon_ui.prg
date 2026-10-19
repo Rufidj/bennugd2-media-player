@@ -23,9 +23,15 @@ global
     string entry_sver[MAX_ENTRIES];     // versión que hay en la tienda
     string entry_sfiles[MAX_ENTRIES];   // ficheros que hay que descargar ("main.addon,logo.png")
     string entry_siver[MAX_ENTRIES];    // versión instalada ("" = no está instalado)
+    int    entry_skind[MAX_ENTRIES];    // 1 = lista de TV/radio de la tienda (0 = addon)
+    string entry_surl[MAX_ENTRIES];     // dirección de origen de una lista
+    int    store_cached;                // 1 = la lista se sacó de la copia guardada (sin conexión)
+    int    store_net_err;               // estado HTTP del último intento (para el mensaje de error)
     // instalación en curso (una descarga por fotograma, para que la pantalla siga viva)
     int    store_job;                   // 1 = instalando
     int    store_ji, store_jn, store_jrow, store_jerr; string store_jid, store_jdir, store_jfiles, store_jname;
+    int    store_jkind;                 // 0 = addon, 1 = lista de TV/radio
+    string store_jurl, store_jfile;     // lista: de dónde se baja y con qué nombre se guarda
     string store_seen[64]; int store_seen_n;   // carpetas ya listadas (el addon del usuario manda sobre el que trae el reproductor)
 end
 
@@ -537,12 +543,15 @@ begin
 end
 
 // ==========================================================================================================
-//  tienda de addons
-//  La lista viene de un fichero de texto del repositorio oficial del reproductor; cada línea es un addon:
-//      id | nombre | version | ficheros | descripcion
-//  Al instalar se descarga <raiz>/<id>/<fichero> en <almacen>/addons/<id>/, que es una de las carpetas
-//  que mira la lista de addons: la del usuario tiene preferencia sobre la que trae el reproductor, así
-//  que instalar desde la tienda también sirve para actualizar un addon del reproductor.
+//  tienda de addons y de listas
+//  La lista viene de ficheros de texto del repositorio oficial del reproductor:
+//      index.txt   cada línea es un addon:   id | nombre | version | ficheros | descripcion
+//      lists.txt   cada línea es una lista:  fichero | direccion | descripcion
+//  Al instalar un addon se descarga <raiz>/<id>/<fichero> en <almacen>/addons/<id>/, que es una de las
+//  carpetas que mira la lista de addons: la del usuario tiene preferencia sobre la que trae el
+//  reproductor, así que instalar desde la tienda también sirve para actualizar un addon del reproductor.
+//  Las listas (TDTChannels, iptv-org...) se descargan de su dirección de origen a <almacen>/listas/,
+//  que es la carpeta de "Mis listas": al bajar una lista nueva sólo hay que volver a instalarla.
 // ==========================================================================================================
 
 function string store_root()
@@ -594,9 +603,50 @@ begin
     return ad_i_ver;
 end
 
-// texto del estado de un addon de la tienda
+// nombre de fichero de una lista de la tienda dentro de "Mis listas" (sin caracteres que no valgan)
+function string store_list_name(string n)
+private string r = ""; int i, c;
+begin
+    for (i = 0; i < len(n); i++)
+        c = asc(substr(n, i, 1));
+        if (c == 47 || c == 92 || c == 58 || c == 42 || c == 63 || c == 34 || c == 60 || c == 62 || c == 124 || c < 32) r += "_"; else r += substr(n, i, 1); end
+    end
+    if (r == "") r = "lista"; end
+    return r;
+end
+
+function string store_list_path(string n)
+begin
+    return join_path(lists_dir, store_list_name(n) + ".m3u");
+end
+
+// "" si la lista no está descargada; "1" si ya está en "Mis listas"
+function string store_list_have(string n)
+begin
+    if (fexists(store_list_path(n))) return "1"; end
+    return "";
+end
+
+// ¿lo descargado es una lista de verdad? (el origen puede devolver una página de error con estado 200)
+function int list_file_ok(string path)
+private int fh, ok; string ln;
+begin
+    fh = fopen(path, O_READ);
+    if (!fh) return 0; end
+    ok = 0;
+    while (!feof(fh) && !ok)
+        ln = fgets(fh);
+        if (len(ln) >= 3 && asc(substr(ln, 0, 1)) == 239) ln = substr(ln, 3); end      // marca BOM de UTF-8
+        if (substr(ln, 0, 7) == "http://" || substr(ln, 0, 8) == "https://" || substr(ln, 0, 4) == "rtmp" || substr(ln, 0, 3) == "udp") ok = 1; end
+    end
+    fclose(fh);
+    return ok;
+end
+
+// texto del estado de un addon o de una lista de la tienda
 function string store_state(int i)
 begin
+    if (entry_skind[i] == 1) if (entry_siver[i] == "") return tr("s_notinst"); else return tr("s_lists_inst"); end end
     if (entry_siver[i] == "") return tr("s_notinst"); end
     if (entry_sver[i] == "" || entry_siver[i] == entry_sver[i]) return tr("s_installed") + " v" + entry_siver[i]; end
     return tr("s_update") + ": v" + entry_siver[i] + " > v" + entry_sver[i];
@@ -606,7 +656,7 @@ function store_reset()
 begin
     n_entries = 1;
     entries[0] = ".."; entry_dir[0] = K_DIR; entry_url[0] = ""; entry_size[0] = 0; entry_logo[0] = ""; entry_info[0] = "";
-    entry_sver[0] = ""; entry_sfiles[0] = ""; entry_siver[0] = "";
+    entry_sver[0] = ""; entry_sfiles[0] = ""; entry_siver[0] = ""; entry_skind[0] = 0; entry_surl[0] = "";
     sel = 0; top_row = 0; dir_ver++; lbl_ver = -1; pv_idx = -1;
 end
 
@@ -615,7 +665,7 @@ end
 function store_open()
 begin
     if (store_dir == "") toast(tr("t_no_store")); return 0; end
-    store_mode = 1; addon_mode = 0; cur_list = ""; store_load = 1;
+    store_mode = 1; addon_mode = 0; cur_list = ""; store_load = 1; store_cached = 0;
     store_reset(); n_entries = 0;
     s_amsg = tr("s_loading"); addon_busy = 1;
 end
@@ -634,6 +684,7 @@ begin
                 entries[n_entries] = nm; entry_dir[n_entries] = K_SITEM; entry_url[n_entries] = aid;
                 entry_size[n_entries] = 0; entry_logo[n_entries] = ""; entry_info[n_entries] = desc;
                 entry_sver[n_entries] = ver; entry_sfiles[n_entries] = files; entry_siver[n_entries] = installed_ver(aid);
+                entry_skind[n_entries] = 0; entry_surl[n_entries] = "";
                 n_entries++;
             end
         end
@@ -641,80 +692,147 @@ begin
     lbl_ver = -1;
 end
 
-// pide la lista de la tienda; si no hay red se usa la última que se bajó
-function store_fetch()
-private int st, fh, n, cached; string txt, cache;
+// listas de TV/radio: "fichero | direccion | descripcion"; se descargan en <almacen>/listas/
+function store_lists_parse(string txt)
+private int p; string line, fname, url, desc;
 begin
-    store_load = 0; cached = 0;
-    cache = join_path(join_path(store_dir, "addons_data"), "index.txt");
-    mkdir(join_path(store_dir, "addons_data"));
-    st = http_fetch(store_root() + "/index.txt", "", "GET", "");
+    while (txt != "" && n_entries < MAX_ENTRIES)
+        p = find(txt, chr(10));
+        if (p < 0) line = txt; txt = ""; else line = substr(txt, 0, p); txt = substr(txt, p + 1); end
+        if (len(line) > 0 && substr(line, len(line) - 1, 1) == chr(13)) line = substr(line, 0, len(line) - 1); end
+        if (len(line) > 0 && substr(line, 0, 1) != "#")
+            fname = field_of(line, "|", 1); url = field_of(line, "|", 2); desc = field_of(line, "|", 3);
+            if (fname != "" && url != "")
+                entries[n_entries] = fname; entry_dir[n_entries] = K_SITEM; entry_url[n_entries] = fname;
+                entry_size[n_entries] = 0; entry_logo[n_entries] = ""; entry_info[n_entries] = desc;
+                entry_sver[n_entries] = ""; entry_sfiles[n_entries] = ""; entry_siver[n_entries] = store_list_have(fname);
+                entry_skind[n_entries] = 1; entry_surl[n_entries] = url;
+                n_entries++;
+            end
+        end
+    end
+    lbl_ver = -1;
+end
+
+// pide un fichero de texto de la tienda; si no hay red usa la copia guardada ("" = no hay nada)
+function string store_get_text(string url, string cache)
+private int st, n, fh; string txt;
+begin
+    st = http_fetch(url, "", "GET", "");
+    store_net_err = st;
     if (st == 200 && http_length() > 0 && http_length() < HTTP_MAX)
         n = http_read(&ad_buf[0], http_length());
         txt = ad_buf_str(0, n);
         http_write(cache, txt);                                  // copia para cuando no haya red
-    else
-        cached = 1;
-        txt = "";
-        if (fexists(cache))
-            fh = fopen(cache, O_READ);
-            while (!feof(fh)) txt += fgets(fh) + chr(10); end
-            fclose(fh);
-        end
-        if (txt == "")
-            addon_busy = 0; s_amsg = ""; n_entries = 1; dir_ver++;
-            show_error(tr("mt_store"), tr("t_store_net") + " (" + (st > 0 ? "error " + st : http_error()) + ")");
-            return 0;
-        end
+        return txt;
     end
-    store_index_parse(txt);
-    addon_busy = 0; s_amsg = "";
-    if (cached) toast(tr("t_store_off")); end
-    return 1;
+    if (!fexists(cache)) return ""; end
+    txt = "";
+    fh = fopen(cache, O_READ);
+    if (!fh) return ""; end
+    while (!feof(fh)) txt += fgets(fh) + chr(10); end
+    fclose(fh);
+    if (txt != "") store_cached = 1; end
+    return txt;
 end
 
-// prepara la instalación del addon de la entrada i: se hace en el fotograma siguiente
+// la tienda se pide en dos pasos (primero los addons y después las listas): una descarga por fotograma,
+// para que se siga viendo el "cargando"; si no hay red se usan las copias guardadas
+function store_fetch()
+private string txt, d;
+begin
+    d = join_path(store_dir, "addons_data");
+    mkdir(d);
+    if (store_load == 1)
+        txt = store_get_text(store_root() + "/index.txt", join_path(d, "index.txt"));
+        if (txt == "")
+            store_load = 0; addon_busy = 0; s_amsg = ""; n_entries = 1; dir_ver++;
+            show_error(tr("mt_store"), tr("t_store_net") + " (" + (store_net_err > 0 ? "error " + store_net_err : http_error()) + ")");
+            return 0;
+        end
+        store_index_parse(txt);
+        store_load = 2;                                          // el siguiente fotograma pide las listas
+        return 1;
+    end
+    if (store_load == 2)
+        txt = store_get_text(store_root() + "/lists.txt", join_path(d, "lists.txt"));
+        store_load = 0; addon_busy = 0; s_amsg = "";
+        if (txt != "") store_lists_parse(txt); end               // si el repositorio no trae lists.txt, no pasa nada
+        if (store_cached) toast(tr("t_store_off")); end
+        return 1;
+    end
+    store_load = 0;
+    return 0;
+end
+
+// prepara la instalación de la entrada i (un addon o una lista): se hace en el fotograma siguiente
 function store_install(int i)
 begin
     if (store_dir == "") toast(tr("t_no_store")); return 0; end
     if (i <= 0 || i >= n_entries || entry_dir[i] != K_SITEM) return 0; end
     store_job = 1; store_ji = 0; store_jerr = 0; store_jrow = i;
-    store_jid = entry_url[i]; store_jname = entries[i];
-    store_jfiles = entry_sfiles[i];
-    if (store_jfiles == "") store_jfiles = "main.addon,logo.png"; end
-    store_jn = field_n(store_jfiles, ",");
-    store_jdir = join_path(addon_root_user(), store_jid);
+    store_jid = entry_url[i]; store_jname = entries[i]; store_jkind = entry_skind[i];
+    store_jurl = entry_surl[i];
+    if (store_jkind == 1)
+        store_jfile = store_list_name(store_jid) + ".m3u";       // destino dentro de "Mis listas"
+        store_jfiles = ""; store_jn = 1; store_jdir = lists_dir;
+    else
+        store_jfiles = entry_sfiles[i];
+        if (store_jfiles == "") store_jfiles = "main.addon,logo.png"; end
+        store_jn = field_n(store_jfiles, ",");
+        store_jdir = join_path(addon_root_user(), store_jid);
+    end
     s_amsg = tr("s_installing") + " " + store_jname; addon_busy = 1;
 end
 
 // una descarga por fotograma: la pantalla se repinta entre fichero y fichero y se ve el avance
 function store_step()
-private int st; string fn, url, why;
+private int st; string fn, url, why, dest;
 begin
-    if (store_ji == 0) mkdir(store_jdir); end
-    if (store_jerr == 0)
-        store_ji++;
-        fn = field_of(store_jfiles, ",", store_ji);
-        if (fn != "")
-            url = store_root() + "/" + store_jid + "/" + fn;
-            st = http_fetch(url, "", "GET", "");
-            if (st != 200) store_jerr = st > 0 ? st : 1;
-            elseif (!http_save(join_path(store_jdir, fn))) store_jerr = -1; end
+    if (store_jkind == 1)
+        // lista de TV/radio: se baja de su dirección de origen directamente a "Mis listas"
+        mkdir(store_jdir);
+        st = http_fetch(store_jurl, "", "GET", "");
+        dest = join_path(store_jdir, store_jfile);
+        if (st != 200)
+            store_jerr = st > 0 ? st : 1;
+        elseif (!http_save(dest))
+            store_jerr = -1;
+        else
+            if (!list_file_ok(dest))
+                store_jerr = -2; fremove(dest); end              // el origen devolvió algo que no es una lista
         end
-        if (store_jerr == 0 && store_ji >= store_jn && !ad_peek_info(join_path(store_jdir, "main.addon"))) store_jerr = -2; end
+        store_ji = 1;
+    else
+        if (store_ji == 0) mkdir(store_jdir); end
+        if (store_jerr == 0)
+            store_ji++;
+            fn = field_of(store_jfiles, ",", store_ji);
+            if (fn != "")
+                url = store_root() + "/" + store_jid + "/" + fn;
+                st = http_fetch(url, "", "GET", "");
+                if (st != 200) store_jerr = st > 0 ? st : 1;
+                elseif (!http_save(join_path(store_jdir, fn))) store_jerr = -1; end
+            end
+            if (store_jerr == 0 && store_ji >= store_jn && !ad_peek_info(join_path(store_jdir, "main.addon"))) store_jerr = -2; end
+        end
     end
     if (store_jerr != 0 || store_ji >= store_jn)
         store_job = 0; addon_busy = 0; s_amsg = "";
         if (store_jerr != 0)
-            if (store_jerr == -2) fremove(join_path(store_jdir, "main.addon")); end   // el fichero bajado no es un addon
-            if (store_jerr == -1) why = tr("t_store_nosave");
-            elseif (store_jerr == -2) why = tr("t_store_badfile");
-            else why = tr("t_store_http") + " " + store_jerr; end
+            if (store_jerr == -2 && store_jkind == 0) fremove(join_path(store_jdir, "main.addon")); end   // el fichero bajado no es un addon
+            if (store_jerr == -1)
+                why = tr("t_store_nosave");
+            elseif (store_jerr == -2)
+                if (store_jkind == 1) why = tr("t_store_badlist"); else why = tr("t_store_badfile"); end
+            else
+                why = tr("t_store_http") + " " + store_jerr;
+            end
             show_error(tr("mt_store"), tr("t_store_fail") + " " + store_jname + ": " + why);
         else
-            entry_siver[store_jrow] = installed_ver(store_jid);
+            if (store_jkind == 1) entry_siver[store_jrow] = store_list_have(store_jid); else entry_siver[store_jrow] = installed_ver(store_jid); end
             dir_ver++; lbl_ver = -1; pv_idx = -1;
-            toast(tr("t_store_ok") + " " + store_jname);
+            if (store_jkind == 1) toast(tr("t_store_listok") + " " + store_jname); else toast(tr("t_store_ok") + " " + store_jname); end
         end
     else
         s_amsg = tr("s_installing") + " " + store_jname + "  " + store_ji + "/" + store_jn;

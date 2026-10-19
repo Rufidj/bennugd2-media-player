@@ -158,3 +158,16 @@ python3 tools/make_addon_index.py && git add addons/index.txt && git commit -m "
 
 The Store only downloads the files listed in the `files` field (`main.addon,logo.png` by default) and refuses to install anything
 that is not a parsable addon.
+
+## Publishing a TV/radio list in the Store
+
+The Store also offers free lists of channels, taken from `addons/lists.txt`: one line per list with `name | url | description`.
+`name` is the file name it gets in "My lists" (the player adds `.m3u`) and `url` is where it is downloaded from, so any public
+M3U of channels works (TDTChannels, iptv-org...). Edit the file, check it and push:
+
+```sh
+python3 tools/check_store_lists.py && git add addons/lists.txt && git commit -m "Update the store lists" && git push
+```
+
+A list is downloaded whole and refuses to install anything that does not look like an M3U; the player shows up to 2047 entries
+of each list, so the checker warns about longer ones.

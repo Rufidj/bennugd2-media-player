@@ -1,0 +1,10 @@
+# BennuGD2 Media Player - listas de TV y radio de la tienda
+# fichero | direccion | descripcion
+# El fichero es el nombre con el que se guarda la lista en la carpeta "Mis listas" (con .m3u) y la
+# direccion de donde se descarga. Se pueden añadir/quitar lineas: la tienda lee este fichero igual
+# que index.txt. Con "|" en la descripcion se perderia el campo, asi que se escribe "/".
+TV España (TDTChannels) | https://www.tdtchannels.com/lists/tv.m3u | Spanish DTT channels, free to air (TDTChannels).
+Radio España (TDTChannels) | https://www.tdtchannels.com/lists/radio.m3u | Spanish radio stations, more than a thousand (TDTChannels).
+TV España (iptv-org) | https://iptv-org.github.io/iptv/countries/es.m3u | More free Spanish channels, with quality and status marks (iptv-org).
+TV México (iptv-org) | https://iptv-org.github.io/iptv/countries/mx.m3u | Free Mexican channels (iptv-org).
+Música y conciertos (iptv-org) | https://iptv-org.github.io/iptv/categories/music.m3u | Music channels and live concerts from many countries (iptv-org).
