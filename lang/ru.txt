@@ -134,6 +134,10 @@ k_auth_pass=Пароль
 t_auth_saved=Учётная запись сохранена
 t_auth_del=Учётная запись удалена
 t_auth_login=Не удалось войти
+
+m_open_list=Открыть список...
+k_open_list=Путь к списку
+t_no_file=Такого файла нет
 m_addon_settings=Настройки дополнения
 m_addon_noset=У этого дополнения нет настроек
 mt_addon_settings=Настройки

@@ -135,6 +135,10 @@ k_auth_pass=Password
 t_auth_saved=Account saved
 t_auth_del=Account deleted
 t_auth_login=The login failed
+
+m_open_list=Open list...
+k_open_list=List path
+t_no_file=That file does not exist
 m_addon_settings=Addon settings
 m_addon_noset=This addon has no settings
 mt_addon_settings=Settings

@@ -4,6 +4,8 @@
 //   cuadrado = silenciar, L1/R1 = -/+10 s, START = pausa.   Teclado: flechas, Enter, Esc, S, M, espacio.
 // Variables de entorno: MEDIA_DIR (carpeta inicial), MP_OPEN (abrir un archivo directamente),
 //   MP_SHOT (ruta .png: guarda una captura tras unos fotogramas y sale; solo para pruebas).
+//   Solo para pruebas tambien: MP_SELECT, MP_ENTER, MP_SCRIPT, MP_KB_TEXT (texto del teclado),
+//   MP_AUTH_USER, MP_AUTH_PASS, MP_STORE_URL, MP_TRACE.
 
 import "libmod_gfx";
 import "libmod_input";
@@ -49,10 +51,11 @@ const
     STORE_URL = "https://raw.githubusercontent.com/Rufidj/bennugd2-media-player/main/addons";
     M_NONE = 0; M_MENU = 1; M_KB = 2; M_CREDITS = 3;                             // pantallas modales (menu / teclado)
     KB_NEWLIST = 1; KB_RENAME_LIST = 2; KB_URL = 3; KB_NEW_TITLE = 4; KB_ENTRY_TITLE = 5; KB_LOGO = 6; KB_ADDON = 7; KB_ASET = 8;
-    KB_AUTH_USER = 9; KB_AUTH_PASS = 10;
+    KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11;
     MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
     MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_ASET = 300; MA_PICK = 100;
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
+    MA_OPEN_LIST = 25;
 end
 
 global
@@ -1278,6 +1281,7 @@ begin
             menu_add(tr("m_add_to"), MA_ADD_TO);
         end
         menu_add(tr("m_new_list"), MA_NEW_LIST);
+        menu_add(tr("m_open_list"), MA_OPEN_LIST);
         menu_add(tr("m_goto_lists"), MA_GOTO_LISTS);
     end
     menu_add(tr("m_settings"), MA_SETTINGS);
@@ -1322,6 +1326,7 @@ begin
             skin = !skin; cfg_save(); open_settings_menu(1);
         end
         case MA_NEW_LIST:   op_after = 0; kb_open(tr("k_new_list"), "", KB_NEWLIST); end
+        case MA_OPEN_LIST:  kb_open(tr("k_open_list"), "", KB_OPEN_LIST); end
         case MA_GOTO_LISTS: cur_list = ""; cur_dir = lists_dir; read_dir(); end
         case MA_ADD_TO:
             op_title = entries[sel]; op_url = entry_path(sel); op_logo = "";
@@ -1399,7 +1404,7 @@ end
 function kb_open(string title, string initial, int purpose)
 private int r, k; string s;
 begin
-    kb_title = title; kb_text = initial; kb_purpose = purpose; kb_secret = kb_secret_next; kb_secret_next = 0;
+    kb_title = title; kb_text = initial; if (getenv("MP_KB_TEXT") != "") kb_text = getenv("MP_KB_TEXT"); end; kb_purpose = purpose; kb_secret = kb_secret_next; kb_secret_next = 0;
     kb_rows[0] = "1234567890"; kb_rows[1] = "qwertyuiop";
     kb_rows[2] = "asdfghjkl" + chr(241); kb_rows[3] = "zxcvbnm.-_"; kb_rows[4] = ":/?=&%+@,~";
     kb_sp[0] = tr("kb_shift"); kb_sp[1] = tr("kb_space"); kb_sp[2] = tr("kb_del"); kb_sp[3] = "https://"; kb_sp[4] = tr("kb_ok"); kb_sp[5] = tr("m_cancel");
@@ -1491,7 +1496,13 @@ begin
         case KB_RENAME_LIST:
             nm = safe_name(kb_text);
             if (nm == "") return 0; end
-            fmove(op_path, list_path(nm)); toast(tr("t_renamed")); read_dir();
+            fmove(op_path, join_path(parent_of(op_path), nm + ".m3u")); toast(tr("t_renamed")); read_dir();
+        end
+        case KB_OPEN_LIST:
+            op_path = kb_text;
+            if (op_path == "" || !fexists(op_path)) toast(tr("t_no_file")); return 0; end
+            cur_list = op_path; cur_dir = parent_of(op_path);
+            read_list();
         end
         case KB_URL:
             if (find(kb_text, "://") < 0 && substr(kb_text, 0, 1) != "/") toast(tr("t_bad_url")); return 0; end
