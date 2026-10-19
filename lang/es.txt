@@ -147,6 +147,7 @@ xt_series=Series
 mt_xtream=Xtream
 t_xt_err=No se pudo hablar con el panel
 m_acc_open=Abrir
+m_acc_new=Cuenta Xtream nueva...
 m_addon_settings=Ajustes del addon
 m_addon_noset=Este addon no tiene ajustes
 mt_addon_settings=Ajustes

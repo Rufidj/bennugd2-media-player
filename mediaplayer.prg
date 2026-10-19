@@ -56,7 +56,7 @@ const
     MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
     MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_ASET = 300; MA_PICK = 100;
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
-    MA_OPEN_LIST = 25; MA_ACC_OPEN = 26;
+    MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27;
 end
 
 global
@@ -1379,6 +1379,11 @@ begin
             end
         end
         case MA_ACCOUNTS: open_accounts_menu(); end
+        case MA_ACC_NEW:
+            au_ask_next = 0; au_ask_name = ""; au_ask_file = "";
+            au_mode = "xtream"; au_login_url = ""; au_server = ""; au_user = ""; au_pass = ""; au_token = "";
+            kb_open(tr("k_xt_server"), au_test_val("MP_AUTH_SERVER", ""), KB_AUTH_SERVER);
+        end
         case MA_ACC_EDIT:
             au_ask_account(join_path(lists_dir, acc_name[acc_sel] + ".m3u"));
         end
@@ -1545,6 +1550,10 @@ begin
         case KB_ASET: host_setting_set(ad_st_name[aset_idx], kb_text); addon_settings_menu(aset_idx); end
         case KB_AUTH_SERVER:
             au_server = kb_text;
+            if (au_ask_name == "")
+                au_ask_name = safe_name(au_server);
+                au_ask_file = join_path(lists_dir, au_ask_name + ".m3u");
+            end
             kb_open(tr("k_auth_user"), au_test_val("MP_AUTH_USER", au_user), KB_AUTH_USER);
         end
         case KB_AUTH_USER:

@@ -146,6 +146,7 @@ xt_series=シリーズ
 mt_xtream=Xtream
 t_xt_err=パネルに接続できませんでした
 m_acc_open=開く
+m_acc_new=Xtream のアカウントを追加...
 m_addon_settings=アドオンの設定
 m_addon_noset=このアドオンには設定がありません
 mt_addon_settings=設定

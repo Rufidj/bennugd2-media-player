@@ -11,9 +11,9 @@ global
     int    xt_job = 0;                // 1 = pedir categorías, 2 = pedir canales, 3 = pedir episodios
     int    xt_screen = 0;             // 1 = la pantalla de Xtream está abierta
     string xt_cat_id[600], xt_cat_name[600]; int xt_cat_n = 0;
-    string xt_str_id[900], xt_str_name[900], xt_str_icon[900], xt_str_ext[900]; int xt_str_n = 0;
+    string xt_str_id[900], xt_str_name[900], xt_str_icon[900], xt_str_ext[900], xt_str_src[900]; int xt_str_n = 0;
     string xt_ser_id[400], xt_ser_name[400], xt_ser_icon[400]; int xt_ser_n = 0;
-    string xt_epi_id[600], xt_epi_name[600]; int xt_epi_n = 0;
+    string xt_epi_id[600], xt_epi_name[600], xt_epi_src[600]; int xt_epi_n = 0;
     string xt_body = "";              // última respuesta de la API
     string xt_cat_sel = "", xt_ser_sel = "";
     int    xt_err = 0;                // último error de la API
@@ -52,6 +52,7 @@ end
 
 // --------------------------------------------------------------------------------------------- JSON
 // el valor de un campo de un objeto JSON: {"name":"x"} -> "x"
+// los valores sin comillas (numeros, true/false) tambien se devuelven como texto
 function string xt_item(string obj, string field)
 private int p, q; string key;
 begin
@@ -62,7 +63,11 @@ begin
     while (p < len(obj) && substr(obj, p, 1) != ":") p++; end
     p++;
     while (p < len(obj) && (substr(obj, p, 1) == " " || substr(obj, p, 1) == chr(9) || substr(obj, p, 1) == chr(10) || substr(obj, p, 1) == chr(13))) p++; end
-    if (substr(obj, p, 1) != chr(34)) return ""; end
+    if (substr(obj, p, 1) != chr(34))
+        q = p;                                   // numero o booleano: hasta la coma o la llave
+        while (q < len(obj) && substr(obj, q, 1) != "," && substr(obj, q, 1) != "}" && substr(obj, q, 1) != "]") q++; end
+        return substr(obj, p, q - p);
+    end
     p++; q = p;
     while (q < len(obj) && substr(obj, q, 1) != chr(34)) q++; end
     return substr(obj, p, q - p);
@@ -82,7 +87,7 @@ end
 // --------------------------------------------------------------------------------------------- carga
 // what: 0 = categorías, 1 = canales, 2 = series, 3 = episodios
 function int xt_load(int what)
-private int pos, n; string obj, cid, nm, ic, ex;
+private int pos, n; string obj, cid, nm, ic, ex, sc;
 begin
     xt_cat_n = 0; xt_str_n = 0; xt_ser_n = 0; xt_epi_n = 0;
     if (what == 0)
@@ -120,10 +125,11 @@ begin
             obj = xt_next_obj(xt_body, pos);
             if (obj == "") break; end
             pos = find(xt_body, "}", pos) + 1;
-            cid = xt_item(obj, "stream_id"); nm = xt_item(obj, "name"); ic = xt_item(obj, "stream_icon"); ex = xt_item(obj, "container_extension");
+            cid = xt_item(obj, "stream_id"); nm = xt_item(obj, "name"); ic = xt_item(obj, "stream_icon"); ex = xt_item(obj, "container_extension"); sc = xt_item(obj, "direct_source");
             if (cid != "" && nm != "")
                 xt_str_id[xt_str_n] = cid; xt_str_name[xt_str_n] = nm; xt_str_icon[xt_str_n] = ic;
-                xt_str_ext[xt_str_n] = (ex != "") ? ex : (xt_type == 0 ? "ts" : "mp4"); xt_str_n++; n++;
+                xt_str_ext[xt_str_n] = (ex != "") ? ex : (xt_type == 0 ? "ts" : "mp4");
+                xt_str_src[xt_str_n] = sc; xt_str_n++; n++;
             end
         end
         return 1;
@@ -138,11 +144,11 @@ begin
             obj = xt_next_obj(xt_body, pos);
             if (obj == "") break; end
             pos = find(xt_body, "}", pos) + 1;
-            cid = xt_item(obj, "id"); nm = xt_item(obj, "title");
+            cid = xt_item(obj, "id"); nm = xt_item(obj, "title"); sc = xt_item(obj, "direct_source");
             if (cid == "") cid = xt_item(obj, "episode_id"); end
             if (nm == "") nm = xt_item(obj, "episode_num"); end
             if (cid != "" && nm != "")
-                xt_epi_id[xt_epi_n] = cid; xt_epi_name[xt_epi_n] = nm; xt_epi_n++; n++;
+                xt_epi_id[xt_epi_n] = cid; xt_epi_name[xt_epi_n] = nm; xt_epi_src[xt_epi_n] = sc; xt_epi_n++; n++;
             end
         end
         return 1;
@@ -197,8 +203,14 @@ end
 
 // la URL de reproducción de un canal
 function string xt_stream_url(int i)
+private int k;
 begin
-    if (xt_level == 3) return xt_server + "/series/" + xt_user + "/" + xt_pass + "/" + xt_ser_sel + "/" + entry_url[i] + ".ts"; end
+    k = i - 1;
+    if (xt_level == 3)
+        if (k >= 0 && k < xt_epi_n && xt_epi_src[k] != "") return xt_epi_src[k]; end
+        return xt_server + "/series/" + xt_user + "/" + xt_pass + "/" + xt_ser_sel + "/" + entry_url[i] + ".ts";
+    end
+    if (k >= 0 && k < xt_str_n && xt_str_src[k] != "") return xt_str_src[k]; end
     if (xt_type == 1) return xt_server + "/movie/" + xt_user + "/" + xt_pass + "/" + entry_url[i] + "." + xt_str_ext[sel - 1]; end
     return xt_server + "/live/" + xt_user + "/" + xt_pass + "/" + entry_url[i] + ".ts";
 end

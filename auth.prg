@@ -259,6 +259,7 @@ begin
     else
         for (i = 0; i < acc_n; i++) menu_add(cut_text(utf8_to_latin1(acc_name[i]), 26), MA_ACC_PICK + i); end
     end
+    menu_add(tr("m_acc_new"), MA_ACC_NEW);
     menu_add(tr("m_back"), MA_CANCEL);
     menu_show(tr("mt_accounts"));
 end

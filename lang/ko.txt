@@ -146,6 +146,7 @@ xt_series=시리즈
 mt_xtream=Xtream
 t_xt_err=패널에 연결할 수 없습니다
 m_acc_open=열기
+m_acc_new=새 Xtream 계정...
 m_addon_settings=애드온 설정
 m_addon_noset=이 애드온에는 설정이 없습니다
 mt_addon_settings=설정

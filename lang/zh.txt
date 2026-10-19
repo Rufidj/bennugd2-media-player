@@ -146,6 +146,7 @@ xt_series=剧集
 mt_xtream=Xtream
 t_xt_err=无法连接面板
 m_acc_open=打开
+m_acc_new=新建 Xtream 账户...
 m_addon_settings=附加组件设置
 m_addon_noset=此附加组件没有设置
 mt_addon_settings=设置

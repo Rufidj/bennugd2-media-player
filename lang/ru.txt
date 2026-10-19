@@ -146,6 +146,7 @@ xt_series=Сериалы
 mt_xtream=Xtream
 t_xt_err=Не удалось связаться с панелью
 m_acc_open=Открыть
+m_acc_new=Новая учётная запись Xtream...
 m_addon_settings=Настройки дополнения
 m_addon_noset=У этого дополнения нет настроек
 mt_addon_settings=Настройки
