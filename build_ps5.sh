@@ -15,19 +15,31 @@ LD_LIBRARY_PATH="$BIN" "$BIN/bgdc" mediaplayer.prg | grep -i "error" && exit 1 |
 STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/res" "$STAGE/videos"
 mkdir -p "$STAGE/lang"
-cp res/*.png res/fonttest.txt "$STAGE/res/"
+cp res/*.png "$STAGE/res/"
 cp -r res/fonts "$STAGE/res/"
 cp lang/*.txt "$STAGE/lang/"
-cp lists/*.m3u samples/* "$STAGE/videos/"
+cp lists/*.m3u "$STAGE/videos/"
+if [ -d samples ]; then cp samples/* "$STAGE/videos/" 2>/dev/null || true; fi
 mkdir -p "$STAGE/addons"
 for a in plex radio-browser somafm internet-archive peertube youtube; do cp -r "addons/$a" "$STAGE/addons/"; done  # incluye logo.png
 cp ADDONS.md ADDONS.es.md "$STAGE/addons/" 2>/dev/null || true
+
+# sce_sys: el empaquetador pide los dos fondos de presentacion (3840x2160 BC7 DX10, sin mipmaps)
+# o ninguno, asi que se quitan cuando falta alguno o no tienen el tamano que espera el validador
+PIC_BYTES=8294548   # 148 de cabecera + (3840/4)*(2160/4)*16 de BC7
+mkdir -p "$STAGE/sce_sys"
+cp title/sce_sys/* "$STAGE/sce_sys/"
+if [ "$(stat -c%s "$STAGE/sce_sys/pic0.dds" 2>/dev/null)" != "$PIC_BYTES" ] || \
+   [ "$(stat -c%s "$STAGE/sce_sys/pic1.dds" 2>/dev/null)" != "$PIC_BYTES" ]; then
+    rm -f "$STAGE/sce_sys/pic0.dds" "$STAGE/sce_sys/pic1.dds"
+    echo "aviso: se genera el titulo sin fondos de presentacion (hacen falta pic0.dds y pic1.dds en 3840x2160 BC7 DX10)"
+fi
 
 # 3. motor + eboot + carpeta del titulo
 cd "$ENGINE"
 PS5_TITLE_ID=PPSA00090 \
 PS5_TITLE_NAME="BennuGD2 Media Player" \
-PS5_SCE_SYS="$HERE/title/sce_sys" \
+PS5_SCE_SYS="$STAGE/sce_sys" \
 PS5_DCB="$HERE/mediaplayer.dcb" \
 PS5_ASSETS="$STAGE" \
 PS5_OUT="${OUT:-$HOME/BennuGD2 Media Player/PPSA00090}" \
