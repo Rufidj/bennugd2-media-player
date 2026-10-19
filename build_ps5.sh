@@ -26,10 +26,15 @@ cp ADDONS.md ADDONS.es.md "$STAGE/addons/" 2>/dev/null || true
 
 # sce_sys: el empaquetador pide los dos fondos de presentacion (3840x2160 BC7 DX10, sin mipmaps)
 # o ninguno, asi que se quitan cuando falta alguno o no tienen el tamano que espera el validador
+# PS5_NO_PICS=1 los quita siempre: el Convert de ps5upload copia los fondos al contenido del pkg pero
+# no rehace la tabla de hashes, y entonces la consola instala el pkg pero no lo abre.
 PIC_BYTES=8294548   # 148 de cabecera + (3840/4)*(2160/4)*16 de BC7
 mkdir -p "$STAGE/sce_sys"
 cp title/sce_sys/* "$STAGE/sce_sys/"
-if [ "$(stat -c%s "$STAGE/sce_sys/pic0.dds" 2>/dev/null)" != "$PIC_BYTES" ] || \
+if [ "${PS5_NO_PICS:-0}" = "1" ]; then
+    rm -f "$STAGE/sce_sys/pic0.dds" "$STAGE/sce_sys/pic1.dds"
+    echo "titulo sin fondos de presentacion (PS5_NO_PICS=1)"
+elif [ "$(stat -c%s "$STAGE/sce_sys/pic0.dds" 2>/dev/null)" != "$PIC_BYTES" ] || \
    [ "$(stat -c%s "$STAGE/sce_sys/pic1.dds" 2>/dev/null)" != "$PIC_BYTES" ]; then
     rm -f "$STAGE/sce_sys/pic0.dds" "$STAGE/sce_sys/pic1.dds"
     echo "aviso: se genera el titulo sin fondos de presentacion (hacen falta pic0.dds y pic1.dds en 3840x2160 BC7 DX10)"
