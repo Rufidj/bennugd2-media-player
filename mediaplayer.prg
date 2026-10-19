@@ -2070,7 +2070,7 @@ begin
             if (grid_mode != grid_last)
                 grid_last = grid_mode;
                 for (i = 0; i < ROWS; i++)
-                    if (txt_row[i] > 0) write_delete(txt_row[i]); end
+                    if (txt_row[i] > 0) write_delete(txt_row[i]); txt_cache[txt_row[i]] = 0; end
                     if (grid_mode == 1)
                         txt_row[i] = write_var(fnt_t, ur(grid_cx(i) - tw(row_label[i]) / 2), ur(grid_cy(i) + 30), -20, 3, row_label[i]);
                     else
