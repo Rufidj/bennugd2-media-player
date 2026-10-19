@@ -143,3 +143,33 @@ Mira `addons/demo/main.addon` en el código fuente: usa `ask`, `message`, `wait`
 ## Depuración
 
 Los errores muestran el archivo y la línea. Usa `log "x vale {x}"` para imprimir valores en el log del reproductor.
+
+## Listas que piden cuenta
+
+Una lista de TV/radio puede pedir al usuario un usuario y una contraseña (las de pago). El reproductor los pregunta al
+instalarla, los guarda junto a la lista (en `<almacen>/listas/<lista>.auth`) y los usa para bajarla y para reproducir sus
+canales.
+
+En el catálogo de la Tienda (`addons/lists.txt`) se añade un cuarto campo con el tipo de cuenta:
+
+```
+nombre | direccion | descripcion | mode=basic
+nombre | direccion | descripcion | mode=form;login=https://servidor/login;t=token
+```
+
+| Campo | Significado |
+|---|---|
+| `mode=basic` | El usuario y la clave se mandan en la cabecera `Authorization: Basic`. |
+| `mode=form` | El reproductor hace un `POST` a `login=` y lee el token de la respuesta JSON. |
+| `login=` | Dirección del endpoint de login (solo para `form`). |
+| `u=`, `p=` | Nombres de los campos de usuario y clave (por defecto `username` y `password`). |
+| `t=` | Nombre del campo JSON con el token (por defecto `token`). |
+| `h=` | Cabecera con la que se manda el token (por defecto `Authorization`). |
+| `json=1` | El login se manda como JSON en vez de como formulario. |
+| `query=1` | El token se añade a la URL como parámetro en vez de mandarse como cabecera. |
+
+Nunca escribas el usuario ni la clave en el catálogo: son de quien instala la lista y el reproductor los pregunta. Las
+credenciales se guardan en texto plano en el almacén del reproductor (`/data/mediaplayer` en la PS5).
+
+Las mismas cuentas se pueden poner a mano en cualquier lista (opciones de una lista: "Cuenta de esta lista") y se listan
+en *Ajustes > Cuentas*.

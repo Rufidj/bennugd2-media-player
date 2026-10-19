@@ -49,9 +49,10 @@ const
     STORE_URL = "https://raw.githubusercontent.com/Rufidj/bennugd2-media-player/main/addons";
     M_NONE = 0; M_MENU = 1; M_KB = 2; M_CREDITS = 3;                             // pantallas modales (menu / teclado)
     KB_NEWLIST = 1; KB_RENAME_LIST = 2; KB_URL = 3; KB_NEW_TITLE = 4; KB_ENTRY_TITLE = 5; KB_LOGO = 6; KB_ADDON = 7; KB_ASET = 8;
+    KB_AUTH_USER = 9; KB_AUTH_PASS = 10;
     MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
     MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_ASET = 300; MA_PICK = 100;
-    MA_STORE_REFRESH = 20;
+    MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
 end
 
 global
@@ -179,6 +180,25 @@ declare function string fit_text(string t, int maxw) end
 declare function string tail_fit(string t, int maxw) end
 declare function string utf8_chop(string t) end
 declare function string store_state(int i) end
+// cuentas de las listas (ver auth.prg)
+declare function string au_sidecar(string listfile) end
+declare function string au_spec_get(string spec, string key) end
+declare function string au_esc(string s) end
+declare function string au_apply(string url) end
+declare function string au_headers() end
+declare function int au_load(string listfile) end
+declare function int au_store(string listfile) end
+declare function int au_clear(string listfile) end
+declare function int au_login() end
+declare function int au_finish() end
+declare function int au_set_spec(string spec) end
+declare function string au_json_str(string body, string field) end
+declare function string au_ask_value(string spec, string key, string def) end
+declare function int au_ask_account(string listfile) end
+declare function int au_reset() end
+declare function string au_test_val(string env, string def) end
+declare function int open_accounts_menu() end
+declare function int open_account_menu(int i) end
 
 // Entrada guiada para pruebas: MP_SCRIPT="fotograma:accion,fotograma:accion,..." (up down left right ok back subs pause seekb seekf mute audio)
 function load_script()
@@ -211,6 +231,7 @@ begin
 end
 
 include "addon.prg";
+include "auth.prg";
 include "addon_ui.prg";
 
 process main()
@@ -487,6 +508,7 @@ private
 begin
     n_entries = 0; addon_mode = 0; store_mode = 0;
     sel = 0; top_row = 0; dir_ver++;
+    au_reset();                                           // fuera de una lista no hay ninguna cuenta activa
     if (parent_of(cur_dir) != cur_dir)
         entries[0] = ".."; entry_dir[0] = 1; n_entries = 1;
     end
@@ -531,6 +553,7 @@ begin
     n_entries = 0; sel = 0; top_row = 0; dir_ver++;
     entries[0] = ".."; entry_dir[0] = K_DIR; entry_url[0] = ""; entry_size[0] = 0; entry_logo[0] = ""; n_entries = 1;
     wl_load(cur_list);
+    au_load(cur_list);
     for (i = 0; i < wl_n && n_entries < MAX_ENTRIES; i++)
         entries[n_entries] = wl_t[i]; entry_dir[n_entries] = K_URL; entry_url[n_entries] = wl_u[i]; entry_size[n_entries] = 0; entry_logo[n_entries] = wl_l[i];
         n_entries++;
@@ -711,7 +734,9 @@ begin
     if (pv_phase == 0 && pv_rest == (entry_dir[sel] == K_URL || entry_dir[sel] == K_AFOLDER ? 45 : 25) && sel >= 0 && sel < n_entries && (entry_dir[sel] == K_FILE || entry_dir[sel] == K_URL || ((entry_dir[sel] == K_AFOLDER || entry_dir[sel] == K_ADDON) && entry_logo[sel] != "")) && entries[sel] != "..")
         video_use_hw(0);
         // emisoras con logo: se abre la imagen del logo; el resto de enlaces: el propio video por red (puede tardar un poco)
-        if ((entry_dir[sel] == K_URL || entry_dir[sel] == K_AFOLDER || entry_dir[sel] == K_ADDON) && entry_logo[sel] != "") pv_h = video_open(entry_logo[sel]); else pv_h = video_open(entry_path(sel)); end
+        if ((entry_dir[sel] == K_URL || entry_dir[sel] == K_AFOLDER || entry_dir[sel] == K_ADDON) && entry_logo[sel] != "") pv_h = video_open(entry_logo[sel]);
+        elseif (au_headers() != "") pv_h = video_open_h(entry_path(sel), au_headers());
+        else pv_h = video_open(entry_path(sel)); end
         video_use_hw(1);
         pv_phase = 3;                                   // 3 = no se pudo abrir
         if (pv_h)
@@ -782,7 +807,7 @@ begin
     pending_title = entries[i]; pending_logo = entry_logo[i]; hls_title = entries[i];
     if (entry_dir[i] == K_URL)
         s_toast = tr("s_connecting"); toast_t = 600;
-        load_path = entry_url[i]; load_wait = 3;
+        load_path = au_apply(entry_url[i]); load_wait = 3;
         if (addon_mode > 0 && entry_aargs[i] != "") load_path = addon_signed_playlist(entry_url[i], entry_aargs[i]); if (load_path == "") load_wait = 0; s_toast = ""; toast_t = 0; end end
     else
         start_video(entry_path(i));
@@ -1071,6 +1096,7 @@ begin
     menu_clear();
     menu_add(tr("m_lang") + tr("lang_name"), MA_LANG);
     menu_add(tr("m_skin") + (skin ? tr("skin_ps") : tr("skin_classic")), MA_SKIN);
+    menu_add(tr("m_accounts"), MA_ACCOUNTS);
     menu_add(tr("m_about"), MA_ABOUT);
     menu_add(tr("m_back"), MA_CANCEL);
     menu_show(tr("mt_settings"));
@@ -1242,10 +1268,12 @@ begin
             menu_add(tr("m_remove"), MA_REMOVE);
         end
         menu_add(tr("m_add_url"), MA_ADD_URL);
+        menu_add(tr("m_list_account"), MA_LIST_ACCOUNT);
     else
         if (sel >= 0 && sel < n_entries && entry_dir[sel] == K_LIST)
             menu_add(tr("m_rename_list"), MA_RENAME_LIST);
             menu_add(tr("m_delete_list"), MA_DELETE_LIST);
+            menu_add(tr("m_list_account"), MA_LIST_ACCOUNT);
         elseif (sel >= 0 && sel < n_entries && entry_dir[sel] == K_FILE)
             menu_add(tr("m_add_to"), MA_ADD_TO);
         end
@@ -1318,11 +1346,26 @@ begin
         end
         case MA_UP:   wl_load(cur_list); op_idx = sel - 1; list_swap(op_idx, op_idx - 1); wl_save(cur_list); read_list(); reselect(op_idx > 0 ? op_idx : 1); end
         case MA_DOWN: wl_load(cur_list); op_idx = sel - 1; list_swap(op_idx, op_idx + 1); wl_save(cur_list); read_list(); reselect(op_idx + 1 < wl_n ? op_idx + 2 : op_idx + 1); end
+        case MA_LIST_ACCOUNT:
+            if (cur_list != "") au_ask_account(cur_list);
+            elseif (sel >= 0 && sel < n_entries && entry_dir[sel] == K_LIST) au_ask_account(join_path(cur_dir, entries[sel]));
+            end
+        end
+        case MA_ACCOUNTS: open_accounts_menu(); end
+        case MA_ACC_EDIT:
+            au_ask_account(join_path(lists_dir, acc_name[acc_sel] + ".m3u"));
+        end
+        case MA_ACC_DEL:
+            au_clear(join_path(lists_dir, acc_name[acc_sel] + ".m3u"));
+            toast(tr("t_auth_del"));
+            open_accounts_menu();
+        end
         default:
             if (act >= MA_ASET && act < MA_ASET + 24) addon_edit_setting(act - MA_ASET); end
             if (act >= MA_PICK && act < MA_PICK + 9)
                 if (add_to_list(join_path(lists_dir, pick_name[act - MA_PICK]), op_title, op_url, op_logo)) toast(tr("t_added")); end
             end
+            if (act >= MA_ACC_PICK && act < MA_ACC_PICK + 8) open_account_menu(act - MA_ACC_PICK); end
         end
     end
 end
@@ -1464,6 +1507,19 @@ begin
         end
         case KB_ADDON: ask_ok = 1; ask_text = kb_text; end
         case KB_ASET: host_setting_set(ad_st_name[aset_idx], kb_text); addon_settings_menu(aset_idx); end
+        case KB_AUTH_USER:
+            au_user = kb_text; kb_secret_next = 1;
+            kb_open(tr("k_auth_pass"), au_test_val("MP_AUTH_PASS", ""), KB_AUTH_PASS);
+        end
+        case KB_AUTH_PASS:
+            au_pass = kb_text;
+            if (au_finish() == -1)
+                show_error(tr("mt_account"), tr("t_auth_login"));
+                au_ask_next = 0;
+            else
+                if (au_ask_next == 1) store_install(au_ask_row); else toast(tr("t_auth_saved")); end
+            end
+        end
         case KB_LOGO:
             wl_l[op_idx] = (kb_text == "https://") ? "" : kb_text; if (wl_save(cur_list)) read_list(); reselect(op_idx + 1); toast(tr("t_logo_updated")); end
         end
@@ -1610,7 +1666,7 @@ begin
     http_trace("start_video: video_close");
     if (vh) video_close(vh); vh = 0; end
     http_trace("start_video: video_open");
-    vh = video_open(path);
+    if (au_headers() != "") vh = video_open_h(path, au_headers()); else vh = video_open(path); end
     http_trace("start_video: abierto " + vh);
     if (!vh)
         toast(tr("t_open_fail"));

@@ -25,6 +25,7 @@ global
     string entry_siver[MAX_ENTRIES];    // versión instalada ("" = no está instalado)
     int    entry_skind[MAX_ENTRIES];    // 1 = lista de TV/radio de la tienda (0 = addon)
     string entry_surl[MAX_ENTRIES];     // dirección de origen de una lista
+    string entry_sauth[MAX_ENTRIES];    // cuenta que pide la lista ("mode=basic" o "mode=form;login=...")
     int    store_cached;                // 1 = la lista se sacó de la copia guardada (sin conexión)
     int    store_net_err;               // estado HTTP del último intento (para el mensaje de error)
     // instalación en curso (una descarga por fotograma, para que la pantalla siga viva)
@@ -707,6 +708,7 @@ begin
                 entry_size[n_entries] = 0; entry_logo[n_entries] = ""; entry_info[n_entries] = desc;
                 entry_sver[n_entries] = ""; entry_sfiles[n_entries] = ""; entry_siver[n_entries] = store_list_have(fname);
                 entry_skind[n_entries] = 1; entry_surl[n_entries] = url;
+                entry_sauth[n_entries] = field_of(line, "|", 4);
                 n_entries++;
             end
         end
@@ -770,6 +772,17 @@ function store_install(int i)
 begin
     if (store_dir == "") toast(tr("t_no_store")); return 0; end
     if (i <= 0 || i >= n_entries || entry_dir[i] != K_SITEM) return 0; end
+    // una lista que pide cuenta: antes de bajarla se pregunta el usuario y la clave (si no están guardados)
+    if (entry_skind[i] == 1 && entry_sauth[i] != "")
+        au_ask_file = store_list_path(entry_url[i]);
+        if (!au_load(au_ask_file))
+            au_ask_spec = entry_sauth[i];
+            au_ask_row = i; au_ask_next = 1;
+            au_set_spec(au_ask_spec);
+            kb_open(tr("k_auth_user"), au_test_val("MP_AUTH_USER", ""), KB_AUTH_USER);
+            return 0;
+        end
+    end
     store_job = 1; store_ji = 0; store_jerr = 0; store_jrow = i;
     store_jid = entry_url[i]; store_jname = entries[i]; store_jkind = entry_skind[i];
     store_jurl = entry_surl[i];
@@ -792,8 +805,9 @@ begin
     if (store_jkind == 1)
         // lista de TV/radio: se baja de su dirección de origen directamente a "Mis listas"
         mkdir(store_jdir);
-        st = http_fetch(store_jurl, "", "GET", "");
         dest = join_path(store_jdir, store_jfile);
+        au_load(dest);                                        // las credenciales de esta lista, si tiene
+        st = http_fetch(au_apply(store_jurl), au_headers(), "GET", "");
         if (st != 200)
             store_jerr = st > 0 ? st : 1;
         elseif (!http_save(dest))

@@ -84,6 +84,11 @@ Besides the addons, the Store offers **free TV and radio lists** (TDTChannels, i
 played at once, and pressing ✕ again downloads it again to refresh it. `tools/check_store_lists.py` checks that file
 (and that every source still answers).
 
+A list can also ask for an **account**: with a fourth field in the catalogue (`mode=basic` or `mode=form;login=...`) the
+player asks for the user and the password when the list is installed, keeps them next to the list (`<store>/listas/<list>.auth`)
+and uses them to download it and to play its channels. Any list can have an account too (options of a list: *Account for this
+list*), and they are all listed in *Settings > Accounts*. The credentials are kept in plain text in the player's storage folder.
+
 Addons go to the first folder the player can really write to: `/data/mediaplayer` on the PS5 and
 `mediaplayer_data` next to the player on the PC (it is created the first time). `MP_STORE=/folder` forces another one.
 
@@ -104,6 +109,7 @@ Plex, SomaFM, Radio Browser, Internet Archive, PeerTube and YouTube are trademar
 
 - Descarga el `.pkg` para PS5 o el `.tar.gz` para Linux en *Releases*.
 - La **Tienda** (menú principal) instala y actualiza los addons y descarga listas de TV/radio gratis (TDTChannels, iptv-org...) a "Mis listas": X instala, ○ vuelve y cuadrado abre el menú (actualizar la lista).
+- Las listas de pago se pueden usar: al instalarlas el reproductor pide el usuario y la contraseña, los guarda junto a la lista (`<almacen>/listas/<lista>.auth`) y los usa para bajarla y reproducir sus canales. También se pueden poner a mano (opciones de una lista: *Cuenta de esta lista*) y se ven en *Ajustes > Cuentas*. Ojo: se guardan en texto plano en el almacén del reproductor.
 - Para compilar desde el código hace falta BennuGD2 con los cambios de `libmod_video` (parche en `engine/`).
 - Tutorial para crear addons en español: [ADDONS.es.md](ADDONS.es.md).
 - Los títulos de Plex con DRM no se pueden reproducir (el addon los oculta).

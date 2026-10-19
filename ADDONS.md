@@ -171,3 +171,32 @@ python3 tools/check_store_lists.py && git add addons/lists.txt && git commit -m 
 
 A list is downloaded whole and refuses to install anything that does not look like an M3U; the player shows up to 2047 entries
 of each list, so the checker warns about longer ones.
+
+## Lists that ask for an account
+
+A list can ask the user for a user name and a password. The player asks for them when the list is installed, keeps them next to
+the list (in `<store>/lists/<list>.auth`) and uses them to download the list and to play its channels.
+
+Add a fourth field to the line of the catalogue (`addons/lists.txt`) with the kind of account:
+
+```
+name | url | description | mode=basic
+name | url | description | mode=form;login=https://server/login;t=token
+```
+
+| Field | Meaning |
+|---|---|
+| `mode=basic` | The user and the password are sent as an `Authorization: Basic` header. |
+| `mode=form` | The player does a `POST` to `login=` and reads the token from the JSON answer. |
+| `login=` | Address of the login endpoint (only for `form`). |
+| `u=`, `p=` | Names of the user and password fields (default `username` and `password`). |
+| `t=` | Name of the JSON field with the token (default `token`). |
+| `h=` | Header used to send the token (default `Authorization`). |
+| `json=1` | The login is sent as JSON instead of a form. |
+| `query=1` | The token is added to the URL as a parameter instead of being sent as a header. |
+
+Never write the user or the password in the catalogue: they belong to the person who installs the list, and the player asks for
+them. The credentials are stored in plain text in the player's storage folder (`/data/mediaplayer` on the PS5).
+
+The same accounts can be set by hand for any list (options of a list: "Account for this list") and are listed in
+*Settings > Accounts*.

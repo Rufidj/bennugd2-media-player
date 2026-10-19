@@ -22,7 +22,7 @@ MAX_BYTES = 8 << 20         # libmod_video: no baja mas de 8 MB de una vez
 
 
 def rows(path):
-    """lineas utiles de lists.txt: (fichero, direccion, descripcion)"""
+    """lineas utiles de lists.txt: (fichero, direccion, descripcion, cuenta, linea)"""
     out = []
     with open(path, encoding="utf-8") as f:
         for n, line in enumerate(f, 1):
@@ -30,10 +30,14 @@ def rows(path):
             if not line or line.startswith("#"):
                 continue
             parts = [p.strip() for p in line.split("|")]
-            if len(parts) != 3 or not parts[0] or not parts[1]:
+            if len(parts) not in (3, 4) or not parts[0] or not parts[1]:
                 print(f"{path}:{n}: linea mal formada: {line}")
                 continue
-            out.append((parts[0], parts[1], parts[2], n))
+            account = parts[3] if len(parts) > 3 else ""
+            if account and "mode=" not in account:
+                print(f"{path}:{n}: la cuenta deberia empezar por 'mode=basic' o 'mode=form': {account}")
+                continue
+            out.append((parts[0], parts[1], parts[2], account, n))
     return out
 
 
@@ -82,7 +86,7 @@ def main():
     rows_ = rows(LISTS)
     print(f"{LISTS}: {len(rows_)} listas")
     bad = 0
-    for name, url, desc, line in rows_:
+    for name, url, desc, account, line in rows_:
         if not check(name, url, line):
             bad += 1
         elif not desc:
