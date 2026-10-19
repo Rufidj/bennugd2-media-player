@@ -16,6 +16,17 @@ global
     string wrap_l[8]; int wrap_n;
     int    addons_ok;
     int    entry_akind[MAX_ENTRIES];    // 1 video, 2 audio, 3 radio (elementos de un addon)
+    // ---- tienda: una entrada por addon del repositorio
+    int    store_mode;                  // 1 = la tienda está en pantalla
+    int    store_load;                  // 1 = hay que pedir la lista (en el fotograma siguiente)
+    string store_base = "";             // raíz de la tienda (vacío = la del repositorio oficial)
+    string entry_sver[MAX_ENTRIES];     // versión que hay en la tienda
+    string entry_sfiles[MAX_ENTRIES];   // ficheros que hay que descargar ("main.addon,logo.png")
+    string entry_siver[MAX_ENTRIES];    // versión instalada ("" = no está instalado)
+    // instalación en curso (una descarga por fotograma, para que la pantalla siga viva)
+    int    store_job;                   // 1 = instalando
+    int    store_ji, store_jn, store_jrow, store_jerr; string store_jid, store_jdir, store_jfiles, store_jname;
+    string store_seen[64]; int store_seen_n;   // carpetas ya listadas (el addon del usuario manda sobre el que trae el reproductor)
 end
 
 declare function string addon_root_user() end
@@ -164,6 +175,18 @@ begin
 end
 
 // ---------------------------------------------------------------- lista de addons instalados
+// El addon que instala el usuario manda sobre el que trae el reproductor: si la carpeta ya se ha
+// visto (mismo nombre) no se lista otra vez, así actualizar un addon del reproductor no lo duplica.
+function addon_seen(string folder)
+private int i;
+begin
+    for (i = 0; i < store_seen_n; i++)
+        if (store_seen[i] == folder) return 1; end
+    end
+    if (store_seen_n < 64) store_seen[store_seen_n] = folder; store_seen_n++; end
+    return 0;
+end
+
 function addon_scan_root(string root)
 private int dh, i, j; string nm, p;
 begin
@@ -174,7 +197,7 @@ begin
     while (nm != "" && n_entries < MAX_ENTRIES)
         if (nm != "." && nm != ".." && substr(nm, 0, 1) != ".")
             p = join_path(root, nm);
-            if (fexists(join_path(p, "main.addon")))
+            if (fexists(join_path(p, "main.addon")) && !addon_seen(nm))
                 if (ad_peek_info(join_path(p, "main.addon")))
                     entries[n_entries] = ad_i_name; entry_dir[n_entries] = K_ADDON; entry_url[n_entries] = p; entry_size[n_entries] = 0; entry_logo[n_entries] = fexists(join_path(p, "logo.png")) ? join_path(p, "logo.png") : "";
                     entry_aargs[n_entries] = ""; entry_info[n_entries] = ad_i_desc + (ad_i_author != "" ? "  (" + ad_i_author + ", v" + ad_i_ver + ")" : "");
@@ -190,11 +213,12 @@ end
 function read_addons()
 private int i, j, t_d; string t_s, t_u, t_i, t_l;
 begin
-    addon_mode = 1;
+    addon_mode = 1; store_mode = 0;
     n_entries = 0; sel = 0; top_row = 0; dir_ver++; cur_list = "";
     entries[0] = ".."; entry_dir[0] = K_DIR; entry_url[0] = ""; entry_size[0] = 0; entry_logo[0] = ""; entry_aargs[0] = ""; entry_info[0] = ""; n_entries = 1;
+    store_seen_n = 0;
+    addon_scan_root(addon_root_user());                // los que instala el usuario (tienda o FTP): mandan
     addon_scan_root(join_path(cd(), "addons"));        // los que trae el reproductor
-    addon_scan_root(addon_root_user());                // los que instala el usuario (por FTP)
     for (i = 2; i < n_entries; i++)                    // orden alfabético
         t_s = entries[i]; t_d = entry_dir[i]; t_u = entry_url[i]; t_i = entry_info[i]; t_l = entry_logo[i]; j = i - 1;
         while (j >= 1 && lcase(t_s) < lcase(entries[j]))
@@ -510,4 +534,194 @@ begin
     end
     show_error(tr("s_addons"), "could not save the stream list");
     return "";
+end
+
+// ==========================================================================================================
+//  tienda de addons
+//  La lista viene de un fichero de texto del repositorio oficial del reproductor; cada línea es un addon:
+//      id | nombre | version | ficheros | descripcion
+//  Al instalar se descarga <raiz>/<id>/<fichero> en <almacen>/addons/<id>/, que es una de las carpetas
+//  que mira la lista de addons: la del usuario tiene preferencia sobre la que trae el reproductor, así
+//  que instalar desde la tienda también sirve para actualizar un addon del reproductor.
+// ==========================================================================================================
+
+function string store_root()
+begin
+    if (store_base != "") return store_base; end
+    return STORE_URL;
+end
+
+// campo k (1..) de una cadena con campos separados por "sep" ("" si no llega); sin espacios de sobra
+function string field_of(string s, string sep, int k)
+private int i, p, a, b;
+begin
+    i = 0;
+    while (k > 1)
+        p = find(substr(s, i), sep);
+        if (p < 0) return ""; end
+        i += p + len(sep); k--;
+    end
+    p = find(substr(s, i), sep);
+    if (p >= 0) b = i + p; else b = len(s); end
+    a = i;
+    while (a < b && (substr(s, a, 1) == " " || substr(s, a, 1) == chr(9))) a++; end
+    while (b > a && (substr(s, b - 1, 1) == " " || substr(s, b - 1, 1) == chr(9) || substr(s, b - 1, 1) == chr(13))) b--; end
+    return substr(s, a, b - a);
+end
+
+function int field_n(string s, string sep)
+private int i, p, n;
+begin
+    if (s == "") return 0; end
+    n = 1; i = 0;
+    while (1)
+        p = find(substr(s, i), sep);
+        if (p < 0) break; end
+        n++; i += p + len(sep);
+    end
+    return n;
+end
+
+// versión instalada de un addon ("" si no está): primero la del usuario, después la del reproductor
+function string installed_ver(string aid)
+private string p;
+begin
+    if (aid == "") return ""; end
+    p = join_path(join_path(addon_root_user(), aid), "main.addon");
+    if (!fexists(p)) p = join_path(join_path(join_path(cd(), "addons"), aid), "main.addon"); end
+    if (!fexists(p)) return ""; end
+    if (!ad_peek_info(p) || ad_i_ver == "") return "?"; end
+    return ad_i_ver;
+end
+
+// texto del estado de un addon de la tienda
+function string store_state(int i)
+begin
+    if (entry_siver[i] == "") return tr("s_notinst"); end
+    if (entry_sver[i] == "" || entry_siver[i] == entry_sver[i]) return tr("s_installed") + " v" + entry_siver[i]; end
+    return tr("s_update") + ": v" + entry_siver[i] + " > v" + entry_sver[i];
+end
+
+function store_reset()
+begin
+    n_entries = 1;
+    entries[0] = ".."; entry_dir[0] = K_DIR; entry_url[0] = ""; entry_size[0] = 0; entry_logo[0] = ""; entry_info[0] = "";
+    entry_sver[0] = ""; entry_sfiles[0] = ""; entry_siver[0] = "";
+    sel = 0; top_row = 0; dir_ver++; lbl_ver = -1; pv_idx = -1;
+end
+
+// la tienda se abre al momento con "cargando..." y la lista se pide en el fotograma siguiente: así se ve
+// el mensaje mientras se espera a la red en vez de una pantalla congelada
+function store_open()
+begin
+    if (store_dir == "") toast(tr("t_no_store")); return 0; end
+    store_mode = 1; addon_mode = 0; cur_list = ""; store_load = 1;
+    store_reset(); n_entries = 0;
+    s_amsg = tr("s_loading"); addon_busy = 1;
+end
+
+function store_index_parse(string txt)
+private int p; string line, aid, nm, ver, files, desc;
+begin
+    store_reset();
+    while (txt != "" && n_entries < MAX_ENTRIES)
+        p = find(txt, chr(10));
+        if (p < 0) line = txt; txt = ""; else line = substr(txt, 0, p); txt = substr(txt, p + 1); end
+        if (len(line) > 0 && substr(line, len(line) - 1, 1) == chr(13)) line = substr(line, 0, len(line) - 1); end
+        if (len(line) > 0 && substr(line, 0, 1) != "#")
+            aid = field_of(line, "|", 1); nm = field_of(line, "|", 2); ver = field_of(line, "|", 3); files = field_of(line, "|", 4); desc = field_of(line, "|", 5);
+            if (aid != "" && nm != "")
+                entries[n_entries] = nm; entry_dir[n_entries] = K_SITEM; entry_url[n_entries] = aid;
+                entry_size[n_entries] = 0; entry_logo[n_entries] = ""; entry_info[n_entries] = desc;
+                entry_sver[n_entries] = ver; entry_sfiles[n_entries] = files; entry_siver[n_entries] = installed_ver(aid);
+                n_entries++;
+            end
+        end
+    end
+    lbl_ver = -1;
+end
+
+// pide la lista de la tienda; si no hay red se usa la última que se bajó
+function store_fetch()
+private int st, fh, n, cached; string txt, cache;
+begin
+    store_load = 0; cached = 0;
+    cache = join_path(join_path(store_dir, "addons_data"), "index.txt");
+    mkdir(join_path(store_dir, "addons_data"));
+    st = http_fetch(store_root() + "/index.txt", "", "GET", "");
+    if (st == 200 && http_length() > 0 && http_length() < HTTP_MAX)
+        n = http_read(&ad_buf[0], http_length());
+        txt = ad_buf_str(0, n);
+        http_write(cache, txt);                                  // copia para cuando no haya red
+    else
+        cached = 1;
+        txt = "";
+        if (fexists(cache))
+            fh = fopen(cache, O_READ);
+            while (!feof(fh)) txt += fgets(fh) + chr(10); end
+            fclose(fh);
+        end
+        if (txt == "")
+            addon_busy = 0; s_amsg = ""; n_entries = 1; dir_ver++;
+            show_error(tr("mt_store"), tr("t_store_net") + " (" + (st > 0 ? "error " + st : http_error()) + ")");
+            return 0;
+        end
+    end
+    store_index_parse(txt);
+    addon_busy = 0; s_amsg = "";
+    if (cached) toast(tr("t_store_off")); end
+    return 1;
+end
+
+// prepara la instalación del addon de la entrada i: se hace en el fotograma siguiente
+function store_install(int i)
+begin
+    if (store_dir == "") toast(tr("t_no_store")); return 0; end
+    if (i <= 0 || i >= n_entries || entry_dir[i] != K_SITEM) return 0; end
+    store_job = 1; store_ji = 0; store_jerr = 0; store_jrow = i;
+    store_jid = entry_url[i]; store_jname = entries[i];
+    store_jfiles = entry_sfiles[i];
+    if (store_jfiles == "") store_jfiles = "main.addon,logo.png"; end
+    store_jn = field_n(store_jfiles, ",");
+    store_jdir = join_path(addon_root_user(), store_jid);
+    s_amsg = tr("s_installing") + " " + store_jname; addon_busy = 1;
+end
+
+// una descarga por fotograma: la pantalla se repinta entre fichero y fichero y se ve el avance
+function store_step()
+private int st; string fn, url;
+begin
+    if (store_ji == 0) mkdir(store_jdir); end
+    if (store_jerr == 0)
+        store_ji++;
+        fn = field_of(store_jfiles, ",", store_ji);
+        if (fn != "")
+            url = store_root() + "/" + store_jid + "/" + fn;
+            st = http_fetch(url, "", "GET", "");
+            if (st != 200) store_jerr = st > 0 ? st : 1;
+            elseif (!http_save(join_path(store_jdir, fn))) store_jerr = -1; end
+        end
+        if (store_jerr == 0 && store_ji >= store_jn && !ad_peek_info(join_path(store_jdir, "main.addon"))) store_jerr = -2; end
+    end
+    if (store_jerr != 0 || store_ji >= store_jn)
+        store_job = 0; addon_busy = 0; s_amsg = "";
+        if (store_jerr != 0)
+            if (store_jerr == -2) fremove(join_path(store_jdir, "main.addon")); end   // el fichero bajado no es un addon
+            show_error(tr("mt_store"), tr("t_store_fail") + " " + store_jname + (store_jerr > 0 ? " (" + store_jerr + ")" : ""));
+        else
+            entry_siver[store_jrow] = installed_ver(store_jid);
+            dir_ver++; lbl_ver = -1; pv_idx = -1;
+            toast(tr("t_store_ok") + " " + store_jname);
+        end
+    else
+        s_amsg = tr("s_installing") + " " + store_jname + "  " + store_ji + "/" + store_jn;
+    end
+end
+
+function open_store_menu()
+begin
+    menu_clear();
+    menu_add(tr("m_refresh"), MA_STORE_REFRESH);
+    menu_add(tr("m_back"), MA_CANCEL);
+    menu_show(tr("mt_store"));
 end

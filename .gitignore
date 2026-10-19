@@ -2,3 +2,5 @@
 samples/
 mediaplayer_data/
 *.cfg
+
+.probe

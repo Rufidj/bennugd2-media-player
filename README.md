@@ -15,6 +15,7 @@ Interface drawn at 1080p with a PlayStation-style skin, designed to be driven wi
 - **Addons** written in a small English-like language, no compiler needed (see [ADDONS.md](ADDONS.md)):
   Plex (free ad-supported catalogue + your own server, login by code), Radio Browser, SomaFM, Internet Archive,
   PeerTube (federated video network), YouTube (popular videos, search of videos, channels and playlists)
+- **Store**: installs and updates the addons from the official repository in the app itself (no FTP, no PC)
 - Credits screen (Options → Settings → About)
 
 ## Download
@@ -66,6 +67,18 @@ Drop a folder with a `main.addon` file into `<store>/addons/` (on the PS5: `/dat
 Tokens and passwords are entered by each user in the settings, never written in the script.
 Tutorial: [ADDONS.md](ADDONS.md) · [ADDONS.es.md](ADDONS.es.md).
 
+An addon installed by hand (or downloaded from the **Store** in the main menu) is listed while the one that comes with the
+player keeps its own folder: if both have the same folder name, the one in `<store>/addons/` wins, so installing from the
+Store also updates the addons that ship with the player.
+
+## Store
+
+The **Store** row of the main menu downloads the addons from the [official repository](https://github.com/Rufidj/bennugd2-media-player)
+(`addons/index.txt` + each addon folder). ✕ installs or updates the selected addon, ○ goes back and □ opens a small menu
+(refresh the list). Every addon is shown with its state (`Installed`, `Update available`, `Not installed`). Addons are
+plain text files, so nothing is executed while downloading; the list is left cached to show it when there is no connection.
+Set `MP_STORE_URL` to another URL to use a mirror or a fork.
+
 ## Credits
 
 Created by Rufidj and Claude. Thanks to SplinterGU for BennuGD2, to Panreyes for the TTF implementation, and to FFmpeg, SDL, sdl-gpu,
@@ -81,6 +94,7 @@ Plex, SomaFM, Radio Browser, Internet Archive, PeerTube and YouTube are trademar
 ### Notas en español
 
 - Descarga el `.pkg` para PS5 o el `.tar.gz` para Linux en *Releases*.
+- La **Tienda** (menú principal) instala y actualiza los addons desde el repositorio oficial: X instala, ○ vuelve y cuadrado abre el menú (actualizar la lista).
 - Para compilar desde el código hace falta BennuGD2 con los cambios de `libmod_video` (parche en `engine/`).
 - Tutorial para crear addons en español: [ADDONS.es.md](ADDONS.es.md).
 - Los títulos de Plex con DRM no se pueden reproducir (el addon los oculta).

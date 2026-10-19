@@ -1,0 +1,8 @@
+# BennuGD2 Media Player - addons de la tienda
+# id | nombre | version | ficheros | descripcion
+internet-archive | Internet Archive | 1.0 | main.addon,logo.png | Free movies, cartoons, concerts and audio from the Internet Archive.
+peertube | PeerTube | 1.0 | main.addon,logo.png | Watch videos from the federated PeerTube network: trending, categories, channels and search.
+plex | Plex | 0.1 | main.addon,logo.png | Plex free catalogue (watch.plex.tv) and your own Plex Media Server.
+radio-browser | Radio Browser | 1.0 | main.addon,logo.png | Search thousands of internet radios by name, country or popularity.
+somafm | SomaFM | 1.0 | main.addon,logo.png | Listener-supported, commercial-free radio: ambient, electronica, indie, jazz and more.
+youtube | YouTube | 1.0 | main.addon,logo.png | YouTube: popular videos, search of videos, channels and playlists, channel browsing and playback in H.264 up to 1080p.

@@ -144,3 +144,17 @@ See `addons/demo/main.addon` in the source: it uses `ask`, `message`, `wait` and
 ## Debugging
 
 Errors show the addon file and line. Use `log "x is {x}"` to print values to the player's log.
+
+## Publishing an addon in the Store
+
+The player's Store reads `addons/index.txt` from the repository: one line per addon with `id | name | version | files | description`
+(the `id` is the addon folder). `tools/make_addon_index.py` writes that file from the `addon`, `version` and `description` lines of
+every `addons/*/main.addon`, so an addon that is added, changed or version-bumped appears in the Store as soon as the index is
+regenerated and pushed:
+
+```sh
+python3 tools/make_addon_index.py && git add addons/index.txt && git commit -m "Update the addon index" && git push
+```
+
+The Store only downloads the files listed in the `files` field (`main.addon,logo.png` by default) and refuses to install anything
+that is not a parsable addon.

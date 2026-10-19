@@ -44,11 +44,14 @@ const
     MAX_ENTRIES = 2047;
 
     ST_BROWSE = 0; ST_PLAY = 1;
-    K_FILE = 0; K_DIR = 1; K_LIST = 2; K_URL = 3; K_MYLISTS = 4; K_ADDONS = 5; K_ADDON = 6; K_AFOLDER = 7;    // tipos de entrada del explorador
+    K_FILE = 0; K_DIR = 1; K_LIST = 2; K_URL = 3; K_MYLISTS = 4; K_ADDONS = 5; K_ADDON = 6; K_AFOLDER = 7; K_STORE = 8; K_SITEM = 9;    // tipos de entrada del explorador
+    // tienda de addons: repositorio oficial del reproductor (se puede apuntar a otro con MP_STORE_URL)
+    STORE_URL = "https://raw.githubusercontent.com/Rufidj/bennugd2-media-player/main/addons";
     M_NONE = 0; M_MENU = 1; M_KB = 2; M_CREDITS = 3;                             // pantallas modales (menu / teclado)
     KB_NEWLIST = 1; KB_RENAME_LIST = 2; KB_URL = 3; KB_NEW_TITLE = 4; KB_ENTRY_TITLE = 5; KB_LOGO = 6; KB_ADDON = 7; KB_ASET = 8;
     MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
     MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_ASET = 300; MA_PICK = 100;
+    MA_STORE_REFRESH = 20;
 end
 
 global
@@ -175,6 +178,7 @@ declare function string cut_text(string t, int n) end
 declare function string fit_text(string t, int maxw) end
 declare function string tail_fit(string t, int maxw) end
 declare function string utf8_chop(string t) end
+declare function string store_state(int i) end
 
 // Entrada guiada para pruebas: MP_SCRIPT="fotograma:accion,fotograma:accion,..." (up down left right ok back subs pause seekb seekf mute audio)
 function load_script()
@@ -241,6 +245,7 @@ begin
     say("MediaPlayer: carpeta " + cur_dir + ", " + n_entries + " entradas");
 
     if (getenv("MP_TRACE") != "") http_trace("PATH:" + getenv("MP_TRACE")); end   // traza del motor de video (libmod_video)
+    store_base = getenv("MP_STORE_URL");                                          // otra copia de la tienda (pruebas y espejos)
     shot_path = getenv("MP_SHOT");
     if (getenv("MP_SHOTF") != "") shot_frame = atoi(getenv("MP_SHOTF")); end
     open_file = getenv("MP_OPEN");
@@ -480,13 +485,16 @@ private
     int dh, i, j, d;
     string nm, t_s; int t_d, t_z;
 begin
-    n_entries = 0; addon_mode = 0;
+    n_entries = 0; addon_mode = 0; store_mode = 0;
     sel = 0; top_row = 0; dir_ver++;
     if (parent_of(cur_dir) != cur_dir)
         entries[0] = ".."; entry_dir[0] = 1; n_entries = 1;
     end
     if (cur_dir == home_dir && cur_dir != lists_dir)
         entries[n_entries] = tr("s_addons"); entry_dir[n_entries] = K_ADDONS; entry_size[n_entries] = 0; entry_logo[n_entries] = ""; n_entries++;
+    end
+    if (store_dir != "" && cur_dir == home_dir && cur_dir != lists_dir)
+        entries[n_entries] = tr("s_store"); entry_dir[n_entries] = K_STORE; entry_size[n_entries] = 0; entry_logo[n_entries] = ""; n_entries++;
     end
     if (store_dir != "" && cur_dir == home_dir && cur_dir != lists_dir)
         entries[n_entries] = tr("m_mylists"); entry_dir[n_entries] = K_MYLISTS; entry_size[n_entries] = 0; entry_logo[n_entries] = ""; n_entries++;
@@ -587,7 +595,9 @@ end
 function update_browser()
 private int old;
 begin
-    if (act_press[A_MUTE]) open_context_menu(); return 0; end
+    if (store_job == 1) store_step(); return 0; end                // instalando: no se atiende al mando
+    if (store_load == 1) store_fetch(); return 0; end              // la lista de la tienda se pide en el fotograma siguiente
+    if (act_press[A_MUTE]) if (store_mode == 1) open_store_menu(); else open_context_menu(); end return 0; end
     if (n_entries > 0)
         old = sel;
         if (act_press[A_UP])    sel--; end
@@ -665,6 +675,15 @@ begin
                     for (k = 0; k < wrap_n; k++) s_info[1 + k] = wrap_l[k]; end
                     s_info[6] = tr("s_addon_hint");
                 end
+                case K_STORE:
+                    wrap_text(tr("s_store_info"), 420, 5);
+                    for (k = 0; k < wrap_n; k++) s_info[1 + k] = wrap_l[k]; end
+                end
+                case K_SITEM:
+                    s_info[1] = store_state(sel);
+                    wrap_text(entry_info[sel], 420, 4);
+                    for (k = 0; k < wrap_n; k++) s_info[2 + k] = wrap_l[k]; end
+                end
                 case K_AFOLDER:
                     s_info[1] = tr("s_folder");
                     wrap_text(entry_info[sel], 420, 4);
@@ -729,7 +748,9 @@ end
 
 function go_up()
 begin
-    if (addon_mode == 2)
+    if (store_mode == 1)
+        store_mode = 0; cur_dir = home_dir; read_dir();
+    elseif (addon_mode == 2)
         addon_back();
     elseif (addon_mode == 1)
         addon_mode = 0; cur_dir = home_dir; read_dir();
@@ -774,6 +795,10 @@ begin
         cur_dir = lists_dir; read_dir();
     elseif (entry_dir[i] == K_ADDONS)
         read_addons();
+    elseif (entry_dir[i] == K_STORE)
+        store_open();
+    elseif (entry_dir[i] == K_SITEM)
+        store_install(i);
     elseif (entry_dir[i] == K_ADDON)
         addon_open(entry_url[i]);
     elseif (entry_dir[i] == K_AFOLDER)
@@ -821,6 +846,7 @@ begin
         for (k = 0; k < 6; k++) s_h[k] = ""; hint_ic[k] = -1; end
         switch (ctx)
             case 1: hint_n = 3; hint_ic[0] = 0; s_h[0] = tr("h_open"); hint_ic[1] = 1; s_h[1] = tr("h_back"); hint_ic[2] = 3; s_h[2] = tr("h_options"); end
+            case 5: hint_n = 3; hint_ic[0] = 0; s_h[0] = tr("h_install"); hint_ic[1] = 1; s_h[1] = tr("h_back"); hint_ic[2] = 3; s_h[2] = tr("h_options"); end
             case 4: hint_n = 1; hint_ic[0] = 1; s_h[0] = tr("h_back"); end
             case 2: hint_n = 2; hint_ic[0] = 0; s_h[0] = tr("h_choose"); hint_ic[1] = 1; s_h[1] = tr("h_cancel"); end
             default:
@@ -1254,6 +1280,7 @@ begin
             lang_load(next_lang()); cfg_save(); open_settings_menu(0);
         end
         case MA_ABOUT: credits_open(); end
+        case MA_STORE_REFRESH: store_open(); end
         case MA_SKIN:
             skin = !skin; cfg_save(); open_settings_menu(1);
         end
@@ -1876,7 +1903,7 @@ begin
         // ---- explorador
         // los textos solo se rehacen al cambiar de carpeta o de pagina (crear cadenas cada fotograma es caro y las acumula)
         if (lbl_ver != dir_ver || lbl_top != top_row)
-            if (addon_mode == 2) s_path = "  " + addon_name; elseif (addon_mode == 1) s_path = "  " + tr("s_addons"); elseif (cur_list != "") s_path = "  " + utf8_to_latin1(base_name(cur_list)) + "   " + tr("s_internet_tag"); else s_path = "  " + utf8_to_latin1(cur_dir); end
+            if (store_mode == 1) s_path = "  " + tr("s_store"); elseif (addon_mode == 2) s_path = "  " + addon_name; elseif (addon_mode == 1) s_path = "  " + tr("s_addons"); elseif (cur_list != "") s_path = "  " + utf8_to_latin1(base_name(cur_list)) + "   " + tr("s_internet_tag"); else s_path = "  " + utf8_to_latin1(cur_dir); end
                 s_empty = tr("s_empty");
             s_hint = tr("h_browser") + "    [" + (store_dir != "" ? cut_text(store_dir, 24) : tr("s_nostore")) + "]";
             for (i = 0; i < ROWS; i++)
@@ -1893,9 +1920,9 @@ begin
         txt_want[txt_path] = 8589934336 + (255);
         put(S_HEADER, g_icon[10], 42, 40, 40, 200, -10);
         draw_bg();
-        if (skin) hint_set(1); else txt_want[txt_hint] = 8589934336 + (150); end
+        if (skin) hint_set(store_mode == 1 ? 5 : 1); else txt_want[txt_hint] = 8589934336 + (150); end
 
-        if (n_entries == 0)
+        if (n_entries == 0 && !addon_busy)
             txt_want[txt_empty] = 8589934336 + (200);
         end
         for (i = 0; i < ROWS; i++)
@@ -1906,6 +1933,8 @@ begin
                 switch (entry_dir[rowi])
                     case K_DIR, K_MYLISTS, K_AFOLDER: g = g_icon[10]; end
                     case K_ADDONS, K_ADDON: g = g_icon[16]; end
+                    case K_STORE: g = g_icon[14]; end
+                    case K_SITEM: g = entry_siver[rowi] != "" ? g_icon[16] : g_icon[14]; end
                     case K_LIST: g = g_icon[14]; end
                     case K_URL: g = (addon_mode == 2 && entry_akind[rowi] == 1) ? g_icon[11] : ((addon_mode == 2 && entry_akind[rowi] >= 2) ? g_icon[15] : g_icon[14]); end
                     default: g = is_audio(entries[rowi]) ? g_icon[15] : g_icon[11]; end
