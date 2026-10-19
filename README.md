@@ -96,6 +96,20 @@ the panel expects (`<server>/live/<user>/<pass>/<id>.ts`).
 Addons go to the first folder the player can really write to: `/data/mediaplayer` on the PS5 and
 `mediaplayer_data` next to the player on the PC (it is created the first time). `MP_STORE=/folder` forces another one.
 
+### Trying the accounts without paying for anything
+
+`tools/test_server.py` is a small HTTP server that fakes an IPTV provider: a list that asks for a user and a password
+(HTTP Basic), another one that logs in with a form and returns a token, and a panel that speaks the Xtream Codes API
+(categories, live channels, movies and series). It also serves its own Store catalogue with those three lists.
+
+```sh
+python3 tools/test_server.py                  # en 127.0.0.1:8310
+MP_STORE_URL=http://127.0.0.1:8310/addons ./mediaplayer.sh
+```
+
+In the Store, install *TV de pago (prueba)*, *TV de pago (formulario)* or *Xtream (prueba)*; the user is `usuario1` and the
+password `clave-secreta`. To try it on the PS5, give the PC's address: `python3 tools/test_server.py 8310 192.168.1.50`.
+
 ## Credits
 
 Created by Rufidj and Claude. Thanks to SplinterGU for BennuGD2, to Panreyes for the TTF implementation, and to FFmpeg, SDL, sdl-gpu,
@@ -114,6 +128,7 @@ Plex, SomaFM, Radio Browser, Internet Archive, PeerTube and YouTube are trademar
 - Descarga el `.pkg` para PS5 o el `.tar.gz` para Linux en *Releases*.
 - La **Tienda** (menú principal) instala y actualiza los addons y descarga listas de TV/radio gratis (TDTChannels, iptv-org...) a "Mis listas": X instala, ○ vuelve y cuadrado abre el menú (actualizar la lista).
 - Las listas de pago se pueden usar: al instalarlas el reproductor pide el usuario y la contraseña, los guarda junto a la lista (`<almacen>/listas/<lista>.auth`) y los usa para bajarla y reproducir sus canales. También se pueden poner a mano (opciones de una lista: *Cuenta de esta lista*) y se ven en *Ajustes > Cuentas*. Ojo: se guardan en texto plano en el almacén del reproductor.
+- Para probar las cuentas sin pagar nada: `python3 tools/test_server.py` levanta un servidor con tres listas de prueba (usuario `usuario1`, clave `clave-secreta`) y su propio catálogo; se usa con `MP_STORE_URL=http://127.0.0.1:8310/addons`. Para la PS5: `python3 tools/test_server.py 8310 192.168.1.50`.
 - Para compilar desde el código hace falta BennuGD2 con los cambios de `libmod_video` (parche en `engine/`).
 - Tutorial para crear addons en español: [ADDONS.es.md](ADDONS.es.md).
 - Los títulos de Plex con DRM no se pueden reproducir (el addon los oculta).
