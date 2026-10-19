@@ -17,6 +17,7 @@ global
     string xt_body = "";              // última respuesta de la API
     string xt_cat_sel = "", xt_ser_sel = "";
     int    xt_err = 0;                // último error de la API
+    int    grid_mode = 0;             // 1 = el explorador se dibuja en cuadricula (pantallas de Xtream)
 
 declare function string xt_url(string path) end
 declare function int xt_get(string path) end
@@ -162,6 +163,7 @@ function int xt_open_level(int level)
 private int i;
 begin
     xt_level = level;
+    grid_mode = 1;
     n_entries = 0; sel = 0; top_row = 0; dir_ver++;
     entries[0] = ".."; entry_dir[0] = K_DIR; entry_url[0] = ""; entry_size[0] = 0; entry_logo[0] = ""; n_entries = 1;
     if (level == 0)

@@ -5,7 +5,7 @@
 // Variables de entorno: MEDIA_DIR (carpeta inicial), MP_OPEN (abrir un archivo directamente),
 //   MP_SHOT (ruta .png: guarda una captura tras unos fotogramas y sale; solo para pruebas).
 //   Solo para pruebas tambien: MP_SELECT, MP_ENTER, MP_SCRIPT, MP_KB_TEXT (texto del teclado),
-//   MP_AUTH_USER, MP_AUTH_PASS, MP_STORE_URL, MP_TRACE.
+//   MP_AUTH_USER, MP_AUTH_PASS, MP_STORE_URL, MP_TRACE, MP_XT_ENTER (abre un panel de Xtream).
 
 import "libmod_gfx";
 import "libmod_input";
@@ -42,6 +42,9 @@ const
     ROWS = 12;
     ROW_H = 46;
     ROW_Y0 = 118;
+    // cuadricula (pantallas de Xtream): 4 columnas x 3 filas = los mismos 12 elementos por pagina
+    GRID_COLS = 4; GRID_ROWS = 3;
+    GRID_X0 = 66; GRID_X1 = 742; GRID_Y0 = 158; GRID_Y1 = 636;
     HIDE_AFTER = 200;       // fotogramas sin tocar nada hasta ocultar los iconos
     MAX_ENTRIES = 2047;
 
@@ -83,6 +86,7 @@ global
 
     // explorador
     string cur_dir;
+    int    grid_last = -1;            // el modo (lista o cuadricula) con el que se crearon los textos de fila
     string entries[MAX_ENTRIES];
     int    entry_dir[MAX_ENTRIES];
     int    entry_size[MAX_ENTRIES];
@@ -271,6 +275,7 @@ begin
         read_dir();
     end
     if (getenv("MP_SELECT") != "") sel = atoi(getenv("MP_SELECT")); if (sel >= n_entries) sel = n_entries - 1; end end   // solo pruebas
+    if (getenv("MP_XT_ENTER") != "") xt_enter(getenv("MP_XT_ENTER")); end   // solo pruebas
     if (getenv("MP_VIZ") != "") viz_mode = atoi(getenv("MP_VIZ")); end   // solo pruebas
     say("MediaPlayer: carpeta " + cur_dir + ", " + n_entries + " entradas");
 
@@ -517,6 +522,7 @@ private
 begin
     n_entries = 0; addon_mode = 0; store_mode = 0;
     sel = 0; top_row = 0; dir_ver++;
+    grid_mode = 0;
     au_reset();                                           // fuera de una lista no hay ninguna cuenta activa
     if (parent_of(cur_dir) != cur_dir)
         entries[0] = ".."; entry_dir[0] = 1; n_entries = 1;
@@ -633,14 +639,26 @@ begin
     if (act_press[A_MUTE]) if (store_mode == 1) open_store_menu(); else open_context_menu(); end return 0; end
     if (n_entries > 0)
         old = sel;
-        if (act_press[A_UP])    sel--; end
-        if (act_press[A_DOWN])  sel++; end
-        if (act_press[A_LEFT])  sel -= ROWS - 1; end
-        if (act_press[A_RIGHT]) sel += ROWS - 1; end
-        if (sel < 0) sel = (old == 0 && act_press[A_UP]) ? n_entries - 1 : 0; end
-        if (sel >= n_entries) sel = (old == n_entries - 1 && act_press[A_DOWN]) ? 0 : n_entries - 1; end
-        if (sel < top_row) top_row = sel; end
-        if (sel >= top_row + ROWS) top_row = sel - ROWS + 1; end
+        if (grid_mode == 1)
+            // en cuadricula: izquierda/derecha una casilla, arriba/abajo una fila
+            if (act_press[A_UP])    sel -= GRID_COLS; end
+            if (act_press[A_DOWN])  sel += GRID_COLS; end
+            if (act_press[A_LEFT])  sel--; end
+            if (act_press[A_RIGHT]) sel++; end
+            if (sel < 0) sel = 0; end
+            if (sel >= n_entries) sel = n_entries - 1; end
+            if (sel < top_row) top_row = (sel / GRID_COLS) * GRID_COLS; end
+            if (sel >= top_row + ROWS) top_row = ((sel - ROWS) / GRID_COLS + 1) * GRID_COLS; end
+        else
+            if (act_press[A_UP])    sel--; end
+            if (act_press[A_DOWN])  sel++; end
+            if (act_press[A_LEFT])  sel -= ROWS - 1; end
+            if (act_press[A_RIGHT]) sel += ROWS - 1; end
+            if (sel < 0) sel = (old == 0 && act_press[A_UP]) ? n_entries - 1 : 0; end
+            if (sel >= n_entries) sel = (old == n_entries - 1 && act_press[A_DOWN]) ? 0 : n_entries - 1; end
+            if (sel < top_row) top_row = sel; end
+            if (sel >= top_row + ROWS) top_row = sel - ROWS + 1; end
+        end
 
         if (act_press[A_OK]) activate_entry(sel); end
         update_preview();
@@ -741,10 +759,12 @@ begin
         end
     end
     pv_rest++;
-    if (pv_phase == 0 && pv_rest == (entry_dir[sel] == K_URL || entry_dir[sel] == K_AFOLDER ? 45 : 25) && sel >= 0 && sel < n_entries && (entry_dir[sel] == K_FILE || entry_dir[sel] == K_URL || ((entry_dir[sel] == K_AFOLDER || entry_dir[sel] == K_ADDON) && entry_logo[sel] != "")) && entries[sel] != "..")
+    if (pv_phase == 0 && pv_rest == (entry_dir[sel] == K_URL || entry_dir[sel] == K_AFOLDER ? 45 : 25) && sel >= 0 && sel < n_entries && (entry_dir[sel] == K_FILE || entry_dir[sel] == K_URL || entry_dir[sel] == K_XSTR || ((entry_dir[sel] == K_AFOLDER || entry_dir[sel] == K_ADDON) && entry_logo[sel] != "")) && entries[sel] != "..")
         video_use_hw(0);
         // emisoras con logo: se abre la imagen del logo; el resto de enlaces: el propio video por red (puede tardar un poco)
-        if ((entry_dir[sel] == K_URL || entry_dir[sel] == K_AFOLDER || entry_dir[sel] == K_ADDON) && entry_logo[sel] != "") pv_h = video_open(entry_logo[sel]);
+        if (entry_dir[sel] == K_XSTR)
+            pv_h = video_open(xt_stream_url(sel));              // canal del panel: miniatura en movimiento, sin sonido
+        elseif ((entry_dir[sel] == K_URL || entry_dir[sel] == K_AFOLDER || entry_dir[sel] == K_ADDON) && entry_logo[sel] != "") pv_h = video_open(entry_logo[sel]);
         elseif (au_headers() != "") pv_h = video_open_h(entry_path(sel), au_headers());
         else pv_h = video_open(entry_path(sel)); end
         video_use_hw(1);
@@ -789,7 +809,7 @@ function go_up()
 begin
     if (xt_screen == 1)
         if (xt_level > 0) xt_level--; xt_job = 0; xt_open_level(xt_level); return 0; end
-        xt_screen = 0; cur_dir = home_dir; read_dir(); return 0;
+        xt_screen = 0; grid_mode = 0; cur_dir = home_dir; read_dir(); return 0;
     end
     if (store_mode == 1)
         store_mode = 0; cur_dir = home_dir; read_dir();
@@ -876,6 +896,17 @@ begin
         ox = (frame_n * (k + 1) / 4) % 1280;
         put(S_WAVE + k, g_wave[k], 1280 - ox, SH / 2, 100, 255, 28 - k);
     end
+end
+
+// centro de la casilla i de la cuadricula
+function int grid_cx(int i)
+begin
+    return GRID_X0 + (i % GRID_COLS) * (GRID_X1 - GRID_X0) / GRID_COLS + (GRID_X1 - GRID_X0) / GRID_COLS / 2;
+end
+
+function int grid_cy(int i)
+begin
+    return GRID_Y0 + (i / GRID_COLS) * (GRID_Y1 - GRID_Y0) / GRID_ROWS + (GRID_Y1 - GRID_Y0) / GRID_ROWS / 2;
 end
 
 // Selector: pastilla redondeada (PlayStation) o barra azul (clasico); w x h en pixeles
@@ -2029,11 +2060,25 @@ begin
                 rowi = top_row + i;
                 if (rowi < n_entries)
                     row_label[i] = disp_name(rowi);
-                    row_label[i] = fit_text(row_label[i], 590);
+                    row_label[i] = fit_text(row_label[i], grid_mode == 1 ? 150 : 590);
                 else
                     row_label[i] = "";
                 end
             end
+            // al cambiar entre lista y cuadricula los textos de fila se recrean en su sitio:
+            // moverlos con write_move no vale (el identificador se recicla y se rompe el dibujo)
+            if (grid_mode != grid_last)
+                grid_last = grid_mode;
+                for (i = 0; i < ROWS; i++)
+                    if (txt_row[i] > 0) write_delete(txt_row[i]); end
+                    if (grid_mode == 1)
+                        txt_row[i] = write_var(fnt_t, ur(grid_cx(i) - tw(row_label[i]) / 2), ur(grid_cy(i) + 30), -20, 3, row_label[i]);
+                    else
+                        txt_row[i] = write_var(fnt_t, ur(110), ur(ROW_Y0 + i * ROW_H + ROW_H / 2), -20, 3, row_label[i]);
+                    end
+                end
+            end
+
             lbl_ver = dir_ver; lbl_top = top_row;
         end
         txt_want[txt_path] = 8589934336 + (255);
@@ -2048,6 +2093,7 @@ begin
             rowi = top_row + i;
             if (rowi < n_entries)
                 by = ROW_Y0 + i * ROW_H + ROW_H / 2;
+                if (grid_mode == 1) by = grid_cy(i); end
                 txt_want[txt_row[i]] = 8589934336 + (rowi == sel ? 255 : 190);
                 switch (entry_dir[rowi])
                     case K_DIR, K_MYLISTS, K_AFOLDER: g = g_icon[10]; end
@@ -2059,9 +2105,12 @@ begin
                     default: g = is_audio(entries[rowi]) ? g_icon[15] : g_icon[11]; end
                 end
                 if (entries[rowi] == "..") g = g_icon[12]; end
-                put(S_ROWICON + i, g, 70, by, 38, rowi == sel ? 255 : 170, -10);
-                if (rowi == sel)
-                    put_sel(S_SEL, 382, by, 700, ROW_H, 2);
+                if (grid_mode == 1)
+                    put(S_ROWICON + i, g, grid_cx(i), by - 26, 48, rowi == sel ? 255 : 170, -10);
+                    if (rowi == sel) put_sel(S_SEL, grid_cx(i), by - 26, 150, 118, 2); end
+                else
+                    put(S_ROWICON + i, g, 70, by, 38, rowi == sel ? 255 : 170, -10);
+                    if (rowi == sel) put_sel(S_SEL, 382, by, 700, ROW_H, 2); end
                 end
             end
         end
