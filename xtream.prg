@@ -10,10 +10,10 @@ global
     int    xt_type = 0;               // 0 = TV en vivo, 1 = VOD, 2 = series
     int    xt_job = 0;                // 1 = pedir categorías, 2 = pedir canales, 3 = pedir episodios
     int    xt_screen = 0;             // 1 = la pantalla de Xtream está abierta
-    string xt_cat_id[600], xt_cat_name[600]; int xt_cat_n = 0;
-    string xt_str_id[900], xt_str_name[900], xt_str_icon[900], xt_str_ext[900], xt_str_src[900]; int xt_str_n = 0;
-    string xt_ser_id[400], xt_ser_name[400], xt_ser_icon[400]; int xt_ser_n = 0;
-    string xt_epi_id[600], xt_epi_name[600], xt_epi_src[600]; int xt_epi_n = 0;
+    string xt_cat_id[300], xt_cat_name[300]; int xt_cat_n = 0;
+    string xt_str_id[600], xt_str_name[600], xt_str_icon[600], xt_str_ext[600], xt_str_src[600]; int xt_str_n = 0;
+    string xt_ser_id[150], xt_ser_name[150], xt_ser_icon[150]; int xt_ser_n = 0;
+    string xt_epi_id[300], xt_epi_name[300], xt_epi_src[300]; int xt_epi_n = 0;
     string xt_body = "";              // última respuesta de la API
     string xt_cat_sel = "", xt_ser_sel = "";
     int    xt_err = 0;                // último error de la API
@@ -93,7 +93,7 @@ begin
     if (what == 0)
         if (!xt_get("/player_api.php?action=get_" + (xt_type == 0 ? "live" : (xt_type == 1 ? "vod" : "series")) + "_categories")) return 0; end
         pos = 0; n = 0;
-        while (n < 600)
+        while (n < 300)
             obj = xt_next_obj(xt_body, pos);
             if (obj == "") break; end
             pos = find(xt_body, "}", pos) + 1;
@@ -108,7 +108,7 @@ begin
         if (xt_type == 2)
             if (!xt_get("/player_api.php?action=get_series")) return 0; end
             pos = 0; n = 0;
-            while (n < 400)
+            while (n < 150)
                 obj = xt_next_obj(xt_body, pos);
                 if (obj == "") break; end
                 pos = find(xt_body, "}", pos) + 1;
@@ -121,7 +121,7 @@ begin
         end
         if (!xt_get("/player_api.php?action=get_" + (xt_type == 0 ? "live" : "vod") + "_streams&category_id=" + au_esc(xt_cat_sel))) return 0; end
         pos = 0; n = 0;
-        while (n < 900)
+        while (n < 600)
             obj = xt_next_obj(xt_body, pos);
             if (obj == "") break; end
             pos = find(xt_body, "}", pos) + 1;
@@ -140,7 +140,7 @@ begin
         pos = find(xt_body, "\"episodes\"");
         if (pos < 0) return 0; end
         n = 0;
-        while (n < 600)
+        while (n < 300)
             obj = xt_next_obj(xt_body, pos);
             if (obj == "") break; end
             pos = find(xt_body, "}", pos) + 1;
