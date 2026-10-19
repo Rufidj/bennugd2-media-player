@@ -90,7 +90,8 @@ and uses them to download it and to play its channels. Any list can have an acco
 list*), and they are all listed in *Settings > Accounts*. The credentials are kept in plain text in the player's storage folder.
 
 With `mode=xtream` the player talks to an IPTV panel that uses the **Xtream Codes API**: it asks for the server, the user and
-the password, and shows the panel's own tree (live TV, movies and series by category). The channels are played with the URLs
+the password, and shows the panel's own tree (live TV, movies and series by category). The tree is drawn as a 4 x 3 grid of
+cards, and the channel you are on plays silently in the side panel as a moving thumbnail. The channels are played with the URLs
 the panel expects (`<server>/live/<user>/<pass>/<id>.ts`).
 
 Addons go to the first folder the player can really write to: `/data/mediaplayer` on the PS5 and
@@ -128,6 +129,7 @@ Plex, SomaFM, Radio Browser, Internet Archive, PeerTube and YouTube are trademar
 - Descarga el `.pkg` para PS5 o el `.tar.gz` para Linux en *Releases*.
 - La **Tienda** (menú principal) instala y actualiza los addons y descarga listas de TV/radio gratis (TDTChannels, iptv-org...) a "Mis listas": X instala, ○ vuelve y cuadrado abre el menú (actualizar la lista).
 - Las listas de pago se pueden usar: al instalarlas el reproductor pide el usuario y la contraseña, los guarda junto a la lista (`<almacen>/listas/<lista>.auth`) y los usa para bajarla y reproducir sus canales. También se pueden poner a mano (opciones de una lista: *Cuenta de esta lista*) y se ven en *Ajustes > Cuentas*. Ojo: se guardan en texto plano en el almacén del reproductor.
+- Los paneles IPTV con la API de Xtream Codes se muestran en cuadrícula (rejilla de 4 x 3) y el canal que está elegido se reproduce en silencio en el panel lateral, como miniatura en movimiento.
 - Para probar las cuentas sin pagar nada: `python3 tools/test_server.py` levanta un servidor con tres listas de prueba (usuario `usuario1`, clave `clave-secreta`) y su propio catálogo; se usa con `MP_STORE_URL=http://127.0.0.1:8310/addons`. Para la PS5: `python3 tools/test_server.py 8310 192.168.1.50`.
 - Para compilar desde el código hace falta BennuGD2 con los cambios de `libmod_video` (parche en `engine/`).
 - Tutorial para crear addons en español: [ADDONS.es.md](ADDONS.es.md).
