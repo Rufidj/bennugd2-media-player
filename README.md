@@ -13,7 +13,8 @@ Interface drawn at 1080p with a PlayStation-style skin, designed to be driven wi
 - **Streaming URLs**, `.m3u` / `.m3u8` lists with logos, list editor with an on-screen keyboard
 - **6 UI languages** with TrueType fonts: Spanish, English, Russian, Japanese, Chinese, Korean
 - **Addons** written in a small English-like language, no compiler needed (see [ADDONS.md](ADDONS.md)):
-  Plex (free ad-supported catalogue + your own server, login by code), Radio Browser, SomaFM, Internet Archive
+  Plex (free ad-supported catalogue + your own server, login by code), Radio Browser, SomaFM, Internet Archive,
+  PeerTube (federated video network), YouTube (popular videos, search of videos, channels and playlists)
 - Credits screen (Options → Settings → About)
 
 ## Download
@@ -68,12 +69,12 @@ Tutorial: [ADDONS.md](ADDONS.md) · [ADDONS.es.md](ADDONS.es.md).
 ## Credits
 
 Created by Rufidj and Claude. Thanks to SplinterGU for BennuGD2, to Panreyes for the TTF implementation, and to FFmpeg, SDL, sdl-gpu,
-FreeType, Google Noto fonts, OpenSSL, Plex, SomaFM, Radio Browser, Internet Archive and the PS5 homebrew community.
+FreeType, Google Noto fonts, OpenSSL, Plex, SomaFM, Radio Browser, Internet Archive, PeerTube/Framasoft, YouTube and the PS5 homebrew community.
 
 ## License
 
 MIT for the player code (see [LICENSE](LICENSE)). Third-party components keep their own licenses (BennuGD2, FFmpeg, SDL, FreeType, OpenSSL, Noto fonts: SIL OFL).
-Plex, SomaFM, Radio Browser and Internet Archive are trademarks/services of their owners; the addons only use their public APIs. DRM-protected content is not supported.
+Plex, SomaFM, Radio Browser, Internet Archive, PeerTube and YouTube are trademarks/services of their owners; the addons only use their public APIs. DRM-protected content is not supported.
 
 ---
 

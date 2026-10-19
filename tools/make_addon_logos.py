@@ -49,5 +49,26 @@ def archive():
     d.rectangle([cx - 110 * s, 212 * s, cx + 110 * s, 232 * s], fill=(235, 235, 240, 255))
     save(im, "internet-archive")
 
-for f in (plex, radio, soma, archive):
+def peertube():
+    # forma propia: reproductor naranja con dos satélites (la red federada), sin logotipo oficial
+    im, d = canvas((19, 24, 32, 255)); s = K
+    cx, cy = 240 * s, 135 * s
+    d.ellipse([cx - 95 * s, cy - 95 * s, cx + 95 * s, cy + 95 * s], outline=(255, 120, 60, 255), width=5 * s)
+    d.ellipse([cx - 62 * s, cy - 62 * s, cx + 62 * s, cy + 62 * s], fill=(255, 120, 60, 255))
+    d.polygon([(cx - 20 * s, cy - 32 * s), (cx + 40 * s, cy), (cx - 20 * s, cy + 32 * s)], fill=(19, 24, 32, 255))
+    for x, y, r in ((-95, -95, 16), (95, 95, 13), (95, -95, 10)):
+        d.ellipse([cx + x * s - r * s, cy + y * s - r * s, cx + x * s + r * s, cy + y * s + r * s], fill=(255, 200, 150, 255))
+    save(im, "peertube")
+
+def youtube():
+    # forma propia: pantalla roja con un triángulo de reproducción, no es el logotipo oficial
+    im, d = canvas((16, 18, 24, 255)); s = K
+    cx, cy = 240 * s, 135 * s
+    d.rounded_rectangle([cx - 152 * s, cy - 86 * s, cx + 152 * s, cy + 86 * s], radius=42 * s, fill=(212, 46, 40, 255))
+    d.polygon([(cx - 36 * s, cy - 50 * s), (cx + 54 * s, cy), (cx - 36 * s, cy + 50 * s)], fill=(250, 250, 250, 255))
+    for x, y in ((-152, -86), (152, -86), (-152, 86), (152, 86)):
+        d.ellipse([cx + x * s - 12 * s, cy + y * s - 12 * s, cx + x * s + 12 * s, cy + y * s + 12 * s], fill=(255, 190, 186, 255))
+    save(im, "youtube")
+
+for f in (plex, radio, soma, archive, peertube, youtube):
     f()

@@ -10,7 +10,7 @@ index efe0cfd0..c552c486 100644
 +target_link_libraries(mod_video ${SDL2_LIBRARY} ${SDL2_LIBRARIES} ${SDL_GPU_LIBRARY} ${SDLMIXER_LIBRARY}
      -L${CMAKE_SOURCE_DIR}/bin bgdrtm bggfx ${FFMPEG_LIBRARIES})
 diff --git a/modules/libmod_video/libmod_video.c b/modules/libmod_video/libmod_video.c
-index 0f604cb7..d376bd08 100644
+index 0f604cb7..eb407e32 100644
 --- a/modules/libmod_video/libmod_video.c
 +++ b/modules/libmod_video/libmod_video.c
 @@ -19,6 +19,13 @@
@@ -55,7 +55,16 @@ index 0f604cb7..d376bd08 100644
  
      int             playing, paused, loop, eof, finished, quit;
      int             seek_req;          double seek_to;
-@@ -144,6 +165,9 @@ typedef struct {
+@@ -123,6 +144,8 @@ typedef struct {
+     /* wall clock fallback / pause bookkeeping */
+     double          clk_base;          /* media time at clk_t0                  */
+     Uint32          clk_t0;
++    double          clk_a;             /* last audio playout time (clock)       */
++    Uint32          clk_a_t0;          /* SDL ticks when clk_a was taken        */
+     double          last_time;         /* last media time reported              */
+ 
+     /* subtitles (text only: SRT / ASS / SSA / WebVTT / mov_text), guarded by mx */
+@@ -144,6 +167,9 @@ typedef struct {
  
  static VIDEO       g_vid[MAX_VIDEOS + 1];       /* handle = index, 0 unused     */
  static VIDEO *     g_audio_owner = NULL;
@@ -65,7 +74,7 @@ index 0f604cb7..d376bd08 100644
  
  /* Graphs of closed videos are freed a few frames later, not immediately: on the PS5 the GPU runs
     draw calls after the CPU has queued them, and recreating a texture right after freeing one
-@@ -182,6 +206,10 @@ static VIDEO * vid_get( int64_t h ) {
+@@ -182,15 +208,29 @@ static VIDEO * vid_get( int64_t h ) {
  /* media time "now" (call with mx held or not; reads are racy but monotonic enough) */
  static double vid_clock( VIDEO * v ) {
      if ( v->has_audio && g_audio_owner == v ) {
@@ -75,8 +84,29 @@ index 0f604cb7..d376bd08 100644
 +            return v->clk_base + ( SDL_GetTicks() - v->clk_t0 ) / 1000.0;
          double queued = ( double ) v->an / ( double ) ( v->a_rate * v->a_ch * v->a_bps );
          double t = v->a_pts_end - queued;
-         return t < 0 ? 0 : t;
-@@ -209,6 +237,18 @@ static void mix_hook( void * udata, Uint8 * stream, int len ) {
+-        return t < 0 ? 0 : t;
++        if ( t < 0 ) t = 0;
++        if ( v->playing && !v->paused ) {
++            /* the audio ring ran dry (underrun, e.g. its track starts late or the demuxer is fetching
++               the next segment): keep time from the last playout instant instead of freezing here.
++               A frozen clock stalls the picture forever, because the decode thread is parked on a
++               full video queue and that queue only drains when this clock advances. */
++            if ( queued <= 0.0 )
++                return v->clk_a + ( SDL_GetTicks() - v->clk_a_t0 ) / 1000.0;
++            v->clk_a = t; v->clk_a_t0 = SDL_GetTicks();
++        }
++        return t;
+     }
+     if ( !v->playing || v->paused ) return v->clk_base;
+     return v->clk_base + ( SDL_GetTicks() - v->clk_t0 ) / 1000.0;
+ }
+ 
+-static void vid_clock_freeze( VIDEO * v ) { v->clk_base = vid_clock( v ); v->clk_t0 = SDL_GetTicks(); }
++static void vid_clock_freeze( VIDEO * v ) { v->clk_base = vid_clock( v ); v->clk_t0 = SDL_GetTicks(); v->clk_a = v->clk_base; v->clk_a_t0 = v->clk_t0; }
+ 
+ /* ---- audio output (SDL_mixer music hook) ------------------------------- */
+ 
+@@ -209,6 +249,18 @@ static void mix_hook( void * udata, Uint8 * stream, int len ) {
          v->ar = ( v->ar + n ) % v->acap;
          v->an -= n;
  
@@ -95,7 +125,7 @@ index 0f604cb7..d376bd08 100644
          if ( v->volume < 0.999 && v->a_bps == 2 ) {
              int16_t * s = ( int16_t * ) stream; int cnt = ( int ) ( n / 2 );
              int vol = ( int ) ( v->volume * 256.0 );
-@@ -481,6 +521,10 @@ static void vq_clear( VIDEO * v ) {
+@@ -481,6 +533,10 @@ static void vq_clear( VIDEO * v ) {
  /* NV12 / 16-bit NV12 rows into a slot (Y then interleaved UV); source pitches in bytes */
  static void copy_rows_parallel( uint8_t * d, size_t dp, const uint8_t * s, size_t sp, size_t bytes, int rows, int down );
  
@@ -106,7 +136,7 @@ index 0f604cb7..d376bd08 100644
  static void pack_nv( VIDEO * v, uint8_t * d, const uint8_t * y, int ypitch, const uint8_t * uv, int uvpitch, int down ) {
      size_t ys = ( size_t ) v->ypw * 4, cs = ( size_t ) v->cpw * 4;
      size_t yb = v->hwmode == 2 ? ( size_t ) v->w * 2 : ( size_t ) v->w;
-@@ -495,6 +539,9 @@ static void pack_nv( VIDEO * v, uint8_t * d, const uint8_t * y, int ypitch, cons
+@@ -495,6 +551,9 @@ static void pack_nv( VIDEO * v, uint8_t * d, const uint8_t * y, int ypitch, cons
      }
  }
  
@@ -116,7 +146,7 @@ index 0f604cb7..d376bd08 100644
  static int vq_reserve( VIDEO * v ) {                      /* free slot, or -1 (quit / seek) */
      double tw = now_s( CLOCK_MONOTONIC );
      SDL_LockMutex( v->mx );
-@@ -504,9 +551,17 @@ static int vq_reserve( VIDEO * v ) {                      /* free slot, or -1 (q
+@@ -504,9 +563,17 @@ static int vq_reserve( VIDEO * v ) {                      /* free slot, or -1 (q
      v->wait_ms += ( now_s( CLOCK_MONOTONIC ) - tw ) * 1000.0;
      return slot;
  }
@@ -125,7 +155,7 @@ index 0f604cb7..d376bd08 100644
 +static void vclock_align( VIDEO * v, double pts ) {
 +    if ( v->vpts_init ) return;
 +    v->vpts_init = 1;
-+    if ( !v->a_got && v->clk_base + 0.5 < pts ) { v->clk_base = pts; v->clk_t0 = SDL_GetTicks(); }
++    if ( !v->a_got && v->clk_base + 0.5 < pts ) { v->clk_base = pts; v->clk_t0 = SDL_GetTicks(); v->clk_a = pts; v->clk_a_t0 = v->clk_t0; }
 +}
  static void vq_commit( VIDEO * v, int slot, double pts ) {
      v->vq[slot].pts = pts;
@@ -134,7 +164,7 @@ index 0f604cb7..d376bd08 100644
      if ( !v->seek_req ) v->vq_n++;
      SDL_UnlockMutex( v->mx );
  }
-@@ -643,6 +698,7 @@ static int push_video_frame( VIDEO * v, AVFrame * f ) {
+@@ -643,6 +710,7 @@ static int push_video_frame( VIDEO * v, AVFrame * f ) {
      v->vq[slot].pts = pts;
  
      SDL_LockMutex( v->mx );
@@ -142,7 +172,7 @@ index 0f604cb7..d376bd08 100644
      if ( !v->seek_req ) v->vq_n++;
      SDL_UnlockMutex( v->mx );
      return 1;
-@@ -662,6 +718,10 @@ static void push_audio( VIDEO * v, AVFrame * f ) {
+@@ -662,6 +730,10 @@ static void push_audio( VIDEO * v, AVFrame * f ) {
      size_t bytes = ( size_t ) got * v->a_ch * v->a_bps;
  
      double pts = ( f->best_effort_timestamp == AV_NOPTS_VALUE ) ? v->a_pts_end : f->best_effort_timestamp * v->atb;
@@ -153,7 +183,7 @@ index 0f604cb7..d376bd08 100644
  
      size_t off = 0;
      while ( off < bytes && !v->quit ) {
-@@ -677,6 +737,8 @@ static void push_audio( VIDEO * v, AVFrame * f ) {
+@@ -677,6 +749,8 @@ static void push_audio( VIDEO * v, AVFrame * f ) {
      }
      SDL_LockMutex( v->mx );
      v->a_pts_end = pts + ( double ) got / v->a_rate;
@@ -162,7 +192,7 @@ index 0f604cb7..d376bd08 100644
      SDL_UnlockMutex( v->mx );
      free( tmp );
  }
-@@ -713,6 +775,8 @@ static void hw_switch_software( VIDEO * v ) {
+@@ -713,6 +787,8 @@ static void hw_switch_software( VIDEO * v ) {
  static int decode_thread( void * arg ) {
      VIDEO * v = ( VIDEO * ) arg;
      AVPacket * pkt = av_packet_alloc();
@@ -171,13 +201,14 @@ index 0f604cb7..d376bd08 100644
  
      while ( !v->quit ) {
          if ( v->hw && v->hw_fail ) hw_switch_software( v );
-@@ -728,14 +792,23 @@ static int decode_thread( void * arg ) {
+@@ -728,14 +804,23 @@ static int decode_thread( void * arg ) {
              if ( v->actx ) avcodec_flush_buffers( v->actx );
              SDL_LockMutex( v->mx );
              vq_clear( v );
 -            v->eof = 0; v->finished = 0; v->a_pts_end = to;
+-            v->clk_base = to; v->clk_t0 = SDL_GetTicks();
 +            v->eof = 0; v->finished = 0; v->a_pts_end = to; v->a_got = 0; v->vpts_init = 0;
-             v->clk_base = to; v->clk_t0 = SDL_GetTicks();
++            v->clk_base = to; v->clk_t0 = SDL_GetTicks(); v->clk_a = to; v->clk_a_t0 = v->clk_t0;
              v->shown_first = 0;
              SDL_UnlockMutex( v->mx );
              continue;
@@ -197,7 +228,7 @@ index 0f604cb7..d376bd08 100644
              SDL_CondWaitTimeout( v->cond, v->mx, 20 );
              SDL_UnlockMutex( v->mx );
              continue;
-@@ -743,6 +816,8 @@ static int decode_thread( void * arg ) {
+@@ -743,6 +828,8 @@ static int decode_thread( void * arg ) {
          SDL_UnlockMutex( v->mx );
  
          int r = av_read_frame( v->fmt, pkt );
@@ -206,7 +237,18 @@ index 0f604cb7..d376bd08 100644
          if ( r < 0 ) {
              /* flush decoders, then end / loop */
              if ( v->hw && !v->hw_fail ) { hwdec_flush( v->hw, hw_picture, v ); hwdec_reset( v->hw ); if ( v->bsf ) av_bsf_flush( v->bsf ); v->hw_skip_rasl = 1; }
-@@ -779,6 +854,7 @@ static int decode_thread( void * arg ) {
+@@ -757,9 +844,7 @@ static int decode_thread( void * arg ) {
+         if ( pkt->stream_index == v->vstream && v->hw && !v->hw_fail ) {
+             hw_feed( v, pkt );
+         } else if ( pkt->stream_index == v->vstream && v->vctx ) {
+-            int sr = avcodec_send_packet( v->vctx, pkt );
+-            if ( sr >= 0 ) drain_decoder( v, v->vctx, 1 );
+-
++            if ( avcodec_send_packet( v->vctx, pkt ) >= 0 ) drain_decoder( v, v->vctx, 1 );
+         } else if ( pkt->stream_index == v->astream && v->actx && v->has_audio ) {
+             if ( avcodec_send_packet( v->actx, pkt ) >= 0 ) drain_decoder( v, v->actx, 0 );
+         } else {
+@@ -779,6 +864,7 @@ static int decode_thread( void * arg ) {
  
  static void vid_upload_slot( VIDEO * v, int slot ) {
      v->shown_count++;
@@ -214,7 +256,7 @@ index 0f604cb7..d376bd08 100644
      if ( !v->graph || !v->graph->tex ) return;
      if ( v->gpu ) yuv_render( v, v->vq[slot].rgba );
      else GPU_UpdateImageBytes( v->graph->tex, NULL, v->vq[slot].rgba, v->w * 4 );
-@@ -792,7 +868,7 @@ static void vid_tick( VIDEO * v ) {
+@@ -792,7 +878,7 @@ static void vid_tick( VIDEO * v ) {
      v->last_time = now;
  
      if ( !v->shown_first && v->vq_n > 0 ) {            /* poster frame before play() */
@@ -223,7 +265,7 @@ index 0f604cb7..d376bd08 100644
          vid_upload_slot( v, pick );
          pick = -1;
      }
-@@ -832,7 +908,24 @@ static enum AVSampleFormat av_fmt_for( Uint16 f, int * bps ) {
+@@ -832,7 +918,24 @@ static enum AVSampleFormat av_fmt_for( Uint16 f, int * bps ) {
      }
  }
  
@@ -248,7 +290,7 @@ index 0f604cb7..d376bd08 100644
      if ( v->wall0 > 0 )
          fprintf( stderr, "libmod_video: %dx%d %s: process CPU %.2f s in %.2f s wall (%.0f%% of one core)\n", v->w, v->h,
                   v->hw ? "hardware decoder" : "software decoder",
-@@ -843,13 +936,17 @@ static void vid_free( VIDEO * v ) {
+@@ -843,13 +946,17 @@ static void vid_free( VIDEO * v ) {
          SDL_WaitThread( v->thr, NULL );
          v->thr = NULL;
      }
@@ -267,7 +309,7 @@ index 0f604cb7..d376bd08 100644
      if ( v->bsf ) av_bsf_free( &v->bsf );
      if ( v->bsf_pkt ) av_packet_free( &v->bsf_pkt );
      if ( v->swr ) swr_free( &v->swr );
-@@ -859,13 +956,16 @@ static void vid_free( VIDEO * v ) {
+@@ -859,13 +966,16 @@ static void vid_free( VIDEO * v ) {
      for ( int i = 0; i < MAX_SUBS; i++ ) if ( v->sub_ctx[i] ) avcodec_free_context( &v->sub_ctx[i] );
      for ( int i = 0; i < v->ncues; i++ ) free( v->cues[i].text );
      free( v->cues );
@@ -284,7 +326,7 @@ index 0f604cb7..d376bd08 100644
  }
  
  static AVCodecContext * open_codec( AVFormatContext * fmt, int idx ) {
-@@ -882,8 +982,34 @@ static AVCodecContext * open_codec( AVFormatContext * fmt, int idx ) {
+@@ -882,8 +992,34 @@ static AVCodecContext * open_codec( AVFormatContext * fmt, int idx ) {
      return c;
  }
  
@@ -319,7 +361,7 @@ index 0f604cb7..d376bd08 100644
      int h;
      for ( h = 1; h <= MAX_VIDEOS; h++ ) if ( !g_vid[h].used ) break;
      if ( h > MAX_VIDEOS ) { string_discard( params[0] ); fprintf( stderr, "VIDEO_OPEN: too many open videos\n" ); return 0; }
-@@ -892,17 +1018,65 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
+@@ -892,17 +1028,65 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
      memset( v, 0, sizeof( *v ) );
      v->used = 1; v->volume = 1.0; v->vstream = v->astream = -1;
  
@@ -383,11 +425,11 @@ index 0f604cb7..d376bd08 100644
 +    if ( v->vctx->pix_fmt == AV_PIX_FMT_NONE || v->vctx->width <= 0 ) { fprintf( stderr, "VIDEO_OPEN: no picture format in %s (no video data found while probing)\n", path ); goto fail; }
      v->w = v->vctx->width; v->h = v->vctx->height;
      v->vtb = av_q2d( v->fmt->streams[v->vstream]->time_base );
-+    { int64_t st = v->fmt->streams[v->vstream]->start_time; v->vstart = st != AV_NOPTS_VALUE ? st * v->vtb : 0; if ( v->vstart < 0 ) v->vstart = 0; v->clk_base = v->vstart; }
++    { int64_t st = v->fmt->streams[v->vstream]->start_time; v->vstart = st != AV_NOPTS_VALUE ? st * v->vtb : 0; if ( v->vstart < 0 ) v->vstart = 0; v->clk_base = v->vstart; v->clk_a = v->vstart; v->clk_a_t0 = SDL_GetTicks(); }
      v->duration = v->fmt->duration > 0 ? v->fmt->duration / ( double ) AV_TIME_BASE : 0;
  
      /* colour conversion on the GPU: 8-bit 4:2:0 from libavcodec, or NV12 / 16-bit NV12 from the console's decoder */
-@@ -911,13 +1085,15 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
+@@ -911,13 +1095,15 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
          int fmt8 = pf == AV_PIX_FMT_YUV420P || pf == AV_PIX_FMT_YUVJ420P;
          int fmt10 = pf == AV_PIX_FMT_YUV420P10LE;
          int is_h264 = v->vctx->codec_id == AV_CODEC_ID_H264, is_hevc = v->vctx->codec_id == AV_CODEC_ID_HEVC;
@@ -404,7 +446,7 @@ index 0f604cb7..d376bd08 100644
                  if ( v->hw ) {
                      const AVBitStreamFilter * bf = av_bsf_get_by_name( is_hevc ? "hevc_mp4toannexb" : "h264_mp4toannexb" );
                      if ( bf && av_bsf_alloc( bf, &v->bsf ) >= 0 ) {
-@@ -974,6 +1150,8 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
+@@ -974,6 +1160,8 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
      if ( v->vq_size > VQ_MAX ) v->vq_size = VQ_MAX;
      if ( v->vq_size < 3 ) v->vq_size = 3;
      for ( int i = 0; i < v->vq_size; i++ ) { v->vq[i].rgba = ( uint8_t * ) calloc( 1, v->slot_bytes ); if ( !v->vq[i].rgba ) goto fail; }
@@ -413,7 +455,7 @@ index 0f604cb7..d376bd08 100644
      v->frame = av_frame_alloc();
  
      /* audio, if SDL_mixer is up */
-@@ -1008,7 +1186,7 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
+@@ -1008,7 +1196,7 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
  
      /* the graph that shows the video */
      {
@@ -422,7 +464,7 @@ index 0f604cb7..d376bd08 100644
          if ( !s ) goto fail;
          SDL_memset( s->pixels, 0, ( size_t ) s->pitch * s->h );
          v->graph = bitmap_new( 0, 0, 0, s );
-@@ -1019,6 +1197,7 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
+@@ -1019,6 +1207,7 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
          grlib_add_map( 0, v->graph );
      }
      if ( v->gpu ) {
@@ -430,7 +472,7 @@ index 0f604cb7..d376bd08 100644
          v->img_y = GPU_CreateImage( v->ypw, v->h,  GPU_FORMAT_RGBA );
          v->img_u = GPU_CreateImage( v->cpw, v->ch, GPU_FORMAT_RGBA );
          if ( v->hwmode == 0 ) v->img_v = GPU_CreateImage( v->cpw, v->ch, GPU_FORMAT_RGBA );
-@@ -1027,7 +1206,9 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
+@@ -1027,7 +1216,9 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
              GPU_SetImageFilter( v->img_u, GPU_FILTER_NEAREST );
              if ( v->img_v ) GPU_SetImageFilter( v->img_v, GPU_FILTER_NEAREST );
              GPU_SetBlending( v->img_y, 0 );
@@ -440,7 +482,7 @@ index 0f604cb7..d376bd08 100644
          }
          if ( !v->tgt ) {                              /* GPU path unavailable: back to the CPU converter */
              fprintf( stderr, "libmod_video: GPU conversion unavailable, using software\n" );
-@@ -1051,8 +1232,18 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
+@@ -1051,8 +1242,18 @@ int64_t libmod_video_open( INSTANCE * my, int64_t * params ) {
  
      v->mx = SDL_CreateMutex(); v->cond = SDL_CreateCond();
      if ( !g_obj_id ) g_obj_id = gr_new_object( 0, obj_info, NULL, NULL );
@@ -459,7 +501,7 @@ index 0f604cb7..d376bd08 100644
      v->thr = SDL_CreateThreadWithStackSize( decode_thread, "video", ( size_t ) 8 << 20, v );   /* the console's decoder needs a big stack */
  #else
      v->thr = SDL_CreateThread( decode_thread, "video", v );
-@@ -1079,6 +1270,94 @@ int64_t libmod_video_hw( INSTANCE * my, int64_t * params ) { VIDEO * v = vid_get
+@@ -1079,6 +1280,94 @@ int64_t libmod_video_hw( INSTANCE * my, int64_t * params ) { VIDEO * v = vid_get
  /* VIDEO_GPU(handle): 1 if that video converts on the GPU */
  int64_t libmod_video_gpu( INSTANCE * my, int64_t * params ) { VIDEO * v = vid_get( params[0] ); return v ? v->gpu : 0; }
  
@@ -554,7 +596,7 @@ index 0f604cb7..d376bd08 100644
  int64_t libmod_video_graph( INSTANCE * my, int64_t * params ) { VIDEO * v = vid_get( params[0] ); return v ? v->graph_code : 0; }
  int64_t libmod_video_width( INSTANCE * my, int64_t * params ) { VIDEO * v = vid_get( params[0] ); return v ? v->w : 0; }
  int64_t libmod_video_height( INSTANCE * my, int64_t * params ) { VIDEO * v = vid_get( params[0] ); return v ? v->h : 0; }
-@@ -1176,6 +1455,38 @@ int64_t libmod_video_subtitle_select( INSTANCE * my, int64_t * params ) {
+@@ -1176,6 +1465,38 @@ int64_t libmod_video_subtitle_select( INSTANCE * my, int64_t * params ) {
      return v->sub_sel >= 0;
  }
  
@@ -593,7 +635,7 @@ index 0f604cb7..d376bd08 100644
  /* load an external subtitle file (.srt .ass .ssa .vtt ...) as an extra track, which becomes selected */
  int64_t libmod_video_subtitle_load( INSTANCE * my, int64_t * params ) {
      VIDEO * v = vid_get( params[0] );
-@@ -1270,4 +1581,146 @@ void __bgdexport( libmod_video, module_finalize )() {
+@@ -1270,4 +1591,146 @@ void __bgdexport( libmod_video, module_finalize )() {
      if ( g_obj_id ) { gr_destroy_object( g_obj_id ); g_obj_id = 0; }
  }
  

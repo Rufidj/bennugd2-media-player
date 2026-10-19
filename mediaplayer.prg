@@ -240,6 +240,7 @@ begin
     if (getenv("MP_VIZ") != "") viz_mode = atoi(getenv("MP_VIZ")); end   // solo pruebas
     say("MediaPlayer: carpeta " + cur_dir + ", " + n_entries + " entradas");
 
+    if (getenv("MP_TRACE") != "") http_trace("PATH:" + getenv("MP_TRACE")); end   // traza del motor de video (libmod_video)
     shot_path = getenv("MP_SHOT");
     if (getenv("MP_SHOTF") != "") shot_frame = atoi(getenv("MP_SHOTF")); end
     open_file = getenv("MP_OPEN");

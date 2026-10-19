@@ -20,7 +20,7 @@ cp -r res/fonts "$STAGE/res/"
 cp lang/*.txt "$STAGE/lang/"
 cp lists/*.m3u samples/* "$STAGE/videos/"
 mkdir -p "$STAGE/addons"
-for a in plex radio-browser somafm internet-archive; do cp -r "addons/$a" "$STAGE/addons/"; done  # incluye logo.png
+for a in plex radio-browser somafm internet-archive peertube youtube; do cp -r "addons/$a" "$STAGE/addons/"; done  # incluye logo.png
 cp ADDONS.md ADDONS.es.md "$STAGE/addons/" 2>/dev/null || true
 
 # 3. motor + eboot + carpeta del titulo

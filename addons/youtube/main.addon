@@ -1,0 +1,640 @@
+# YouTube addon for the BennuGD2 Media Player
+#
+# YouTube does not give its videos away like other sites do: the web page hands out obfuscated
+# addresses that this player cannot use. This addon asks the very same internal API the web page
+# uses ("Innertube") for the list it keeps for Apple's visionOS, which is the only one that still
+# answers with a plain HLS list. From that list only the H.264 variant and the audio are kept, and
+# the small result is handed to the player inside the address of the item itself. No helper program,
+# no Python and no change to the player are needed.
+#
+# Only H.264 is offered because it is the only video codec the decoder of a PlayStation 5 knows.
+# The quality and the country of the listings are addon settings: press SQUARE on the addon in the
+# Addons list to change them.
+
+addon "YouTube"
+id youtube
+version 1.0
+author "BennuGD2 Media Player"
+description "YouTube: popular videos, search of videos, channels and playlists, channel browsing and playback in H.264 up to 1080p."
+
+setting quality is choice, label "Highest quality (H.264)", default "1080p", choices "1080p", "720p", "480p", "360p"
+setting region is text, label "Country of the listings (ES, US, MX...; empty for the default)"
+
+# --------------------------------------------------------------------------- the first page
+
+page home:
+    show folder "Popular this week" opening results with ep is "search" with body is search_body("", "CAMSBAgDEAE=") with kind is "video" with title is "Popular this week" info "The videos with the most views of the last seven days"
+    show folder "Most viewed ever" opening results with ep is "search" with body is search_body("", "CAMSAhAB") with kind is "video" with title is "Most viewed ever" info "The most watched videos of all time"
+    show folder "Search videos..." opening search_videos info "Type what you want to watch"
+    show folder "Search channels..." opening search_channels info "Find a channel and browse its videos and playlists"
+    show folder "Search playlists..." opening search_playlists info "Lists of videos made by anybody"
+    show folder "Open a link or an id" opening open_any info "Paste a youtube.com address or the id of a video or a playlist"
+
+# --------------------------------------------------------------------------- searching
+
+page search_videos:
+    ask "What do you want to watch?" into q
+    if q is empty:
+        stop
+    load("search", search_body(q, "EgIQAQ=="), "video", q)
+
+page search_channels:
+    ask "Which channel are you looking for?" into q
+    if q is empty:
+        stop
+    load("search", search_body(q, "EgIQAg=="), "channel", q)
+
+page search_playlists:
+    ask "Which playlists are you looking for?" into q
+    if q is empty:
+        stop
+    load("search", search_body(q, "EgIQAw=="), "playlist", q)
+
+page open_any:
+    ask "Paste a YouTube address or the id of a video or a playlist:" into q
+    open_link(trim(q))
+
+# a list of items, asked to the internal YouTube API. The body keeps the query (or the "ask for
+# more" token) so that the "More results..." folder can be opened again with the same arguments.
+page results with ep, body, kind, title:
+    load(ep, body, kind, title)
+
+# --------------------------------------------------------------------------- a channel
+
+page channel with id, title:
+    show folder "Videos" opening results with ep is "browse" with body is browse_body(id, "EgZ2aWRlb3PyBgQKAjoA") with kind is "auto" with title is title info "Everything the channel has published"
+    show folder "Playlists" opening results with ep is "browse" with body is browse_body(id, "EglwbGF5bGlzdHPyBgoKCEIGCgIQaCIA") with kind is "auto" with title is title info "The playlists the channel has made"
+
+# --------------------------------------------------------------------------- playing
+
+# The player needs the address of a video when the item is made, and working it out takes about a
+# second, so the lists never do it: every list shows folders, and opening one comes here, which
+# works out the address and then offers the video in a list of one.
+page play with id, title, pic, note:
+    message "Getting the video ready..."
+    set u to play_url(id)
+    clear message
+    show video title playing u logo pic info note
+
+# --------------------------------------------------------------------------- shared code
+
+define ua():
+    give back "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/26.0 Safari/605.1.15"
+
+define search_body(q, p):
+    give back {query: q, params: p}
+
+define browse_body(id, p):
+    give back {browseId: id, params: p}
+
+# asks the internal YouTube API; the answer comes back already read as JSON
+define api(ep, body):
+    set cl to {clientName: "WEB", clientVersion: "2.20260708.00.00", hl: "en"}
+    if region is not empty:
+        set cl.gl to upper(trim(region))
+    set body.context to {client: cl}
+    try:
+        fetch json from "https://www.youtube.com/youtubei/v1/{ep}?prettyPrint=false" with body body
+    on error:
+        clear message
+        fail "YouTube could not be reached: {error}"
+    give back result
+
+# loads one page of items and adds a folder for the next one when YouTube offers more
+define load(ep, body, kind, title):
+    message "Loading..."
+    set r to api(ep, body)
+    clear message
+    if render_all(r, kind) is 0:
+        fail "There is nothing to show here."
+    set tok to cont_of(r)
+    if tok is not empty:
+        show folder "More results..." opening results with ep is ep with body is {continuation: tok} with kind is kind with title is title info "Ask YouTube for the next page"
+    give back 0
+
+# --------------------------------------------------------------------------- items of a list
+
+define render_all(r, kind):
+    set ritems to cont_items(r)
+    if length(ritems) is greater than 0:
+        give back render_sections(ritems, kind, 0)
+    set c to get(r, "contents")
+    set search to get(c, "twoColumnSearchResultsRenderer")
+    if search is not nothing:
+        set sl to get(get(search, "primaryContents"), "sectionListRenderer")
+        give back render_sections(default(get(sl, "contents"), []), kind, 0)
+    set browse to get(c, "twoColumnBrowseResultsRenderer")
+    if browse is not nothing:
+        set n to 0
+        for each t in default(get(browse, "tabs"), []):
+            set content to get(get(t, "tabRenderer"), "content")
+            if content is not nothing:
+                set n to render_content(content, kind, n)
+        give back n
+    give back 0
+
+define render_sections(sections, kind, n):
+    set cnt to n
+    for each sec in sections:
+        set ir to get(sec, "itemSectionRenderer")
+        if ir is not nothing:
+            for each it in default(get(ir, "contents"), []):
+                set cnt to render_item(it, kind, cnt)
+        set sh to get(sec, "shelfRenderer")
+        if sh is not nothing:
+            set hl to get(get(sh, "content"), "horizontalListRenderer")
+            for each it in default(get(hl, "items"), []):
+                set cnt to render_item(it, kind, cnt)
+        if ir is nothing and sh is nothing:
+            set cnt to render_item(sec, kind, cnt)
+    give back cnt
+
+define render_content(content, kind, n):
+    set cnt to n
+    set rg to get(content, "richGridRenderer")
+    if rg is not nothing:
+        for each it in default(get(rg, "contents"), []):
+            set cnt to render_item(it, kind, cnt)
+        give back cnt
+    set sl to get(content, "sectionListRenderer")
+    if sl is not nothing:
+        give back render_sections(default(get(sl, "contents"), []), kind, cnt)
+    set gr to get(content, "gridRenderer")
+    if gr is not nothing:
+        for each it in default(get(gr, "items"), []):
+            set cnt to render_item(it, kind, cnt)
+    give back cnt
+
+define render_item(it, kind, n):
+    set cnt to n
+    set gr to get(it, "gridRenderer")
+    if gr is not nothing:
+        for each g in default(get(gr, "items"), []):
+            set cnt to render_item(g, kind, cnt)
+        give back cnt
+    set v to get(it, "videoRenderer")
+    if v is not nothing:
+        if show_video(v) is 1:
+            set cnt to cnt + 1
+        give back cnt
+    set ri to get(it, "richItemRenderer")
+    if ri is not nothing:
+        give back render_item(get(ri, "content"), kind, cnt)
+    set lk to get(it, "lockupViewModel")
+    if lk is not nothing:
+        if show_lockup(lk, kind) is 1:
+            set cnt to cnt + 1
+        give back cnt
+    set ch to get(it, "channelRenderer")
+    if ch is not nothing:
+        if show_channel(ch) is 1:
+            set cnt to cnt + 1
+        give back cnt
+    set pl to get(it, "playlistRenderer")
+    if pl is not nothing:
+        if show_playlist(pl) is 1:
+            set cnt to cnt + 1
+    give back cnt
+
+# a video of the classic kind (search results and some shelves)
+define show_video(v):
+    set id to default(get(v, "videoId"), "")
+    if id is empty:
+        give back 0
+    if default(get(v, "isLiveNow"), false):
+        give back 0
+    set t to text_of(get(v, "title"))
+    if t is empty:
+        set t to id
+    show folder t opening play with id is id with title is t with pic is thumb(id) with note is video_info(v) logo thumb(id) info video_info(v) duration secs_of(text_of(get(v, "lengthText")))
+    give back 1
+
+# a video, a playlist or a channel of the new kind (everything YouTube shows as a "lockup")
+define show_lockup(l, kind):
+    set id to default(get(l, "contentId"), "")
+    if id is empty:
+        give back 0
+    set t to text_of(get(get(get(l, "metadata"), "lockupMetadataViewModel"), "title")["content"])
+    if t is empty:
+        set t to id
+    set ispl to kind is "playlist"
+    if kind is "auto":
+        set ct to default(get(l, "contentType"), "")
+        set ispl to ct contains "PLAYLIST" or ct contains "COURSE" or ct contains "SHOW" or ct contains "PODCAST"
+    if ispl:
+        show folder t opening results with ep is "browse" with body is {browseId: "VL{id}"} with kind is "auto" with title is t logo lockup_img(l) info lockup_info(l)
+    otherwise:
+        show folder t opening play with id is id with title is t with pic is thumb(id) with note is lockup_info(l) logo thumb(id) info lockup_info(l) duration secs_of(lockup_dur(l))
+    give back 1
+
+define show_channel(c):
+    set id to default(get(c, "channelId"), "")
+    if id is empty:
+        give back 0
+    set t to text_of(get(c, "title"))
+    if t is empty:
+        set t to id
+    set parts to []
+    set sub to text_of(get(c, "subscriberCountText"))
+    if sub is not empty:
+        add sub to parts
+    set vc to text_of(get(c, "videoCountText"))
+    if vc is not empty:
+        add vc to parts
+    set d to text_of(get(c, "descriptionSnippet"))
+    if d is not empty:
+        add shorten(d, 80) to parts
+    show folder t opening channel with id is id with title is t logo thumbs_img(c) info join(parts, " - ")
+    give back 1
+
+define show_playlist(pl):
+    set id to default(get(pl, "playlistId"), "")
+    if id is empty:
+        give back 0
+    set t to text_of(get(pl, "title"))
+    if t is empty:
+        set t to id
+    show folder t opening results with ep is "browse" with body is {browseId: "VL{id}"} with kind is "auto" with title is t logo thumbs_img(pl) info text_of(get(pl, "videoCountText"))
+    give back 1
+
+# --------------------------------------------------------------------------- small pieces of an item
+
+define video_info(v):
+    set parts to []
+    set who to text_of(get(v, "ownerText"))
+    if who is empty:
+        set who to text_of(get(v, "shortBylineText"))
+    if who is not empty:
+        add who to parts
+    set vw to text_of(get(v, "viewCountText"))
+    if vw is empty:
+        set vw to text_of(get(v, "shortViewCountText"))
+    if vw is not empty:
+        add vw to parts
+    set ago to text_of(get(v, "publishedTimeText"))
+    if ago is not empty:
+        add ago to parts
+    give back join(parts, " - ")
+
+define lockup_info(l):
+    set parts to []
+    set rows to get(get(get(get(l, "metadata"), "lockupMetadataViewModel"), "metadata"), "contentMetadataViewModel")
+    for each row in default(get(rows, "metadataRows"), []):
+        for each p in default(get(row, "metadataParts"), []):
+            set tx to get(get(p, "text"), "content")
+            if tx is not nothing:
+                add tx to parts
+    set d to lockup_dur(l)
+    if d is not empty:
+        add d to parts
+    give back join(parts, " - ")
+
+define lockup_dur(l):
+    set ov to default(get(get(get(l, "contentImage"), "thumbnailViewModel"), "overlays"), [])
+    for each o in ov:
+        set bo to get(o, "thumbnailBottomOverlayViewModel")
+        for each b in default(get(bo, "badges"), []):
+            set t to get(get(b, "thumbnailBadgeViewModel"), "text")
+            if t is not nothing:
+                give back t
+    give back ""
+
+define lockup_img(l):
+    set img to get(get(l, "contentImage"), "thumbnailViewModel")
+    give back src_url(default(get(get(img, "image"), "sources"), []))
+
+define thumbs_img(o):
+    give back src_url(default(get(get(o, "thumbnail"), "thumbnails"), []))
+
+define src_url(list):
+    if length(list) is 0:
+        give back ""
+    set u to default(get(last(list), "url"), "")
+    if u starts with "//":
+        set u to "https:{u}"
+    give back u
+
+define thumb(id):
+    give back "https://i.ytimg.com/vi/{id}/mqdefault.jpg"
+
+# "1:02:03" or "4:05" -> seconds
+define secs_of(t):
+    if t is empty:
+        give back 0
+    set p to split(t, ":")
+    if length(p) is 3:
+        give back number(p[1]) * 3600 + number(p[2]) * 60 + number(p[3])
+    if length(p) is 2:
+        give back number(p[1]) * 60 + number(p[2])
+    give back 0
+
+# the text of a YouTube label, which is written either as "simpleText", as a list of "runs" or
+# plainly as "content"
+define text_of(v):
+    if v is nothing:
+        give back ""
+    if has(v, "simpleText"):
+        give back default(get(v, "simpleText"), "")
+    if has(v, "runs"):
+        set parts to []
+        for each r in default(get(v, "runs"), []):
+            add default(get(r, "text"), "") to parts
+        give back join(parts, "")
+    if has(v, "content"):
+        give back default(get(v, "content"), "")
+    give back text(v)
+
+# --------------------------------------------------------------------------- the "more" token
+
+# a page asked with a "more" token does not answer with "contents" but with a list of actions
+define cont_items(r):
+    set cmds to get(r, "onResponseReceivedCommands")
+    if cmds is nothing:
+        set cmds to get(r, "onResponseReceivedActions")
+    set out to []
+    for each c in default(cmds, []):
+        set act to get(c, "appendContinuationItemsAction")
+        if act is not nothing:
+            for each it in default(get(act, "continuationItems"), []):
+                add it to out
+    give back out
+
+define cont_of(r):
+    set ritems to cont_items(r)
+    if length(ritems) is greater than 0:
+        give back cont_in(ritems)
+    set c to get(r, "contents")
+    set search to get(c, "twoColumnSearchResultsRenderer")
+    if search is not nothing:
+        set sl to get(get(search, "primaryContents"), "sectionListRenderer")
+        give back cont_in(default(get(sl, "contents"), []))
+    set browse to get(c, "twoColumnBrowseResultsRenderer")
+    if browse is not nothing:
+        for each t in default(get(browse, "tabs"), []):
+            set content to get(get(t, "tabRenderer"), "content")
+            if content is not nothing:
+                set rg to get(content, "richGridRenderer")
+                if rg is not nothing:
+                    give back cont_in(default(get(rg, "contents"), []))
+                set sl2 to get(content, "sectionListRenderer")
+                if sl2 is not nothing:
+                    give back cont_in(default(get(sl2, "contents"), []))
+    give back ""
+
+define cont_in(items):
+    if length(items) is 0:
+        give back ""
+    set l to last(items)
+    set ci to get(l, "continuationItemRenderer")
+    if ci is nothing:
+        set sub to default(get(get(l, "itemSectionRenderer"), "contents"), [])
+        if length(sub) is 0:
+            set sub to default(get(get(l, "gridRenderer"), "items"), [])
+        give back cont_in(sub)
+    set cc to get(get(ci, "continuationEndpoint"), "continuationCommand")
+    give back default(get(cc, "token"), "")
+
+# --------------------------------------------------------------------------- opening a link
+
+define open_link(t):
+    if t is empty:
+        stop
+    set pl to arg_of(t, "list")
+    set vi to arg_of(t, "v")
+    if pl is empty and vi is empty:
+        if t starts with "PL" or t starts with "UU" or t starts with "OL" or t starts with "FL" or t starts with "RD":
+            set pl to t
+        otherwise if t contains "youtu.be/":
+            set vi to id_after(t, "youtu.be/")
+        otherwise if t contains "/shorts/":
+            set vi to id_after(t, "/shorts/")
+        otherwise if t contains "/live/":
+            set vi to id_after(t, "/live/")
+        otherwise if t contains "/embed/":
+            set vi to id_after(t, "/embed/")
+        otherwise if length(t) is 11:
+            set vi to t
+    if pl is empty and vi is empty:
+        fail "That does not look like a YouTube address or id. Try a name in the searches instead."
+    if pl is not empty:
+        load("browse", {browseId: "VL{pl}"}, "auto", "Playlist")
+        give back 0
+    message "Getting the video ready..."
+    set mm to manifest(vi, visitor(vi))
+    set u to data_url(mm[1])
+    set ti to mm[2]
+    if ti is empty:
+        set ti to vi
+    clear message
+    show video ti playing u logo thumb(vi) info "Ready"
+    give back 0
+
+define arg_of(u, name):
+    set p to index_of(u, name + "=")
+    if p is 0:
+        give back ""
+    set r to slice(u, p + length(name) + 1, 999999)
+    set q to index_of(r, "&")
+    if q is 0:
+        give back r
+    give back slice(r, 1, q - 1)
+
+# "https://youtu.be/ID?t=5" or "/shorts/ID/..." -> "ID"
+define id_after(t, m):
+    set r to slice(t, index_of(t, m) + length(m), 999999)
+    set q to index_of(r, "?")
+    if q is not 0:
+        set r to slice(r, 1, q - 1)
+    set q to index_of(r, "/")
+    if q is not 0:
+        set r to slice(r, 1, q - 1)
+    give back r
+
+# --------------------------------------------------------------------------- playing a video
+
+define play_url(vid):
+    set mm to manifest(vid, visitor(vid))
+    give back data_url(mm[1])
+
+# the address of the page carries a session id that YouTube then wants to see in the player request
+define visitor(vid):
+    try:
+        fetch text from "https://www.youtube.com/embed/{vid}" with header "User-Agent" is ua()
+    on error:
+        clear message
+        fail "YouTube could not be reached: {error}"
+    set v to between(result, '"VISITOR_DATA":"', '"')
+    if v is empty:
+        clear message
+        fail "YouTube did not give a session for this video. It may be private, age-restricted or not allowed in your country."
+    give back v
+
+# the visionOS client is the only one that still answers with a plain HLS list.
+# gives back [the address of the list, the real title of the video]
+define manifest(vid, vis):
+    set cl to {clientName: "VISIONOS", clientVersion: "1.02", deviceMake: "Apple", deviceModel: "RealityDevice17,1", userAgent: ua(), osName: "visionOS", osVersion: "26.5.23O471", hl: "en", timeZone: "UTC", utcOffsetMinutes: 0}
+    set body to {context: {client: cl}, videoId: vid, contentCheckOk: true, racyCheckOk: true}
+    try:
+        fetch text from "https://www.youtube.com/youtubei/v1/player?prettyPrint=false" with header "User-Agent" is ua() with header "X-Youtube-Client-Name" is "101" with header "X-Youtube-Client-Version" is "1.02" with header "X-Goog-Visitor-Id" is vis with body body
+    on error:
+        clear message
+        fail "The video could not be asked for: {error}"
+    set u to between(result, '"hlsManifestUrl":"', '"')
+    if u is empty:
+        set st to between(result, '"playabilityStatus":{"status":"', '"')
+        clear message
+        if st is empty:
+            fail "This video cannot be played here."
+        fail "This video cannot be played here ({st})."
+    set vd to result
+    set p to index_of(result, '"videoDetails"')
+    if p is greater than 0:
+        set vd to slice(result, p, 999999)
+    give back [replace(u, "\u0026", "&"), between(vd, '"title":"', '"')]
+
+# from the list of the video only the H.264 variant and the audio are kept: the player always takes
+# the best stream it finds, and that would be a VP9 one, which a PlayStation 5 cannot decode. The
+# small result travels inside the address itself ("data:"), so the player opens it like any stream.
+define data_url(m):
+    try:
+        fetch text from m with header "User-Agent" is ua()
+    on error:
+        clear message
+        fail "The parts list of the video could not be downloaded: {error}"
+    set lines to split(result, "\n")
+    set want to qlimit()
+    set auds to []
+    set cands to []
+    set sinfo to ""
+    set suri to ""
+    set small to 999999
+    for each l in lines:
+        if l starts with "#EXT-X-MEDIA:" and l contains "TYPE=AUDIO":
+            add l to auds
+        if l starts with "#EXT-X-STREAM-INF" and l contains "avc1":
+            set h to res_h(l)
+            if h is greater than 0 and index is less than length(lines):
+                add [h, l, lines[index + 1]] to cands
+                if h is less than small:
+                    set small to h
+                    set sinfo to l
+                    set suri to lines[index + 1]
+    if length(cands) is 0:
+        clear message
+        fail "This video has no H.264 version, which is the only one this player can show."
+    # a video that was just uploaded may still be preparing its higher qualities: the list of such a
+    # variant answers "not found", so each candidate is asked for (only its first bytes) before it is
+    # chosen, and the next lower one is tried when it is not ready
+    set lim to want
+    set tries to 0
+    set vinfo to ""
+    set vuri to ""
+    while tries is less than 4:
+        set tries to tries + 1
+        set bh to 0
+        set cinfo to ""
+        set curi to ""
+        for each c in cands:
+            if c[1] is at most lim and c[1] is greater than bh:
+                set bh to c[1]
+                set cinfo to c[2]
+                set curi to c[3]
+        if curi is empty:
+            if tries is 1 and suri is not empty:
+                # the video has nothing as low as the wanted quality: the smallest one is used
+                set cinfo to sinfo
+                set curi to suri
+                set bh to small
+            otherwise:
+                exit loop
+        if playlist_ok(curi) is 1:
+            set vinfo to cinfo
+            set vuri to curi
+            exit loop
+        set lim to bh - 1
+    if vuri is empty:
+        clear message
+        fail "None of the H.264 versions of this video is ready yet. Try again in a while."
+    # only one audio track is kept, the original one (not a dub): every extra track is another list
+    # the player has to read before it starts, which on a console is felt as a long wait
+    set g to between(vinfo, 'AUDIO="', '"')
+    set keep to ""
+    set fall to ""
+    for each a in auds:
+        if g is empty or a contains "GROUP-ID=\"{g}\"":
+            if fall is empty:
+                set fall to a
+            if keep is empty and a contains "original":
+                set keep to a
+    if keep is empty:
+        set keep to fall
+    set out to "#EXTM3U" + "\n" + "#EXT-X-INDEPENDENT-SEGMENTS" + "\n"
+    if keep is not empty:
+        set out to out + keep + "\n"
+    set out to out + drop_attr(vinfo, "SUBTITLES") + "\n" + vuri + "\n"
+    give back "data:application/vnd.apple.mpegurl," + out + ".m3u8"
+
+# does this variant list exist yet? only its first bytes are asked for
+define playlist_ok(u):
+    try:
+        fetch text from u with header "User-Agent" is ua() with header "Range" is "bytes=0-0"
+    on error:
+        give back 0
+    give back 1
+
+define qlimit():
+    if quality is "720p":
+        give back 720
+    if quality is "480p":
+        give back 480
+    if quality is "360p":
+        give back 360
+    give back 1080
+
+# "RESOLUTION=1920x1080,FRAME-RATE=..." -> 1080
+define res_h(line):
+    set p to index_of(line, "RESOLUTION=")
+    if p is 0:
+        give back 0
+    set r to slice(line, p + 11, p + 26)
+    set wh to split(r, "x")
+    if length(wh) is less than 2:
+        give back 0
+    set h to split(wh[2], ",")
+    give back number(h[1])
+
+# a variant may point to a group of subtitles; those are not carried over
+define drop_attr(line, name):
+    set p to index_of(line, name + "=\"")
+    if p is 0:
+        give back line
+    set head to slice(line, 1, p - 1)
+    set rest to slice(line, p + length(name) + 2, 999999)
+    set q to index_of(rest, "\"")
+    if q is 0:
+        give back head
+    set rest to slice(rest, q + 1, 999999)
+    if head ends with ",":
+        set head to slice(head, 1, length(head) - 1)
+    otherwise if rest starts with ",":
+        set rest to slice(rest, 2, 999999)
+    give back trim(head) + rest
+
+# --------------------------------------------------------------------------- small helpers
+
+# reads a field of a record without complaining when the value before the dot is missing
+define get(v, k):
+    if has(v, k):
+        give back v[k]
+    give back nothing
+
+# the text between two markers of a bigger piece of text
+define between(s, a, b):
+    set p to index_of(s, a)
+    if p is 0:
+        give back ""
+    set r to slice(s, p + length(a), 999999)
+    set q to index_of(r, b)
+    if q is 0:
+        give back ""
+    give back slice(r, 1, q - 1)
