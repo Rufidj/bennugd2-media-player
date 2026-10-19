@@ -1085,24 +1085,29 @@ begin
     c[4] = join_path(cd(), "mediaplayer_data");
     store_dir = "";
     for (i = 0; i < 5; i++)
-        if (c[i] != "")
-            mkdir(c[i]);
-            mkdir(join_path(c[i], "listas"));
-            if (is_writable(join_path(c[i], "listas")))
-                store_dir = c[i]; lists_dir = join_path(c[i], "listas"); break;
-            end
+        if (c[i] != "" && is_writable(c[i]))
+            store_dir = c[i]; break;
         end
     end
-    if (store_dir != "") mkdir(join_path(store_dir, "addons")); mkdir(join_path(store_dir, "addons_data")); end
+    if (store_dir == "")
+        // ninguna carpeta se puede escribir de verdad: se usa igualmente la mejor candidata, porque
+        // el motor guarda en memoria y asi los ajustes y las listas funcionan al menos en esta sesion
+        if (getenv("MP_STORE") != "") store_dir = getenv("MP_STORE"); else store_dir = c[4]; end
+    end
+    lists_dir = join_path(store_dir, "listas");
+    mkdir(store_dir); mkdir(lists_dir); mkdir(join_path(store_dir, "addons")); mkdir(join_path(store_dir, "addons_data"));
     say("MediaPlayer: almacen = [" + store_dir + "]");
 end
 
-function is_writable(string d)
-private int fh;
+// ¿se puede escribir DE VERDAD en esta carpeta?  El fopen de los prg guarda en memoria cuando la
+// ruta no existe (dice que si aunque en el disco no haya nada), asi que se prueba con http_write,
+// que escribe con el disco real: asi en un PC no se elige /data/mediaplayer, que no se puede crear
+function int is_writable(string d)
 begin
-    fh = fopen(join_path(d, ".probe"), O_WRITE);
-    if (!fh) return 0; end
-    fputs(fh, "ok"); fclose(fh);
+    mkdir(d);
+    mkdir(join_path(d, "listas"));
+    if (!http_write(join_path(d, ".probe"), "ok")) return 0; end
+    fremove(join_path(d, ".probe"));
     return 1;
 end
 

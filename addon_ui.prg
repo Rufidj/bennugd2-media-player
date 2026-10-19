@@ -689,7 +689,7 @@ end
 
 // una descarga por fotograma: la pantalla se repinta entre fichero y fichero y se ve el avance
 function store_step()
-private int st; string fn, url;
+private int st; string fn, url, why;
 begin
     if (store_ji == 0) mkdir(store_jdir); end
     if (store_jerr == 0)
@@ -707,7 +707,10 @@ begin
         store_job = 0; addon_busy = 0; s_amsg = "";
         if (store_jerr != 0)
             if (store_jerr == -2) fremove(join_path(store_jdir, "main.addon")); end   // el fichero bajado no es un addon
-            show_error(tr("mt_store"), tr("t_store_fail") + " " + store_jname + (store_jerr > 0 ? " (" + store_jerr + ")" : ""));
+            if (store_jerr == -1) why = tr("t_store_nosave");
+            elseif (store_jerr == -2) why = tr("t_store_badfile");
+            else why = tr("t_store_http") + " " + store_jerr; end
+            show_error(tr("mt_store"), tr("t_store_fail") + " " + store_jname + ": " + why);
         else
             entry_siver[store_jrow] = installed_ver(store_jid);
             dir_ver++; lbl_ver = -1; pv_idx = -1;
