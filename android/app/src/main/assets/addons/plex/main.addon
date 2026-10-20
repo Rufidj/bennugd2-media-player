@@ -1,0 +1,173 @@
+# Plex addon for the BennuGD2 Media Player
+# Browse the libraries of your own Plex Media Server and play the files directly ("direct play").
+#
+# The server address and your token are settings: each user types their own in the addon settings
+# (press SQUARE on the addon in the Addons list). Nothing secret is written in this file.
+
+addon "Plex"
+id plex
+version 0.1
+author "BennuGD2 Media Player"
+description "Plex free catalogue (watch.plex.tv) and your own Plex Media Server."
+
+setting server is text, label "Server address (set by Choose a server, or type http://IP:32400)"
+setting server_token is secret text, label "Server access token (set by Choose a server)"
+setting token is secret text, label "Plex token (filled by Sign in, or paste yours)"
+setting client is text, label "Device id (made automatically)"
+
+# Sign in with a code: no password is typed on the console
+page login:
+    if client is empty:
+        set made to uuid()
+        save client as made
+    fetch json from "https://plex.tv/api/v2/pins?strong=false" with method "POST" with header "Accept" is "application/json" with header "X-Plex-Client-Identifier" is client with header "X-Plex-Product" is "BennuGD2 Media Player"
+    set pin to result
+    message "On your phone or computer open plex.tv/link and type the code {pin.code}  (circle cancels)"
+    set found to nothing
+    repeat 90 times:
+        wait 2 seconds
+        fetch json from "https://plex.tv/api/v2/pins/{pin.id}" with header "Accept" is "application/json" with header "X-Plex-Client-Identifier" is client
+        if result.authToken is not nothing:
+            set found to result.authToken
+            exit loop
+    clear message
+    if found is nothing:
+        fail "The code was not entered in time. Try again."
+    save token as found
+    show folder "Signed in! Press circle and open Plex again" opening home
+
+# the first page
+page home:
+    if token is empty:
+        show folder "Sign in with plex.tv (get a code)" opening login info "You will type a short code at plex.tv/link on your phone or computer. Nothing is stored except the token, in the addon settings."
+        stop
+    show folder "Free movies and shows (On Plex)" opening free info "The free, ad-supported catalogue of watch.plex.tv. Needs only a (free) Plex account."
+    show folder "Choose a Plex server" opening servers info "Lists the servers of your plex.tv account, including servers shared with you by other users."
+    show folder "Open the chosen server" opening server info "The libraries of the server you chose (or typed in the addon settings)."
+
+# ---- the free catalogue (https://watch.plex.tv)
+page free:
+    fetch json from "https://vod.provider.plex.tv/hubs/promoted" with header "Accept" is "application/json" with header "X-Plex-Token" is token with header "X-Plex-Client-Identifier" is client
+    for each hub in result.MediaContainer.Hub:
+        show folder hub.title opening freehub with key is hub.key with title is hub.title
+
+page freehub with key, title:
+    fetch json from "https://vod.provider.plex.tv{key}?count=60" with header "Accept" is "application/json" with header "X-Plex-Token" is token with header "X-Plex-Client-Identifier" is client
+    set shown to []
+    set skipped to []
+    for each item in result.MediaContainer.Metadata:
+        show_free(item, shown, skipped)
+    check_protected(shown, skipped)
+
+page freekids with id, title:
+    fetch json from "https://vod.provider.plex.tv/library/metadata/{id}/children" with header "Accept" is "application/json" with header "X-Plex-Token" is token with header "X-Plex-Client-Identifier" is client
+    set shown to []
+    set skipped to []
+    for each item in result.MediaContainer.Metadata:
+        show_free(item, shown, skipped)
+    check_protected(shown, skipped)
+
+# Plex encrypts some of its catalogue (DRM). Those titles cannot be played here, so they are not listed.
+define check_protected(shown, skipped):
+    if length(shown) is 0 and length(skipped) is greater than 0:
+        fail "These titles are protected with DRM by Plex and cannot be played in this player. Titles without DRM (for example many movies) work fine."
+    give back 0
+
+define show_free(item, shown, skipped):
+    if item.type is "show" or item.type is "season":
+        show folder item.title opening freekids with id is item.ratingKey with title is item.title logo item.thumb info shorten(default(item.summary, ""), 200) year default(item.year, 0)
+        add 1 to shown
+        give back 0
+    if has(item, "Media"):
+        set path to ""
+        for each media in item.Media:
+            if media.protocol is "hls" and not default(media.drm, false):
+                set path to media.Part[1].key
+        if path is empty:
+            add 1 to skipped
+            give back 0
+        show video item.title playing "https://vod.provider.plex.tv{path}" with header "X-Plex-Token" is token with header "X-Plex-Client-Identifier" is client logo item.thumb info shorten(default(item.summary, ""), 200) year default(item.year, 0) duration round(default(item.duration, 0) / 1000)
+        add 1 to shown
+    give back 0
+
+# ---- choose a server from the plex.tv account (own servers and servers shared with you)
+page servers:
+    fetch json from "https://plex.tv/api/v2/resources?includeHttps=1&includeRelay=1" with header "Accept" is "application/json" with header "X-Plex-Token" is token with header "X-Plex-Client-Identifier" is client
+    set found to []
+    for each res in result:
+        if res.provides contains "server":
+            for each conn in res.connections:
+                set kind to "remote"
+                if conn.relay:
+                    set kind to "relay (slower)"
+                otherwise if conn.local:
+                    set kind to "local network"
+                set owner to "your server"
+                if not default(res.owned, true):
+                    set owner to "shared with you"
+                set address to conn.uri
+                if conn.local and not conn.relay:
+                    set address to "http://{conn.address}:{conn.port}"
+                show folder "{res.name} - {kind} ({conn.address})" opening pickserver with name is res.name with address is address with access is res.accessToken info "{owner}. {address}"
+                add 1 to found
+    if length(found) is 0:
+        fail "No Plex servers were found in your plex.tv account. Make sure the server is signed in to the same account, or type its address in the addon settings."
+
+page pickserver with name, address, access:
+    save server as address
+    save server_token as access
+    show folder "Chosen: {name}. Press circle and open the server" opening server
+
+# ---- the chosen server (or the address typed in the settings)
+page server:
+    if server is empty:
+        fail "No server chosen yet. Use 'Choose a Plex server' (or type the address, like http://192.168.1.50:32400, in the addon settings)."
+    fetch json from "{server}/library/sections?X-Plex-Token={url_encode(stoken())}" with header "Accept" is "application/json"
+    for each lib in result.MediaContainer.Directory:
+        show folder lib.title opening library with key is lib.key with title is lib.title with kind is lib.type info "Library ({lib.type})"
+
+page library with key, title, kind:
+    fetch json from "{server}/library/sections/{key}/all?X-Plex-Token={url_encode(stoken())}&X-Plex-Container-Start=0&X-Plex-Container-Size=500" with header "Accept" is "application/json"
+    for each item in result.MediaContainer.Metadata:
+        show_entry(item)
+
+page seasons with id, title:
+    fetch json from "{server}/library/metadata/{id}/children?X-Plex-Token={url_encode(stoken())}" with header "Accept" is "application/json"
+    for each item in result.MediaContainer.Metadata:
+        show folder item.title opening episodes with id is item.ratingKey with title is item.title logo picture(item) info "{item.leafCount} episodes"
+
+page episodes with id, title:
+    fetch json from "{server}/library/metadata/{id}/children?X-Plex-Token={url_encode(stoken())}" with header "Accept" is "application/json"
+    for each item in result.MediaContainer.Metadata:
+        show_entry(item)
+
+# shows a movie / episode / track / show / album from a Plex "Metadata" record
+define show_entry(item):
+    if item.type is "show":
+        show folder item.title opening seasons with id is item.ratingKey with title is item.title logo picture(item) info shorten(default(item.summary, ""), 200) year default(item.year, 0)
+    otherwise if item.type is "album" or item.type is "artist":
+        show folder item.title opening episodes with id is item.ratingKey with title is item.title logo picture(item)
+    otherwise if has(item, "Media"):
+        set path to item.Media[1].Part[1].key
+        set address to "{server}{path}?X-Plex-Token={url_encode(stoken())}"
+        if item.type is "track":
+            show audio item.title playing address logo picture(item) info default(item.grandparentTitle, "")
+        otherwise:
+            show video item.title playing address logo picture(item) info shorten(default(item.summary, ""), 200) year default(item.year, 0) duration round(default(item.duration, 0) / 1000)
+    give back 0
+
+define picture(item):
+    if has(item, "thumb"):
+        give back "{server}{item.thumb}?X-Plex-Token={url_encode(stoken())}"
+    give back ""
+
+define call_check():
+    if token is empty:
+        fail "Please enter your Plex token first: select the Plex addon, press SQUARE and open Settings."
+    give back 0
+
+# the token to use with the chosen server: the one plex.tv gave for that server (differs for shared servers), else the account token
+define stoken():
+    if server_token is not empty:
+        give back server_token
+    give back token

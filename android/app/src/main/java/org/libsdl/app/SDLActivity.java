@@ -452,6 +452,9 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
                 if (!res.exists()) copyAssetTree("res", res);
                 File lang = new File(getFilesDir(), "lang");
                 if (!lang.exists()) copyAssetTree("lang", lang);
+                // los addons que trae el reproductor (el motor los busca en ./addons)
+                File addons = new File(getFilesDir(), "addons");
+                if (!addons.exists()) copyAssetTree("addons", addons);
                 bgdSetup(dcb.getAbsolutePath());
             } catch (Exception e) {
                 Log.e(TAG, "no se pudo preparar el .dcb: " + e);

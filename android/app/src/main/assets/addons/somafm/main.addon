@@ -1,0 +1,19 @@
+# SomaFM addon - commercial-free internet radio channels (https://somafm.com)
+
+addon "SomaFM"
+id somafm
+version 1.0
+author "BennuGD2 Media Player"
+description "Listener-supported, commercial-free radio: ambient, electronica, indie, jazz and more."
+
+setting quality is choice, label "Stream quality", choices "128 mp3", "64 aac"
+
+page home:
+    fetch json from "http://somafm.com/channels.json"
+    for each channel in sort(result.channels, "title"):
+        show radio channel.title playing stream_url(channel.id) logo channel.largeimage info "{channel.genre} - {channel.description}"
+
+define stream_url(channel_id):
+    if quality is "64 aac":
+        give back "https://ice1.somafm.com/{channel_id}-64-aac"
+    give back "https://ice1.somafm.com/{channel_id}-128-mp3"

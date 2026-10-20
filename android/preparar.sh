@@ -27,9 +27,11 @@ cp "$HERE/../mediaplayer.dcb" "$HERE/app/src/main/assets/game.dcb"
 
 # los recursos (res/) y los idiomas (lang/) los carga el motor por ruta relativa
 # al .dcb: van tambien en los assets y la app los copia a su carpeta
-rm -rf "$HERE/app/src/main/assets/res" "$HERE/app/src/main/assets/lang"
+rm -rf "$HERE/app/src/main/assets/res" "$HERE/app/src/main/assets/lang" "$HERE/app/src/main/assets/addons"
 cp -r "$HERE/../res" "$HERE/app/src/main/assets/res"
 cp -r "$HERE/../lang" "$HERE/app/src/main/assets/lang"
+# los addons que trae el reproductor (el motor los busca en ./addons)
+cp -r "$HERE/../addons" "$HERE/app/src/main/assets/addons"
 
 for pair in $PAIRS; do
     TARGET="${pair%%:*}"

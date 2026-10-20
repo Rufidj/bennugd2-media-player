@@ -1,0 +1,33 @@
+# Internet Archive addon - free movies, old cartoons, concerts and music (https://archive.org)
+# Everything here is in the public domain or shared by its authors.
+
+addon "Internet Archive"
+id internet-archive
+version 1.0
+author "BennuGD2 Media Player"
+description "Free movies, cartoons, concerts and audio from the Internet Archive."
+
+page home:
+    show folder "Feature films" opening collection with query is "collection:feature_films AND mediatype:movies" with kind is "video"
+    show folder "Classic cartoons" opening collection with query is "collection:classic_cartoons AND mediatype:movies" with kind is "video"
+    show folder "Live music (concerts)" opening collection with query is "collection:etree AND mediatype:etree" with kind is "audio"
+    show folder "Search..." opening search
+
+page search:
+    ask "Search the archive (for example: sintel)" into words
+    show folder "Movies and videos for '{words}'" opening collection with query is "{words} AND mediatype:movies" with kind is "video"
+    show folder "Audio for '{words}'" opening collection with query is "{words} AND mediatype:audio" with kind is "audio"
+
+page collection with query, kind:
+    fetch json from "http://archive.org/advancedsearch.php?q={url_encode(query)}&fl%5B%5D=identifier&fl%5B%5D=title&fl%5B%5D=description&fl%5B%5D=year&sort%5B%5D=downloads+desc&rows=60&output=json"
+    for each doc in result.response.docs:
+        show folder default(doc.title, doc.identifier) opening files with identifier is doc.identifier with kind is kind logo "http://archive.org/services/img/{doc.identifier}" info shorten(text(default(doc.description, "")), 160) year default(doc.year, 0)
+
+# the playable files of one archive item
+page files with identifier, kind:
+    fetch json from "http://archive.org/metadata/{identifier}"
+    for each file in result.files:
+        if kind is "video" and (file.name ends with ".mp4" or file.name ends with ".mkv" or file.name ends with ".ogv"):
+            show video default(file.title, file.name) playing "https://archive.org/download/{identifier}/{url_encode(file.name)}" logo "http://archive.org/services/img/{identifier}" info "{file.format} - {round(number(default(file.size, 0)) / 1048576, 1)} MB"
+        otherwise if kind is "audio" and (file.name ends with ".mp3" or file.name ends with ".ogg" or file.name ends with ".flac"):
+            show audio default(file.title, file.name) playing "https://archive.org/download/{identifier}/{url_encode(file.name)}" logo "http://archive.org/services/img/{identifier}" info "{file.format}"

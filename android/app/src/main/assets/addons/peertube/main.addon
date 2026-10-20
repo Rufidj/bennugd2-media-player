@@ -1,0 +1,236 @@
+# PeerTube addon for the BennuGD2 Media Player
+# PeerTube is a network of free, federated video instances. Every instance offers a public JSON API
+# and serves its videos without DRM, so they play directly here. No account is needed.
+# The instance address, the videos per page and the quality are addon settings
+# (press SQUARE on the addon in the Addons list).
+
+addon "PeerTube"
+id peertube
+version 1.0
+author "BennuGD2 Media Player"
+description "Watch videos from the federated PeerTube network: trending, categories, channels and search."
+
+setting server is text, label "Instance address", default "https://peertube.tv"
+setting page_size is number, label "Videos per page (5 to 50)", default 20
+setting quality is choice, label "Quality", default "Best available", choices "Best available", "720p or less", "480p or less", "360p or less"
+
+# the first page
+page home:
+    show folder "Trending" opening videos with query is "sort=-trending" with start is 0 info "The most watched videos of the last days"
+    show folder "Most viewed" opening videos with query is "sort=-views" with start is 0 info "The all time favourites of this instance"
+    show folder "Newest" opening videos with query is "sort=-publishedAt" with start is 0 info "Recently published videos"
+    show folder "Newest of this instance" opening videos with query is "sort=-publishedAt&isLocal=true" with start is 0 info "Videos hosted by {host_of(server)}"
+    show folder "Search videos..." opening search info "Finds videos by title; this instance also knows videos of many others"
+    show folder "Search a channel..." opening channels info "Find a channel and browse its videos"
+    show folder "By category" opening categories
+    show folder "Change instance" opening instance info "Another PeerTube address, like https://framatube.org"
+
+# a list of videos: /api/v1/videos accepts the query, count, start and sort parameters
+page videos with query, start:
+    load_videos(query, start)
+
+page search:
+    ask "What do you want to watch?" into q
+    if q is empty:
+        stop
+    load_videos("search={url_encode(q)}&sort=-publishedAt", 0)
+
+page categories:
+    message "Loading the categories..."
+    try:
+        fetch json from join_url(server, "/api/v1/videos/categories")
+    on error:
+        clear message
+        fail "The categories could not be loaded: {error}"
+    clear message
+    for each k in keys(result):
+        show folder result[k] opening cat with id is k
+
+page cat with id:
+    load_videos("sort=-views&categoryOneOf={id}", 0)
+
+page channels:
+    ask "Channel name to look for:" into q
+    if q is empty:
+        stop
+    message "Searching channels..."
+    try:
+        fetch json from join_url(server, "/api/v1/search/video-channels?count=20&search={url_encode(q)}")
+    on error:
+        clear message
+        fail "The channels could not be searched: {error}"
+    clear message
+    set found to default(result.data, [])
+    if length(found) is 0:
+        fail "No channel was found with that name"
+    for each c in found:
+        show folder "{default(c.displayName, c.name)} ({default(c.followersCount, 0)} followers)" opening channel with name is c.name with host is c.host logo avatar_of(c) info shorten(default(c.description, ""), 100)
+
+# the videos are asked to the instance that owns the channel, so remote channels always work
+page channel with name, host:
+    message "Loading the videos of the channel..."
+    try:
+        fetch json from "https://{host}/api/v1/video-channels/{url_encode(name)}@{host}/videos?count={size()}&nsfw=false&sort=-publishedAt"
+    on error:
+        clear message
+        fail "The videos of the channel could not be loaded: {error}"
+    clear message
+    show_list(default(result.data, []), 0, "", 0)
+
+page instance:
+    ask "New PeerTube instance (like https://framatube.org):" into addr default server
+    if addr is empty:
+        stop
+    if addr starts with "http":
+        set base to addr
+    otherwise:
+        set base to "https://{addr}"
+    message "Checking {base}..."
+    try:
+        fetch json from join_url(base, "/api/v1/videos?count=1&nsfw=false")
+    on error:
+        clear message
+        fail "That address does not answer like a PeerTube instance: {error}"
+    clear message
+    save server as base
+    show folder "Instance changed to {base}. Press circle and open PeerTube again." opening home
+
+# ---- shared code
+
+define load_videos(query, start):
+    set n to default(start, 0)
+    set u to join_url(server, "/api/v1/videos?count={size()}&nsfw=false&{query}&start={n}")
+    message "Loading videos..."
+    try:
+        fetch json from u
+    on error:
+        clear message
+        fail "The video list could not be loaded: {error}"
+    clear message
+    show_list(default(result.data, []), default(result.total, 0), query, n)
+    give back 0
+
+# shows a page of video records; when there are more, a "More videos..." folder appears
+define show_list(videos, total, query, start):
+    set shown to []
+    set skipped to []
+    message "Loading the video details..."
+    for each v in videos:
+        try:
+            show_one(v, shown, skipped)
+        on error:
+            add 1 to skipped
+    clear message
+    if length(shown) is 0:
+        if length(skipped) is greater than 0:
+            fail "These videos could not be opened here (they may be still processing, private or blocked by the instance)."
+        fail "There are no videos in this list."
+    if query is not empty:
+        set finish to start + length(videos)
+        if finish is less than total:
+            show folder "More videos..." opening videos with query is query with start is finish
+    give back 0
+
+define show_one(v, shown, skipped):
+    if default(v.isLive, false):
+        give back 0
+    if not has(v, "name") or not has(v, "uuid"):
+        give back 0
+    # the lists do not carry the playback files, so the detail is asked to the video's own instance
+    fetch json from join_url(origin_of(v), "/api/v1/videos/{v.uuid}")
+    set d to result
+    set url to play_url(d)
+    if url is empty:
+        add 1 to skipped
+        give back 0
+    show video v.name playing url logo pic_of(v) info info_of(v) year year_of(v) duration default(v.duration, 0)
+    add 1 to shown
+    give back 0
+
+# the web file of the chosen quality, else the best web file, else the HLS playlist
+define play_url(v):
+    set best to ""
+    set chosen to ""
+    if has(v, "files"):
+        for each f in default(v.files, []):
+            if f.resolution.id is 0:
+                skip
+            if best is empty:
+                set best to f.fileUrl
+            if chosen is empty:
+                if f.resolution.id is at most qlimit():
+                    set chosen to f.fileUrl
+    if chosen is not empty:
+        give back chosen
+    if best is not empty:
+        give back best
+    if has(v, "streamingPlaylists"):
+        for each p in default(v.streamingPlaylists, []):
+            if has(p, "playlistUrl"):
+                if p.playlistUrl is not empty:
+                    give back p.playlistUrl
+    give back ""
+
+define qlimit():
+    if quality is "720p or less":
+        give back 720
+    if quality is "480p or less":
+        give back 480
+    if quality is "360p or less":
+        give back 360
+    give back 9999
+
+define pic_of(v):
+    if has(v, "previewPath"):
+        if v.previewPath is not empty:
+            give back join_url(origin_of(v), v.previewPath)
+    give back ""
+
+# the instance that hosts the video, taken from its page address
+define origin_of(v):
+    if has(v, "url"):
+        set parts to split(v.url, "/")
+        if length(parts) is greater than 2:
+            give back "{parts[1]}//{parts[3]}"
+    give back server
+
+define year_of(v):
+    if has(v, "publishedAt"):
+        give back number(slice(v.publishedAt, 1, 4))
+    give back 0
+
+define info_of(v):
+    set parts to []
+    if has(v, "channel"):
+        set who to default(v.channel.displayName, "")
+        if who is not empty:
+            add who to parts
+    if default(v.views, 0) is greater than 0:
+        add "{v.views} views" to parts
+    if has(v, "description"):
+        set d to shorten(default(v.description, ""), 90)
+        if d is not empty:
+            add d to parts
+    give back join(parts, " - ")
+
+define avatar_of(c):
+    set a to ""
+    if has(c, "avatars"):
+        if length(c.avatars) is greater than 0:
+            if has(c.avatars[1], "fileUrl"):
+                set a to default(c.avatars[1].fileUrl, "")
+            if a is empty and has(c.avatars[1], "path"):
+                set a to join_url(server, c.avatars[1].path)
+    give back a
+
+define host_of(addr):
+    set parts to split(addr, "/")
+    set host to ""
+    if length(parts) is greater than 2:
+        set host to parts[3]
+    if host is empty:
+        set host to addr
+    give back host
+
+define size():
+    give back round(min(max(page_size, 5), 50))
