@@ -23,6 +23,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.os.Handler;
+import android.os.Looper;
 import android.os.Message;
 import android.provider.Settings;
 import android.text.Editable;
@@ -216,7 +217,7 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
     // Main components
     protected static SDLActivity mSingleton;
     protected static SDLSurface mSurface;
-    protected static TouchPadView mTouchPad;
+    protected static TouchOverlayView mTouchOverlay;
     protected static DummyEdit mTextEdit;
     protected static boolean mScreenKeyboardShown;
     protected static ViewGroup mLayout;
@@ -292,7 +293,7 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
        ruta del .dcb (copiado de los assets a la carpeta de la app).
        OJO: el nombre no puede llevar guion bajo: en JNI el "_" se codifica como
        "_1" y el simbolo de C no coincidiria con el que busca la maquina virtual. */
-    public static native void bgdSetup(String path);
+    public static native void bgdSetup(String path, int width, int height);
 
     // Load the .so
     public void loadLibraries() {
@@ -373,26 +374,36 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         }
     }
 
-    /* El motor dibuja a 1920x1080 (16:9). En una pantalla mas ancha (un movil en
-       horizontal) la imagen se deformaria, asi que la superficie se ajusta al
-       hueco de 16:9 que queda libre y se centra: el resto queda en negro. */
-    private void setFixedAspect() {
+    /* El juego esta designed para 16:9 (1920x1080) y la pantalla del movil es
+       mas ancha (20:9), asi que se dibuja en el hueco de 16:9 que queda libre y
+       se centra: el resto de la pantalla queda en negro. Para que la imagen
+       llegue a ese hueco (y no se quede en una esquina con el resto en negro) el
+       motor tiene que renderizar a ese mismo tamano, que es lo que se le dice
+       con SCALE_RESOLUTION (ver bgdSetup). */
+    private int[] screenBox() {
+        int aw, ah;
         try {
-            int aw = mLayout.getWidth(), ah = mLayout.getHeight();
-            if (aw <= 0 || ah <= 0) {
-                DisplayMetrics dm = new DisplayMetrics();
-                getWindowManager().getDefaultDisplay().getRealMetrics(dm);
-                aw = dm.widthPixels; ah = dm.heightPixels;
-            }
-            int sw, sh;
-            if (aw * 9 > ah * 16) { sw = ah * 16 / 9; sh = ah; }
-            else                 { sw = aw; sh = aw * 9 / 16; }
+            DisplayMetrics dm = new DisplayMetrics();
+            getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+            aw = dm.widthPixels; ah = dm.heightPixels;
+        } catch (Exception e) {
+            aw = 1920; ah = 1080;
+        }
+        if (aw <= 0 || ah <= 0) { aw = 1920; ah = 1080; }
+        int sw, sh;
+        if (aw * 9 > ah * 16) { sw = ah * 16 / 9; sh = ah; }
+        else                 { sw = aw; sh = aw * 9 / 16; }
+        return new int[] { sw, sh };
+    }
+
+    private void setFixedAspect(int sw, int sh) {
+        try {
             mLayout.setBackgroundColor(0xFF000000);
             RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams(sw, sh);
             lp.addRule(RelativeLayout.CENTER_IN_PARENT);
             mSurface.setLayoutParams(lp);
             // el mando en pantalla va en el mismo sitio que la imagen del juego
-            if (mTouchPad != null) mTouchPad.setLayoutParams(lp);
+            if (mTouchOverlay != null) mTouchOverlay.setLayoutParams(lp);
             // la superficie tiene que ser del mismo tamano que la vista: si no, el
             // sistema la estira y los toques no caen donde se ven
             mSurface.getHolder().setFixedSize(sw, sh);
@@ -472,7 +483,11 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
                 // los addons que trae el reproductor (el motor los busca en ./addons)
                 File addons = new File(getFilesDir(), "addons");
                 if (!addons.exists()) copyAssetTree("addons", addons);
-                bgdSetup(dcb.getAbsolutePath());
+                // el motor dibuja a 1920x1080: se le dice el tamano real de la
+                // pantalla (el hueco de 16:9) para que la imagen lo llene todo
+                int[] box = screenBox();
+                setFixedAspect(box[0], box[1]);
+                bgdSetup(dcb.getAbsolutePath(), box[0], box[1]);
             } catch (Exception e) {
                 Log.e(TAG, "no se pudo preparar el .dcb: " + e);
             }
@@ -531,9 +546,10 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         mLayout = new RelativeLayout(this);
         mLayout.addView(mSurface);
 
-        // el mando en pantalla (cruceta y botones) va encima de la superficie
-        mTouchPad = new TouchPadView(this);
-        mLayout.addView(mTouchPad);
+        // la capa de toques va encima de la superficie: convierte los dedos en
+        // teclas y los pasa al motor
+        mTouchOverlay = new TouchOverlayView(this);
+        mLayout.addView(mTouchOverlay);
 
         // Get our current screen orientation and pass it down.
         mCurrentOrientation = SDLActivity.getCurrentOrientation();
@@ -555,7 +571,8 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         mLayout.post(new Runnable() {
             @Override
             public void run() {
-                setFixedAspect();
+                int[] box = screenBox();
+                setFixedAspect(box[0], box[1]);
             }
         });
 
@@ -785,9 +802,20 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
             return;
         }
 
-        // Default system back button behavior.
+        /* En el reproductor el boton de atras es "volver": se le manda la tecla
+           ESC al motor (que vuelve a la carpeta anterior o cierra un menu) en
+           vez de cerrar la app. */
         if (!isFinishing()) {
-            super.onBackPressed();
+            Log.v(TAG, "onBackPressed: se manda ESC al motor");
+            SDLActivity.onNativeKeyDown(KeyEvent.KEYCODE_ESCAPE);
+            // la tecla se suelta en el fotograma siguiente (el motor solo mira el
+            // estado del teclado entre fotogramas)
+            new Handler(Looper.getMainLooper()).postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    SDLActivity.onNativeKeyUp(KeyEvent.KEYCODE_ESCAPE);
+                }
+            }, 50);
         }
     }
 

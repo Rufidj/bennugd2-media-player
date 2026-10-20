@@ -84,8 +84,10 @@ global
     int act_rep[A_COUNT];
     int any_input;
 
-    // en Android el mando en pantalla lo dibuja la app (ver TouchPadView)
+    // en Android los toques los convierte la app en teclas (ver TouchOverlayView)
     int touch_mode;                 // 1 = se esta manejando con el dedo
+    int touch_x, touch_y;           // ultima posicion del dedo
+    int touch_age;                  // fotogramas desde el ultimo toque
 
     // explorador
     string cur_dir;
@@ -272,7 +274,7 @@ begin
     load_assets();
     for (i = 0; i < S_COUNT; i++) sprite_proc(i); end
     create_viz();
-    // en Android se maneja con el dedo: el mando en pantalla lo pone la app
+    // en Android el mando en pantalla lo pone la app
     if (getenv("ANDROID_ROOT") != "") touch_mode = 1; end
 
     storage_init();
@@ -310,9 +312,12 @@ begin
         frame_n++;
         read_input();
         apply_script();
-        // con la tecla ESC se sale; en Android el boton de atras del mando en
-        // pantalla tambien es ESC, pero ahi se vuelve a la carpeta de antes
-        if (act_press[A_BACK] && state == ST_BROWSE && key(_ESC) && !touch_mode) exit(); end
+        // con la tecla ESC se sale; en Android el boton de atras del sistema
+        // tambien es ESC, y ahi solo se sale cuando ya no hay donde volver
+        if (act_press[A_BACK] && state == ST_BROWSE && key(_ESC))
+            if (!touch_mode) exit(); end
+            if (cur_dir == home_dir && modal == M_NONE && addon_mode == 0 && store_mode == 0 && cur_list == "") exit(); end
+        end
 
         if (getenv("MP_ENTER") != "" && frame_n == 10) activate_entry(sel); end                       // solo pruebas
         if (getenv("MP_SEL2") != "" && frame_n == 12) sel = atoi(getenv("MP_SEL2")); end
@@ -477,6 +482,34 @@ begin
 end
 
 // ------------------------------------------------------------------ entrada
+// En Android (y en cualquier sitio con pantalla tactil) se maneja con el dedo:
+// la app convierte los toques en teclas, pero el punto exacto del toque lo
+// consulta el motor: con touches[] se sabe que fila hay debajo del dedo, y al
+// tocarla se abre directamente.
+// El motor suelta el dedo un fotograma despues, asi que se guarda la ultima
+// posicion en la que estuvo (puede que ya no haya ningun dedo cuando el juego
+// mira la tecla "aceptar").
+// Devuelve el numero de entrada que hay bajo el dedo, o -1 si no hay ninguna.
+function int touch_row()
+private int t_x, t_y, t_r, t_i;
+begin
+    if (!touch_mode) return -1; end
+    if (touch_age > 8) return -1; end;
+    t_x = touch_x;
+    t_y = touch_y;
+    if (grid_mode == 1)                   // la cuadricula (la tienda, los addons)
+        for (t_i = 0; t_i < ROWS; t_i++)
+            if (abs(t_x - grid_cx(t_i)) < (GRID_X1 - GRID_X0) / GRID_COLS / 2 && abs(t_y - grid_cy(t_i)) < (GRID_Y1 - GRID_Y0) / GRID_ROWS / 2) return top_row + t_i; end
+        end
+        return -1;
+    end
+    t_r = (t_y - ROW_Y0) / ROW_H;          // la lista de archivos
+    if (t_r < 0 || t_r >= ROWS) return -1; end
+    if (t_r >= n_entries - top_row) return -1; end
+    if (t_x < 30 || t_x > 700) return -1; end
+    return top_row + t_r;
+end
+
 function read_input()
 private
     int i, n, ax, ay;
@@ -502,6 +535,16 @@ begin
     h[A_SEEKF] = key(_P)|| joy_getbutton(JOY_BUTTON_RIGHTSHOULDER);
     h[A_AUDIO] = key(_A) || joy_getbutton(JOY_BUTTON_TOUCHPAD);
     h[A_MUTE]  = key(_M)     || joy_getbutton(JOY_BUTTON_X);
+
+    // ultima posicion del dedo (el motor suelta el dedo un fotograma despues,
+    // asi que puede que ya no haya ningun dedo cuando se mira la tecla)
+    if (touch_mode && touches[0].active)
+        touch_x = touches[0].x * UID / UIN;
+        touch_y = touches[0].y * UID / UIN;
+        touch_age = 0;
+    else
+        touch_age++;
+    end
 
     any_input = 0;
     for (i = 0; i < A_COUNT; i++)
@@ -653,7 +696,7 @@ begin
 end
 
 function update_browser()
-private int old;
+private int old, r;
 begin
     if (xt_job) xt_step(); return 0; end                          // Xtream: cargando categorías o canales
     if (store_job == 1) store_step(); return 0; end                // instalando: no se atiende al mando
@@ -682,7 +725,13 @@ begin
             if (sel >= top_row + ROWS) top_row = sel - ROWS + 1; end
         end
 
-        if (act_press[A_OK]) activate_entry(sel); end
+        if (act_press[A_OK])
+            // si hay un dedo sobre una fila, se abre esa (el boton "aceptar" de
+            // un mando no tiene donde estar, asi que manda el dedo)
+            r = touch_row();
+            if (r >= 0) sel = r; end
+            activate_entry(sel);
+        end
         update_preview();
     end
     if (act_press[A_BACK] || act_press[A_SUBS])

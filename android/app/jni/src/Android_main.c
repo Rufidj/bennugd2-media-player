@@ -16,15 +16,25 @@ extern int bgdi_main( int argc, char * argv[] );
 
 /* El motor busca el .dcb en el directorio actual: en Android el proceso
    arranca en "/" y ahi no se puede escribir, asi que el Java lo copia a la
-   carpeta de la app y nos pasa la ruta con bgd_setup(). */
+   carpeta de la app y nos pasa la ruta con bgdSetup(). */
 static char g_dcb[ 1024 ] = "";
 
 JNIEXPORT void JNICALL
-Java_org_libsdl_app_SDLActivity_bgdSetup( JNIEnv * env, jclass cls, jstring path )
+Java_org_libsdl_app_SDLActivity_bgdSetup( JNIEnv * env, jclass cls, jstring path, jint w, jint h )
 {
     const char * p = ( *env )->GetStringUTFChars( env, path, 0 );
     snprintf( g_dcb, sizeof( g_dcb ), "%s", p ? p : "" );
     if ( p ) ( *env )->ReleaseStringUTFChars( env, path, p );
+
+    /* El motor dibuja a 1920x1080, pero la pantalla del movil es de otra
+       proporcion: se le dice el tamano real (el hueco de 16:9 que ha dejado la
+       app) para que renderice ahi y la imagen llene la pantalla sin deformarse
+       ni quedarse en una esquina. SCALE_RESOLUTION va en ancho*10000+alto. */
+    if ( w > 0 && h > 0 ) {
+        char res[ 32 ];
+        snprintf( res, sizeof( res ), "%d", (int)w * 10000 + (int)h );
+        setenv( "SCALE_RESOLUTION", res, 1 );
+    }
 }
 
 int SDL_main( int argc, char * argv[] )
