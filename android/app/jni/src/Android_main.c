@@ -20,7 +20,7 @@ extern int bgdi_main( int argc, char * argv[] );
 static char g_dcb[ 1024 ] = "";
 
 JNIEXPORT void JNICALL
-Java_org_libsdl_app_SDLActivity_bgd_setup( JNIEnv * env, jclass cls, jstring path )
+Java_org_libsdl_app_SDLActivity_bgdSetup( JNIEnv * env, jclass cls, jstring path )
 {
     const char * p = ( *env )->GetStringUTFChars( env, path, 0 );
     snprintf( g_dcb, sizeof( g_dcb ), "%s", p ? p : "" );

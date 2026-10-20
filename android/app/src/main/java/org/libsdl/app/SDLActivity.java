@@ -277,14 +277,18 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
             // "SDL2_mixer",
             // "SDL2_net",
             // "SDL2_ttf",
-            "main"
+            // la libreria con el punto de entrada (SDL_main) de la app: el motor
+            // es libbgdi.so, asi que aqui si se puede usar el nombre de siempre
+            "SDL2main"
         };
     }
 
     /* El motor (BennuGD2) busca el .dcb en el directorio actual: en Android el
        proceso arranca en "/" y ahi no se puede escribir, asi que se le pasa la
-       ruta del .dcb (copiado de los assets a la carpeta de la app). */
-    public static native void bgd_setup(String path);
+       ruta del .dcb (copiado de los assets a la carpeta de la app).
+       OJO: el nombre no puede llevar guion bajo: en JNI el "_" se codifica como
+       "_1" y el simbolo de C no coincidiria con el que busca la maquina virtual. */
+    public static native void bgdSetup(String path);
 
     // Load the .so
     public void loadLibraries() {
@@ -366,7 +370,7 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
                     out.close();
                     in.close();
                 }
-                bgd_setup(dcb.getAbsolutePath());
+                bgdSetup(dcb.getAbsolutePath());
             } catch (Exception e) {
                 Log.e(TAG, "no se pudo preparar el .dcb: " + e);
             }
