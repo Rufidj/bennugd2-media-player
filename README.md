@@ -16,6 +16,9 @@ Interface drawn at 1080p with a PlayStation-style skin, designed to be driven wi
   Plex (free ad-supported catalogue + your own server, login by code), Radio Browser, SomaFM, Internet Archive,
   PeerTube (federated video network), YouTube (popular videos, search of videos, channels and playlists)
 - **Store**: installs and updates the addons, and downloads free TV/radio lists (TDTChannels, iptv-org...), from the official repository in the app itself (no FTP, no PC)
+- **Hardware video decoding on PC**: on Linux and Windows the player uses the system's GPU decoder
+  (NVDEC on NVIDIA, VAAPI on Intel/AMD, D3D11VA on Windows) instead of decoding in software; the PS5
+  keeps using the console's own decoder
 - Credits screen (Options → Settings → About)
 
 ## Download
