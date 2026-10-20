@@ -1120,6 +1120,8 @@ begin
                 hint_ic[0] = 0; s_h[0] = tr("h_type"); hint_ic[1] = 3; s_h[1] = tr("h_delete"); hint_ic[2] = 2; s_h[2] = tr("h_space");
                 s_h[3] = "L1 " + tr("h_shift"); s_h[4] = "START " + tr("h_accept"); hint_ic[5] = 1; s_h[5] = tr("h_cancel");
             end
+        // en el movil no hay botones de consola: los simbolos sobran
+        if (touch_mode) for (k = 0; k < 6; k++) hint_ic[k] = -1; end
         end
         wtot = 0;
         for (k = 0; k < hint_n; k++) wtot += (hint_ic[k] >= 0 ? 44 : 0) + tw(s_h[k]) + (k < hint_n - 1 ? 44 : 0); end
