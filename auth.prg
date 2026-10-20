@@ -181,6 +181,27 @@ begin
 end
 
 // busca un texto en un JSON: {"token":"abc"} -> "abc"
+// Quita las barras de escape de un texto JSON (\" \/ \\ \n ...)
+function string json_unescape(string s)
+private string r = "", ch; int i;
+begin
+    for (i = 0; i < len(s); i++)
+        ch = substr(s, i, 1);
+        if (ch == "\\" && i + 1 < len(s))
+            i++;
+            ch = substr(s, i, 1);
+            if (ch == "n") r += chr(10);
+            elseif (ch == "t") r += chr(9);
+            elseif (ch == "r") r += chr(13);
+            elseif (ch == "u") i += 4; r += "?";
+            else r += ch; end
+        else
+            r += ch;
+        end
+    end
+    return r;
+end
+
 function string au_json_str(string body, string field)
 private int p, q; string key;
 begin
@@ -198,7 +219,7 @@ begin
     if (substr(body, p, 1) != chr(34)) return ""; end
     p++; q = p;
     while (q < len(body) && substr(body, q, 1) != chr(34)) q++; end
-    return substr(body, p, q - p);
+    return json_unescape(substr(body, p, q - p));
 end
 
 // deja la cuenta guardada y hace el login si la lista lo necesita

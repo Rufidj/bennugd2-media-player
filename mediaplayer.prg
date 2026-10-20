@@ -87,6 +87,12 @@ global
     // explorador
     string cur_dir;
     int    grid_last = -1;            // el modo (lista o cuadricula) con el que se crearon los textos de fila
+    // logos (imagenes) de las casillas de la cuadricula: se bajan en segundo plano y se cachean
+    int    cell_map[ROWS];            // textura del logo de cada casilla (0 = todavia no)
+    string cell_logo[ROWS];           // URL del logo de la casilla
+    string cell_file[ROWS];           // fichero en la cache
+    int    cell_state[ROWS];          // 0 = pendiente, 1 = bajando, 2 = en cache, 3 = error
+    int    logo_busy = 0;             // hay una descarga de logo en marcha
     string entries[MAX_ENTRIES];
     int    entry_dir[MAX_ENTRIES];
     int    entry_size[MAX_ENTRIES];
@@ -878,6 +884,7 @@ begin
     elseif (entry_dir[i] == K_XSER)
         xt_ser_sel = entry_url[i]; xt_job = 3;
     elseif (entry_dir[i] == K_XSTR)
+        pending_title = disp_name(i); pending_logo = entry_logo[i];      // el titulo es el nombre del canal, no el .ts
         start_video(xt_stream_url(i));
     else
         request_open(i);
@@ -895,6 +902,64 @@ begin
     for (k = 0; k < 3; k++)
         ox = (frame_n * (k + 1) / 4) % 1280;
         put(S_WAVE + k, g_wave[k], 1280 - ox, SH / 2, 100, 255, 28 - k);
+    end
+end
+
+// Un numero corto a partir de la URL: sirve de nombre para el fichero de la cache
+function string url_hash(string s)
+private int h, i;
+begin
+    h = 5381;
+    for (i = 0; i < len(s); i++) h = ((h % 1000003) * 33 + asc(substr(s, i, 1))) % 1000003; end
+    return "" + h + "_" + len(s);
+end
+
+// Carpeta donde se guardan las imagenes de los logos
+function string logo_dir()
+begin
+    if (store_dir == "") return ""; end
+    return join_path(store_dir, "cache");
+end
+
+// La imagen se baja en un proceso aparte: la interfaz no se congela mientras espera
+process logo_fetch(int slot, string url, string fn)
+private int st;
+begin
+    st = http_fetch(url, "", "GET", "");
+    if (st == 200 && http_length() > 0 && http_length() < 4000000) http_save(fn); end
+    cell_state[slot] = fexists(fn) ? 2 : 3;
+    logo_busy = 0;
+    frame;
+end
+
+// Pide los logos de las casillas visibles y los va abriendo (uno por fotograma)
+function update_cell_logos()
+private int i, rowi;
+begin
+    if (grid_mode != 1) return 0; end
+    for (i = 0; i < ROWS; i++)
+        rowi = top_row + i;
+        if (rowi < n_entries && entry_logo[rowi] != "")
+            if (cell_logo[i] != entry_logo[rowi])
+                cell_logo[i] = entry_logo[rowi];
+                cell_file[i] = join_path(logo_dir(), "l" + url_hash(entry_logo[rowi]) + ".img");
+                cell_state[i] = fexists(cell_file[i]) ? 2 : 0;
+                if (cell_map[i] > 0) map_del(0, cell_map[i]); end
+                cell_map[i] = 0;
+            end
+            if (cell_state[i] == 0 && logo_busy == 0)
+                mkdir(logo_dir());
+                logo_busy = 1; cell_state[i] = 1;
+                logo_fetch(i, entry_logo[rowi], cell_file[i]);
+            end
+            if (cell_state[i] == 2 && cell_map[i] == 0)
+                cell_map[i] = map_load(cell_file[i]);
+                if (cell_map[i] == 0) cell_state[i] = 3; end
+            end
+        else
+            if (cell_map[i] > 0) map_del(0, cell_map[i]); end
+            cell_map[i] = 0; cell_logo[i] = ""; cell_state[i] = 0;
+        end
     end
 end
 
@@ -2031,7 +2096,7 @@ end
 
 function layout_all()
 private
-    int i, a, bx, by, n, pos, dur, pct, px, g, rowi, k, p1, p2, lines;
+    int i, a, bx, by, n, pos, dur, pct, px, g, rowi, k, p1, p2, lines, w, h;
     string t, l[3];
 begin
     hide_sprites();
@@ -2051,6 +2116,7 @@ begin
 
     if (state == ST_BROWSE)
         // ---- explorador
+        update_cell_logos();
         // los textos solo se rehacen al cambiar de carpeta o de pagina (crear cadenas cada fotograma es caro y las acumula)
         if (lbl_ver != dir_ver || lbl_top != top_row)
             if (store_mode == 1) s_path = "  " + tr("s_store"); elseif (addon_mode == 2) s_path = "  " + addon_name; elseif (addon_mode == 1) s_path = "  " + tr("s_addons"); elseif (cur_list != "") s_path = "  " + utf8_to_latin1(base_name(cur_list)) + "   " + tr("s_internet_tag"); else s_path = "  " + utf8_to_latin1(cur_dir); end
@@ -2061,6 +2127,7 @@ begin
                 if (rowi < n_entries)
                     row_label[i] = disp_name(rowi);
                     row_label[i] = fit_text(row_label[i], grid_mode == 1 ? 150 : 590);
+                    if (getenv("MP_DEBUG") != "" && grid_mode == 1) say("GRIDLBL [" + i + "] '" + row_label[i] + "' tw=" + tw(row_label[i]) + " orig='" + disp_name(rowi) + "'"); end
                 else
                     row_label[i] = "";
                 end
@@ -2106,7 +2173,15 @@ begin
                 end
                 if (entries[rowi] == "..") g = g_icon[12]; end
                 if (grid_mode == 1)
-                    put(S_ROWICON + i, g, grid_cx(i), by - 26, 48, rowi == sel ? 255 : 170, -10);
+                    if (cell_map[i] > 0)
+                        // el logo del canal, centrado en la casilla
+                        k = 0; w = graphic_info(0, cell_map[i], G_WIDTH); h = graphic_info(0, cell_map[i], G_HEIGHT);
+                        if (w > 0) k = 10000 / w; end
+                        if (h > 0 && 9500 / h < k) k = 9500 / h; end   // que el logo no llegue al nombre
+                        put(S_ROWICON + i, cell_map[i], grid_cx(i), by - 26, k, rowi == sel ? 255 : 210, -10);
+                    else
+                        put(S_ROWICON + i, g, grid_cx(i), by - 26, 48, rowi == sel ? 255 : 170, -10);
+                    end
                     if (rowi == sel) put_sel(S_SEL, grid_cx(i), by - 26, 150, 118, 2); end
                 else
                     put(S_ROWICON + i, g, 70, by, 38, rowi == sel ? 255 : 170, -10);
@@ -2122,6 +2197,12 @@ begin
             if (i < k) k = i; end
             put(S_PREVIEW, video_graph(pv_h), 990, 260, k, 255, 5);
             if (video_is_audio_only(pv_h)) put(S_PREVIEW, g_icon[15], 990, 260, 190, 230, 5); end
+        elseif (grid_mode == 1 && sel >= 0 && sel < n_entries && sel - top_row >= 0 && sel - top_row < ROWS && cell_map[sel - top_row] > 0)
+            // mientras llega la miniatura del canal se ve su logo (tarda menos)
+            k = 460 * 100 / graphic_info(0, cell_map[sel - top_row], G_WIDTH);
+            i = graphic_info(0, cell_map[sel - top_row], G_HEIGHT) > 0 ? 260 * 100 / graphic_info(0, cell_map[sel - top_row], G_HEIGHT) : 100;
+            if (i < k) k = i; end
+            if (k > 0) put(S_PREVIEW, cell_map[sel - top_row], 990, 260, k, 255, 5); end
         end
         for (i = 0; i < 7; i++) txt_want[txt_info[i]] = 8589934336 + (i == 0 ? 255 : 200); end
         if (pv_phase == 3) s_info[2] = tr("s_nopreview"); end

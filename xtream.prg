@@ -23,6 +23,7 @@ declare function string xt_url(string path) end
 declare function int xt_get(string path) end
 declare function int xt_load(int what) end
 declare function string xt_item(string obj, string field) end
+declare function string json_unescape(string s) end
 declare function string xt_next_obj(string body, int pos) end
 declare function int xt_open_level(int level) end
 declare function string xt_stream_url(int i) end
@@ -71,7 +72,7 @@ begin
     end
     p++; q = p;
     while (q < len(obj) && substr(obj, q, 1) != chr(34)) q++; end
-    return substr(obj, p, q - p);
+    return json_unescape(substr(obj, p, q - p));
 end
 
 // el siguiente objeto "{}" de un array JSON
@@ -213,7 +214,7 @@ begin
         return xt_server + "/series/" + xt_user + "/" + xt_pass + "/" + xt_ser_sel + "/" + entry_url[i] + ".ts";
     end
     if (k >= 0 && k < xt_str_n && xt_str_src[k] != "") return xt_str_src[k]; end
-    if (xt_type == 1) return xt_server + "/movie/" + xt_user + "/" + xt_pass + "/" + entry_url[i] + "." + xt_str_ext[sel - 1]; end
+    if (xt_type == 1 && k >= 0 && k < xt_str_n && xt_str_ext[k] != "") return xt_server + "/movie/" + xt_user + "/" + xt_pass + "/" + entry_url[i] + "." + xt_str_ext[k]; end
     return xt_server + "/live/" + xt_user + "/" + xt_pass + "/" + entry_url[i] + ".ts";
 end
 
