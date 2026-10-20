@@ -25,6 +25,12 @@ DEPS="libSDL2.so libSDL2_image.so libSDL2_mixer.so libfreetype.so \
 mkdir -p "$HERE/app/src/main/assets"
 cp "$HERE/../mediaplayer.dcb" "$HERE/app/src/main/assets/game.dcb"
 
+# los recursos (res/) y los idiomas (lang/) los carga el motor por ruta relativa
+# al .dcb: van tambien en los assets y la app los copia a su carpeta
+rm -rf "$HERE/app/src/main/assets/res" "$HERE/app/src/main/assets/lang"
+cp -r "$HERE/../res" "$HERE/app/src/main/assets/res"
+cp -r "$HERE/../lang" "$HERE/app/src/main/assets/lang"
+
 for pair in $PAIRS; do
     TARGET="${pair%%:*}"
     ABI="${pair##*:}"

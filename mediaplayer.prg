@@ -84,6 +84,9 @@ global
     int act_rep[A_COUNT];
     int any_input;
 
+    // en Android el mando en pantalla lo dibuja la app (ver TouchPadView)
+    int touch_mode;                 // 1 = se esta manejando con el dedo
+
     // explorador
     string cur_dir;
     int    grid_last = -1;            // el modo (lista o cuadricula) con el que se crearon los textos de fila
@@ -269,6 +272,8 @@ begin
     load_assets();
     for (i = 0; i < S_COUNT; i++) sprite_proc(i); end
     create_viz();
+    // en Android se maneja con el dedo: el mando en pantalla lo pone la app
+    if (getenv("ANDROID_ROOT") != "") touch_mode = 1; end
 
     storage_init();
     cfg_load();
@@ -300,7 +305,9 @@ begin
         frame_n++;
         read_input();
         apply_script();
-        if (act_press[A_BACK] && state == ST_BROWSE && key(_ESC)) exit(); end
+        // con la tecla ESC se sale; en Android el boton de atras del mando en
+        // pantalla tambien es ESC, pero ahi se vuelve a la carpeta de antes
+        if (act_press[A_BACK] && state == ST_BROWSE && key(_ESC) && !touch_mode) exit(); end
 
         if (getenv("MP_ENTER") != "" && frame_n == 10) activate_entry(sel); end                       // solo pruebas
         if (getenv("MP_SEL2") != "" && frame_n == 12) sel = atoi(getenv("MP_SEL2")); end

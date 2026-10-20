@@ -30,6 +30,7 @@ import android.util.DisplayMetrics;
 import android.util.Log;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.IOException;
 import java.io.InputStream;
 import android.util.SparseArray;
 import android.view.Display;
@@ -213,6 +214,7 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
     // Main components
     protected static SDLActivity mSingleton;
     protected static SDLSurface mSurface;
+    protected static TouchPadView mTouchPad;
     protected static DummyEdit mTextEdit;
     protected static boolean mScreenKeyboardShown;
     protected static ViewGroup mLayout;
@@ -328,6 +330,60 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         return new SDLSurface(context);
     }
 
+    /* El motor dibuja a 1920x1080 (16:9). En una pantalla mas ancha (un movil en
+       horizontal) la imagen se deformaria, asi que la superficie se ajusta al
+       hueco de 16:9 que queda libre y se centra: el resto queda en negro. */
+    private void setFixedAspect() {
+        try {
+            int aw = mLayout.getWidth(), ah = mLayout.getHeight();
+            if (aw <= 0 || ah <= 0) {
+                DisplayMetrics dm = new DisplayMetrics();
+                getWindowManager().getDefaultDisplay().getRealMetrics(dm);
+                aw = dm.widthPixels; ah = dm.heightPixels;
+            }
+            int sw, sh;
+            if (aw * 9 > ah * 16) { sw = ah * 16 / 9; sh = ah; }
+            else                 { sw = aw; sh = aw * 9 / 16; }
+            mLayout.setBackgroundColor(0xFF000000);
+            RelativeLayout.LayoutParams lp = new RelativeLayout.LayoutParams(sw, sh);
+            lp.addRule(RelativeLayout.CENTER_IN_PARENT);
+            mSurface.setLayoutParams(lp);
+            // el mando en pantalla va en el mismo sitio que la imagen del juego
+            if (mTouchPad != null) mTouchPad.setLayoutParams(lp);
+            // la superficie tiene que ser del mismo tamano que la vista: si no, el
+            // sistema la estira y los toques no caen donde se ven
+            mSurface.getHolder().setFixedSize(sw, sh);
+        } catch (Exception e) {
+            Log.e(TAG, "no se pudo fijar la proporción de la pantalla: " + e);
+        }
+    }
+
+    /* Copia un fichero de los assets a disco */    private void copyAsset(String assetPath, File dest) throws IOException {
+        InputStream in = getAssets().open(assetPath);
+        FileOutputStream out = new FileOutputStream(dest);
+        byte[] buf = new byte[65536];
+        int n;
+        while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+        out.close();
+        in.close();
+    }
+
+    /* Copia una carpeta entera de los assets (el motor carga los recursos y los
+       idiomas por ruta relativa al .dcb, asi que tienen que estar en disco) */
+    private void copyAssetTree(String assetPath, File dest) throws IOException {
+        String[] entries = getAssets().list(assetPath);
+        if (entries == null || entries.length == 0) {
+            // no es una carpeta: es un fichero
+            if (dest.getParentFile() != null) dest.getParentFile().mkdirs();
+            copyAsset(assetPath, dest);
+            return;
+        }
+        if (!dest.exists()) dest.mkdirs();
+        for (String e : entries) {
+            copyAssetTree(assetPath.isEmpty() ? e : assetPath + "/" + e, new File(dest, e));
+        }
+    }
+
     // Setup
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -358,18 +414,18 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         }
 
         if (!mBrokenLibraries) {
-            // el .dcb del reproductor, de los assets a la carpeta de la app
+            // el .dcb del reproductor y sus recursos (res/ y lang/) van de los assets
+            // a la carpeta de la app: el motor los carga por ruta relativa al .dcb
             try {
                 File dcb = new File(getFilesDir(), "game.dcb");
                 if (!dcb.exists()) {
-                    InputStream in = getAssets().open("game.dcb");
-                    FileOutputStream out = new FileOutputStream(dcb);
-                    byte[] buf = new byte[65536];
-                    int n;
-                    while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
-                    out.close();
-                    in.close();
+                    copyAsset("game.dcb", dcb);
                 }
+                // los recursos y los idiomas solo se copian la primera vez
+                File res = new File(getFilesDir(), "res");
+                if (!res.exists()) copyAssetTree("res", res);
+                File lang = new File(getFilesDir(), "lang");
+                if (!lang.exists()) copyAssetTree("lang", lang);
                 bgdSetup(dcb.getAbsolutePath());
             } catch (Exception e) {
                 Log.e(TAG, "no se pudo preparar el .dcb: " + e);
@@ -429,6 +485,10 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         mLayout = new RelativeLayout(this);
         mLayout.addView(mSurface);
 
+        // el mando en pantalla (cruceta y botones) va encima de la superficie
+        mTouchPad = new TouchPadView(this);
+        mLayout.addView(mTouchPad);
+
         // Get our current screen orientation and pass it down.
         mCurrentOrientation = SDLActivity.getCurrentOrientation();
         // Only record current orientation
@@ -444,6 +504,14 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         }
 
         setContentView(mLayout);
+
+        // el hueco libre se conoce cuando la vista ya esta medida
+        mLayout.post(new Runnable() {
+            @Override
+            public void run() {
+                setFixedAspect();
+            }
+        });
 
         setWindowStyle(false);
 

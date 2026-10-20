@@ -11,4 +11,6 @@ android/app/build/
 android/.gradle/
 android/app/libs/
 android/app/src/main/assets/game.dcb
+android/app/src/main/assets/res/
+android/app/src/main/assets/lang/
 android/local.properties
