@@ -55,9 +55,9 @@ const
     STORE_URL = "https://raw.githubusercontent.com/Rufidj/bennugd2-media-player/main/addons";
     M_NONE = 0; M_MENU = 1; M_KB = 2; M_CREDITS = 3;                             // pantallas modales (menu / teclado)
     KB_NEWLIST = 1; KB_RENAME_LIST = 2; KB_URL = 3; KB_NEW_TITLE = 4; KB_ENTRY_TITLE = 5; KB_LOGO = 6; KB_ADDON = 7; KB_ASET = 8;
-    KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11; KB_AUTH_SERVER = 12;
+    KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11; KB_AUTH_SERVER = 12; KB_TMDB = 13;
     MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
-    MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_ASET = 300; MA_PICK = 100;
+    MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_TMDB = 20; MA_ASET = 300; MA_PICK = 100;
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
     MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27;
 end
@@ -93,6 +93,8 @@ global
     string cell_file[ROWS];           // fichero en la cache
     int    cell_state[ROWS];          // 0 = pendiente, 1 = bajando, 2 = en cache, 3 = error
     int    logo_busy = 0;             // hay una descarga de logo en marcha
+    int    cell_tmdb[ROWS];           // 1 = ya se ha consultado TMDb por ese logo
+    string tmdb_key = "";             // clave de la API de TMDb (opcional)
     string entries[MAX_ENTRIES];
     int    entry_dir[MAX_ENTRIES];
     int    entry_size[MAX_ENTRIES];
@@ -198,6 +200,8 @@ declare function string store_state(int i) end
 declare function string au_sidecar(string listfile) end
 declare function string au_spec_get(string spec, string key) end
 declare function string au_esc(string s) end
+declare function string ad_buf_str(int start, int n) end
+declare function string xt_item(string obj, string field) end
 declare function string au_apply(string url) end
 declare function string au_headers() end
 declare function int au_load(string listfile) end
@@ -932,6 +936,49 @@ begin
     frame;
 end
 
+// El idioma de TMDb segun el del reproductor
+function string tmdb_lang()
+begin
+    if (lang_cur == "en") return "en-US"; end
+    if (lang_cur == "ru") return "ru-RU"; end
+    if (lang_cur == "ja") return "ja-JP"; end
+    if (lang_cur == "zh") return "zh-CN"; end
+    if (lang_cur == "ko") return "ko-KR"; end
+    return "es-ES";
+end
+
+// Busca el cartel de una pelicula o serie en TMDb (proceso aparte: no bloquea la interfaz)
+process tmdb_fetch(int slot, string title)
+private string q, body, poster, kind, cachef; int st, fh;
+begin
+    cachef = join_path(logo_dir(), "t" + url_hash(title) + ".txt");
+    poster = "";
+    fh = fopen(cachef, O_READ);
+    if (fh)                                          // ya se habia buscado este titulo
+        poster = fgets(fh);
+        fclose(fh);
+        if (poster != "") poster = "https://image.tmdb.org/t/p/w300" + poster; end
+    else
+        kind = (xt_type == 1) ? "movie" : "tv";
+        q = "https://api.themoviedb.org/3/search/" + kind + "?api_key=" + tmdb_key + "&query=" + au_esc(title) + "&language=" + tmdb_lang();
+        st = http_fetch(q, "", "GET", "");
+        if (st == 200 && http_length() > 0 && http_length() < 2000000)
+            body = ad_buf_str(0, http_length());
+            poster = xt_item(body, "poster_path");
+        end
+        fh = fopen(cachef, O_WRITE);
+        if (fh) fputs(fh, poster); fclose(fh);
+        if (poster != "") poster = "https://image.tmdb.org/t/p/w300" + poster; end
+    end
+    if (poster != "")
+        cell_logo[slot] = poster;
+        cell_file[slot] = join_path(logo_dir(), "l" + url_hash(poster) + ".img");
+    end
+    cell_state[slot] = 0;                           // ahora se baja el cartel (o el logo del panel)
+    logo_busy = 0;
+    frame;
+end
+
 // Pide los logos de las casillas visibles y los va abriendo (uno por fotograma)
 function update_cell_logos()
 private int i, rowi;
@@ -944,13 +991,19 @@ begin
                 cell_logo[i] = entry_logo[rowi];
                 cell_file[i] = join_path(logo_dir(), "l" + url_hash(entry_logo[rowi]) + ".img");
                 cell_state[i] = fexists(cell_file[i]) ? 2 : 0;
+                cell_tmdb[i] = 0;
                 if (cell_map[i] > 0) map_del(0, cell_map[i]); end
                 cell_map[i] = 0;
             end
             if (cell_state[i] == 0 && logo_busy == 0)
                 mkdir(logo_dir());
                 logo_busy = 1; cell_state[i] = 1;
-                logo_fetch(i, entry_logo[rowi], cell_file[i]);
+                if (tmdb_key != "" && !cell_tmdb[i] && (xt_type == 1 || xt_type == 2))
+                    cell_tmdb[i] = 1;                 // primero se pregunta a TMDb
+                    tmdb_fetch(i, disp_name(rowi));
+                else
+                    logo_fetch(i, cell_logo[i], cell_file[i]);
+                end
             end
             if (cell_state[i] == 2 && cell_map[i] == 0)
                 cell_map[i] = map_load(cell_file[i]);
@@ -1196,6 +1249,7 @@ begin
             k = substr(ln, 0, p); v = substr(ln, p + 1);
             if (k == "lang" && is_lang(v)) lang_cur = v; end
             if (k == "skin") skin = atoi(v) ? 1 : 0; end
+            if (k == "tmdb") tmdb_key = v; end
         end
     end
     fclose(fh);
@@ -1209,6 +1263,7 @@ begin
     if (!fh) return 0; end
     fputs(fh, "lang=" + lang_cur);
     fputs(fh, "skin=" + skin);
+    fputs(fh, "tmdb=" + tmdb_key);
     fclose(fh);
 end
 
@@ -1218,6 +1273,7 @@ begin
     menu_add(tr("m_lang") + tr("lang_name"), MA_LANG);
     menu_add(tr("m_skin") + (skin ? tr("skin_ps") : tr("skin_classic")), MA_SKIN);
     menu_add(tr("m_accounts"), MA_ACCOUNTS);
+    menu_add(tr("m_tmdb"), MA_TMDB);
     menu_add(tr("m_about"), MA_ABOUT);
     menu_add(tr("m_back"), MA_CANCEL);
     menu_show(tr("mt_settings"));
@@ -1439,6 +1495,7 @@ begin
             lang_load(next_lang()); cfg_save(); open_settings_menu(0);
         end
         case MA_ABOUT: credits_open(); end
+        case MA_TMDB:  kb_open(tr("k_tmdb"), tmdb_key, KB_TMDB); end
         case MA_STORE_REFRESH: store_open(); end
         case MA_SKIN:
             skin = !skin; cfg_save(); open_settings_menu(1);
@@ -1669,6 +1726,9 @@ begin
                     if (au_ask_next == 1) store_install(au_ask_row); else toast(tr("t_auth_saved")); end
                 end
             end
+        end
+        case KB_TMDB:
+            tmdb_key = kb_text; cfg_save(); open_settings_menu(0); toast(tr("t_tmdb_saved"));
         end
         case KB_LOGO:
             wl_l[op_idx] = (kb_text == "https://") ? "" : kb_text; if (wl_save(cur_list)) read_list(); reselect(op_idx + 1); toast(tr("t_logo_updated")); end

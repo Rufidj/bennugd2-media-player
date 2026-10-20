@@ -169,3 +169,6 @@ cr_a5=OpenSSL - conexiones seguras (HTTPS)
 cr_a6=Plex, SomaFM, Radio Browser e Internet Archive - contenido para los addons
 cr_a7=La comunidad homebrew de PS5 - payload SDK, PacBrew y ShadowMountPlus
 cr_end=¡Gracias por ver!
+m_tmdb=TMDb (clave de API): 
+k_tmdb=Clave de API de TMDb
+t_tmdb_saved=Clave de TMDb guardada
