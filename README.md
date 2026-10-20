@@ -49,8 +49,15 @@ If the app does not open: check the firmware, that kstuff is loaded before Shado
 | L1 / R1 | N / P | -10 s / +10 s |
 | Touchpad | A | next audio track |
 
-On Android the on-screen pad (D-pad, ✕ and ○) is drawn by the app over the game and the
-touches are sent to the engine as key presses, so the same controls work with the finger.
+On Android the app turns the finger gestures into the keys the player already knows:
+
+| Gesture | Action |
+|---|---|
+| tap on a file or folder | open it |
+| swipe up / down | move in the list |
+| swipe left / right | move in the menus |
+| long press | options |
+| the system back button | back (the engine maps it to ESC) |
 
 ## Android
 
@@ -74,6 +81,8 @@ cd android && ./gradlew assembleDebug
 
 The APK lands in `android/app/build/outputs/apk/debug/app-debug.apk`. It asks for access to
 all the files (so it can read the videos and the music of the phone) and opens `/sdcard`.
+The app tells the engine the real size of the screen (`SCALE_RESOLUTION`), so the image
+fills the 16:9 box of the phone instead of staying in a corner.
 
 ## Run from source (Linux)
 
