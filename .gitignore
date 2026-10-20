@@ -4,3 +4,11 @@ mediaplayer_data/
 *.cfg
 
 .probe
+
+# Android
+android/build/
+android/app/build/
+android/.gradle/
+android/app/libs/
+android/app/src/main/assets/game.dcb
+android/local.properties
