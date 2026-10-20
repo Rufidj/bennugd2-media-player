@@ -2201,7 +2201,8 @@ begin
                 for (i = 0; i < ROWS; i++)
                     if (txt_row[i] > 0) write_delete(txt_row[i]); txt_cache[txt_row[i]] = 0; end
                     if (grid_mode == 1)
-                        txt_row[i] = write_var(fnt_t, ur(grid_cx(i) - tw(row_label[i]) / 2), ur(grid_cy(i) + 30), -20, 3, row_label[i]);
+                        // alineacion 4 = centrado: el motor lo recentra cada vez que cambia el texto
+                        txt_row[i] = write_var(fnt_t, ur(grid_cx(i)), ur(grid_cy(i) + 30), -20, 4, row_label[i]);
                     else
                         txt_row[i] = write_var(fnt_t, ur(110), ur(ROW_Y0 + i * ROW_H + ROW_H / 2), -20, 3, row_label[i]);
                     end
@@ -2239,7 +2240,7 @@ begin
                         // el logo del canal, centrado en la casilla
                         k = 0; w = graphic_info(0, cell_map[i], G_WIDTH); h = graphic_info(0, cell_map[i], G_HEIGHT);
                         if (w > 0) k = 10000 / w; end
-                        if (h > 0 && 9500 / h < k) k = 9500 / h; end   // que el logo no llegue al nombre
+                        if (h > 0 && 6000 / h < k) k = 6000 / h; end   // que el logo no llegue al nombre
                         put(S_ROWICON + i, cell_map[i], grid_cx(i), by - 26, k, rowi == sel ? 255 : 210, -10);
                     else
                         put(S_ROWICON + i, g, grid_cx(i), by - 26, 48, rowi == sel ? 255 : 170, -10);
