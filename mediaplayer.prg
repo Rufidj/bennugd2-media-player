@@ -280,6 +280,11 @@ begin
     lang_load(lang_cur);          // carga el idioma, abre sus fuentes TrueType y crea los textos
     load_script();
     cur_dir = getenv("MEDIA_DIR");
+    if (cur_dir == "" && getenv("ANDROID_ROOT") != "")
+        // en Android se abre la carpeta de los archivos del telefono (los videos,
+        // la musica...), que es lo unico que hay ahi
+        cur_dir = fexists("/sdcard") ? "/sdcard" : cd();
+    end
     if (cur_dir == "")
         // por defecto la carpeta "videos" junto al programa (en la PS5: /app0/videos)
         cur_dir = join_path(cd(), "videos"); home_dir = cur_dir;

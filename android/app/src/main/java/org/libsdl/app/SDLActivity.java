@@ -21,8 +21,10 @@ import android.hardware.Sensor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
+import android.os.Environment;
 import android.os.Handler;
 import android.os.Message;
+import android.provider.Settings;
 import android.text.Editable;
 import android.text.InputType;
 import android.text.Selection;
@@ -330,6 +332,30 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         return new SDLSurface(context);
     }
 
+    /* El reproductor necesita leer los archivos del telefono (los videos, la
+       musica). En Android 11 o superior eso se concede en los ajustes del
+       sistema: se le lleva al usuario a esa pantalla (una sola vez, mientras
+       no lo conceda, vuelve a aparecer). */
+    private void askStorageAccess() {
+        if (Build.VERSION.SDK_INT < 30) return;
+        try {
+            if (Environment.isExternalStorageManager()) return;
+        } catch (Exception e) {
+            return;
+        }
+        try {
+            Intent intent = new Intent(Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION);
+            intent.setData(Uri.parse("package:" + getPackageName()));
+            startActivity(intent);
+        } catch (Exception e) {
+            try {
+                startActivity(new Intent(Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION));
+            } catch (Exception e2) {
+                Log.e(TAG, "no se pudo pedir acceso a los archivos: " + e2);
+            }
+        }
+    }
+
     /* El motor dibuja a 1920x1080 (16:9). En una pantalla mas ancha (un movil en
        horizontal) la imagen se deformaria, asi que la superficie se ajusta al
        hueco de 16:9 que queda libre y se centra: el resto queda en negro. */
@@ -512,6 +538,15 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
                 setFixedAspect();
             }
         });
+
+        // para ver los videos del telefono hace falta acceso a todos los archivos:
+        // en Android 11 o superior el usuario lo concede en los ajustes
+        mLayout.postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                askStorageAccess();
+            }
+        }, 1500);
 
         setWindowStyle(false);
 
