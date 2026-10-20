@@ -332,6 +332,23 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         return new SDLSurface(context);
     }
 
+    /* Pantalla completa (sin las barras del sistema): en un movil el juego se
+       ve mejor asi, y las barras vuelven a esconderse solas si el usuario las
+       muestra por error (IMMERSIVE_STICKY). */
+    private void setImmersiveMode() {
+        try {
+            getWindow().getDecorView().setSystemUiVisibility(
+                View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+                | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                | View.SYSTEM_UI_FLAG_FULLSCREEN
+                | View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY);
+        } catch (Exception e) {
+            Log.e(TAG, "no se pudo poner en pantalla completa: " + e);
+        }
+    }
+
     /* El reproductor necesita leer los archivos del telefono (los videos, la
        musica). En Android 11 o superior eso se concede en los ajustes del
        sistema: se le lleva al usuario a esa pantalla (una sola vez, mientras
@@ -667,6 +684,11 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
     public void onWindowFocusChanged(boolean hasFocus) {
         super.onWindowFocusChanged(hasFocus);
         Log.v(TAG, "onWindowFocusChanged(): " + hasFocus);
+
+        if (hasFocus) {
+            // en un movil se quiere la pantalla completa (sin barras del sistema)
+            setImmersiveMode();
+        }
 
         if (SDLActivity.mBrokenLibraries) {
            return;
