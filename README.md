@@ -49,6 +49,32 @@ If the app does not open: check the firmware, that kstuff is loaded before Shado
 | L1 / R1 | N / P | -10 s / +10 s |
 | Touchpad | A | next audio track |
 
+On Android the on-screen pad (D-pad, ✕ and ○) is drawn by the app over the game and the
+touches are sent to the engine as key presses, so the same controls work with the finger.
+
+## Android
+
+The app is built from the SDL2 template in [`android/`](android). It runs on phones
+(arm64-v8a) and on the emulator (x86_64); the APK is universal.
+
+To build it you need the engine compiled for Android and the third-party libraries
+(SDL2, SDL2_image, SDL2_mixer, FreeType, sdl-gpu, FFmpeg and mbedTLS for HTTPS):
+
+```sh
+# en el checkout de BennuGD2
+ANDROID_NDK=$HOME/Android/Sdk/ndk/27.0.12077973 ./build.sh aarch64-linux-android
+ANDROID_NDK=$HOME/Android/Sdk/ndk/27.0.12077973 ./build.sh x86_64-linux-android
+
+# en este repositorio: copia las librerias y el .dcb a donde el Gradle los espera
+./android/preparar.sh
+
+# y monta el APK
+cd android && ./gradlew assembleDebug
+```
+
+The APK lands in `android/app/build/outputs/apk/debug/app-debug.apk`. It asks for access to
+all the files (so it can read the videos and the music of the phone) and opens `/sdcard`.
+
 ## Run from source (Linux)
 
 You need BennuGD2 built with the **`libmod_video` changes** in [`engine/libmod_video-mediaplayer.patch`](engine/libmod_video-mediaplayer.patch)

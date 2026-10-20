@@ -21,7 +21,8 @@ ALL="aarch64-linux-android:arm64-v8a x86_64-linux-android:x86_64"
 PAIRS="${*:-$ALL}"
 
 DEPS="libSDL2.so libSDL2_image.so libSDL2_mixer.so libfreetype.so \
-      libavformat.so libavcodec.so libavutil.so libswscale.so libswresample.so"
+      libavformat.so libavcodec.so libavutil.so libswscale.so libswresample.so \
+      libmbedtls.so libmbedx509.so libmbedcrypto.so"
 mkdir -p "$HERE/app/src/main/assets"
 cp "$HERE/../mediaplayer.dcb" "$HERE/app/src/main/assets/game.dcb"
 
