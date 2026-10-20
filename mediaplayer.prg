@@ -949,7 +949,9 @@ end
 
 // Busca el cartel de una pelicula o serie en TMDb (proceso aparte: no bloquea la interfaz)
 process tmdb_fetch(int slot, string title)
-private string q, body, poster, kind, cachef; int st, fh;
+private
+    string q, body, poster, kind, cachef;
+    int st, fh;
 begin
     cachef = join_path(logo_dir(), "t" + url_hash(title) + ".txt");
     poster = "";
@@ -967,7 +969,7 @@ begin
             poster = xt_item(body, "poster_path");
         end
         fh = fopen(cachef, O_WRITE);
-        if (fh) fputs(fh, poster); fclose(fh);
+        if (fh) fputs(fh, poster); fclose(fh); end
         if (poster != "") poster = "https://image.tmdb.org/t/p/w300" + poster; end
     end
     if (poster != "")
