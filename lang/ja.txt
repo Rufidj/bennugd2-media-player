@@ -180,3 +180,6 @@ t_dl_ok=ダウンロード完了:
 t_dl_cancel=ダウンロードを中止しました
 t_dl_fail=ダウンロードに失敗しました
 t_dl_deleted=ダウンロードを削除しました
+m_dl_video=映像と音声 (.mp4)
+m_dl_audio=音声のみ (.m4a, .mp3...)
+mt_dl_format=ダウンロード形式

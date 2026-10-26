@@ -60,7 +60,7 @@ const
     MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
     MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_TMDB = 28; MA_ASET = 300; MA_PICK = 100;
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
-    MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27; MA_DOWNLOAD = 29; MA_DELETE_DL = 30; MA_DELETE_DL_YES = 31;
+    MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27; MA_DOWNLOAD = 29; MA_DELETE_DL = 30; MA_DELETE_DL_YES = 31; MA_DL_VIDEO = 32; MA_DL_AUDIO = 33;
 end
 
 global
@@ -1511,7 +1511,7 @@ begin
     menu_clear();
     if (addon_mode > 0)
         // un video de un addon se puede guardar en la consola (los avisos de radio y audio no)
-        if (dl_possible(sel)) menu_add(tr("m_download"), MA_DOWNLOAD); end
+        if (dl_possible(sel) > 0) menu_add(tr("m_download"), MA_DOWNLOAD); end
         if (addon_mode == 2 || (sel > 0 && sel < n_entries && entry_dir[sel] == K_ADDON)) menu_add(tr("m_addon_settings"), MA_ASETTINGS); end
         menu_add(tr("m_settings"), MA_SETTINGS);
         menu_add(tr("m_cancel"), MA_CANCEL);
@@ -1580,7 +1580,18 @@ begin
         end
         case MA_ABOUT: credits_open(); end
         case MA_TMDB:  kb_open(tr("k_tmdb"), tmdb_key, KB_TMDB); end
-        case MA_DOWNLOAD: dl_start(sel); end
+        case MA_DOWNLOAD:
+            if (dl_possible(sel) == 1)
+                // un video: se elige el formato (la musica solo tiene audio y se baja directamente)
+                dl_pick = sel;
+                menu_clear(); menu_add(tr("m_dl_video"), MA_DL_VIDEO); menu_add(tr("m_dl_audio"), MA_DL_AUDIO); menu_add(tr("m_cancel"), MA_CANCEL);
+                menu_show(tr("mt_dl_format"));
+            else
+                dl_start(sel, 0);
+            end
+        end
+        case MA_DL_VIDEO: dl_start(dl_pick, 0); end
+        case MA_DL_AUDIO: dl_start(dl_pick, 1); end
         case MA_DELETE_DL:
             op_path = join_path(cur_dir, entries[sel]);
             menu_clear(); menu_add(tr("m_yes_delete") + " \"" + cut_text(utf8_to_latin1(entries[sel]), 24) + "\"", MA_DELETE_DL_YES); menu_add(tr("m_no"), MA_CANCEL);

@@ -180,3 +180,6 @@ t_dl_ok=已下载：
 t_dl_cancel=下载已取消
 t_dl_fail=下载失败
 t_dl_deleted=已删除下载
+m_dl_video=视频和音频 (.mp4)
+m_dl_audio=仅音频 (.m4a, .mp3...)
+mt_dl_format=下载格式

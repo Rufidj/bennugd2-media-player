@@ -37,6 +37,7 @@ global
     int    store_jreq, store_jcur;      // una descarga en segundo plano en curso, y el numero de fichero que baja
     int    dl_job;                      // 1 = descargando un video a "Descargas"
     string dl_path, dl_title;
+    int    dl_pick;                     // entrada para la que se esta eligiendo el formato
     // ventana de progreso propia (la barra del sistema de la PS5 no se puede usar desde un titulo)
     int    ov_on, ov_pct, ov_cancel;    // visible / porcentaje 0-100 / con boton de cancelar
     string ov_title = "", s_ovt = "", s_ovp = "", s_ovh = "";
@@ -944,27 +945,33 @@ end
 // ---- guardar un video de un addon en "Descargas": el motor copia video y audio a un .mp4 en segundo plano
 // ¿se puede descargar esta entrada?  Un video directo si; una carpeta del addon solo si parece un video
 // (tiene duracion o abre la pagina "play"/"watch"), porque al descargar se abre esa pagina para obtener la URL
+// Devuelve 0 = no, 1 = video (se ofrece el video y solo el audio), 2 = solo audio (musica)
 function int dl_possible(int i)
 begin
     if (addon_mode != 2 || i <= 0 || i >= n_entries) return 0; end
-    if (entry_dir[i] == K_URL) return entry_akind[i] == 1; end
-    if (entry_dir[i] == K_AFOLDER) return entry_dur[i] > 0 || entry_url[i] == "play" || entry_url[i] == "watch"; end
+    if (entry_dir[i] == K_URL) return entry_akind[i] == 1 ? 1 : (entry_akind[i] == 2 ? 2 : 0); end
+    if (entry_dir[i] == K_AFOLDER) return (entry_dur[i] > 0 || entry_url[i] == "play" || entry_url[i] == "watch") ? 1 : 0; end
     return 0;
 end
 
-function dl_start(int i)
-private string dname, dpath, durl, dhdr; int r, dn, c, k;
+// audio = 1: solo el sonido (.m4a, .mp3, .opus...: el motor elige segun el codec); si no, el video con su audio en un .mp4
+function dl_start(int i, int audio)
+private string dname, dpath, durl, dhdr, dext; int r, dn, c, k;
 begin
     if (store_dir == "") toast(tr("t_no_store")); return 0; end
     if (dl_job || !dl_possible(i)) return 0; end
     durl = entry_url[i]; dhdr = entry_aargs[i];
+    if (dl_possible(i) == 2) audio = 1; end
     if (entry_dir[i] == K_AFOLDER)
-        // se ejecuta la pagina del elemento (la lista de la pantalla sigue como esta: no se toca) y se coge su primer video
+        // se ejecuta la pagina del elemento (la lista de la pantalla sigue como esta: no se toca) y se coge su primer video (o audio)
         if (addon_run(entry_url[i], entry_aargs[i]) != 0) return 0; end
         k = 0; while (k < ad_nit && ad_it_kind[k] != 1) k++; end
+        if (k >= ad_nit) k = 0; while (k < ad_nit && ad_it_kind[k] != 2) k++; end end
         if (k >= ad_nit) toast(tr("t_dl_fail")); return 0; end
+        if (ad_it_kind[k] == 2) audio = 1; end
         durl = ad_it_url[k]; dhdr = ad_it_hdr[k];
     end
+    dext = audio ? ".m4a" : ".mp4";
     mkdir(downloads_dir);
     dname = "";
     for (r = 0; r < len(entries[i]); r++)                                     // sin los caracteres que un nombre de fichero no admite
@@ -973,9 +980,9 @@ begin
     end
     while (len(dname) > 80) dname = utf8_chop(dname); end
     if (dname == "") dname = "video"; end
-    dpath = join_path(downloads_dir, dname + ".mp4"); dn = 1;
-    while (fexists(dpath)) dn++; dpath = join_path(downloads_dir, dname + " (" + dn + ").mp4"); end
-    r = video_download_begin(durl, dhdr, dpath);
+    dpath = join_path(downloads_dir, dname + dext); dn = 1;
+    while (fexists(dpath)) dn++; dpath = join_path(downloads_dir, dname + " (" + dn + ")" + dext); end
+    if (audio) r = video_download_audio_begin(durl, dhdr, dpath); else r = video_download_begin(durl, dhdr, dpath); end
     if (r != 0) toast(tr("t_dl_fail")); return 0; end
     dl_job = 1; dl_path = dpath; dl_title = entries[i];
     s_amsg = tr("s_downloading") + " " + dl_title; addon_busy = 1;
@@ -995,6 +1002,7 @@ begin
         return 0;
     end
     dl_job = 0; addon_busy = 0; s_amsg = ""; prog_stop();
+    dl_path = video_download_path();                                          // en audio la extension la decide el motor segun el codec
     if (st == 0)
         toast(tr("t_dl_ok") + " " + dl_title);
     elseif (st == -2)
