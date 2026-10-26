@@ -15,6 +15,7 @@ global
     string entry_info[MAX_ENTRIES];     // descripción (para el panel de la derecha)
     string wrap_l[8]; int wrap_n;
     int    addons_ok;
+    int    entry_dur[MAX_ENTRIES];      // segundos, si el addon los dio
     int    entry_akind[MAX_ENTRIES];    // 1 video, 2 audio, 3 radio (elementos de un addon)
     // ---- tienda: una entrada por addon del repositorio
     int    store_mode;                  // 1 = la tienda está en pantalla
@@ -254,7 +255,7 @@ begin
         if (ad_it_year[i] > 0) t += (t != "" ? "  " : "") + "(" + ad_it_year[i] + ")"; end
         if (ad_it_dur[i] > 0) t += (t != "" ? "  " : "") + fmt_time(ad_it_dur[i] * 1000); end
         entry_info[n_entries] = t;
-        entry_akind[n_entries] = ad_it_kind[i];
+        entry_akind[n_entries] = ad_it_kind[i]; entry_dur[n_entries] = ad_it_dur[i];
         if (ad_it_kind[i] == 0)
             entry_dir[n_entries] = K_AFOLDER; entry_url[n_entries] = ad_it_page[i]; entry_aargs[n_entries] = ad_it_args[i];
         else
@@ -909,11 +910,29 @@ begin
 end
 
 // ---- guardar un video de un addon en "Descargas": el motor copia video y audio a un .mp4 en segundo plano
+// ¿se puede descargar esta entrada?  Un video directo si; una carpeta del addon solo si parece un video
+// (tiene duracion o abre la pagina "play"/"watch"), porque al descargar se abre esa pagina para obtener la URL
+function int dl_possible(int i)
+begin
+    if (addon_mode != 2 || i <= 0 || i >= n_entries) return 0; end
+    if (entry_dir[i] == K_URL) return entry_akind[i] == 1; end
+    if (entry_dir[i] == K_AFOLDER) return entry_dur[i] > 0 || entry_url[i] == "play" || entry_url[i] == "watch"; end
+    return 0;
+end
+
 function dl_start(int i)
-private string dname, dpath; int r, dn, c;
+private string dname, dpath, durl, dhdr; int r, dn, c, k;
 begin
     if (store_dir == "") toast(tr("t_no_store")); return 0; end
-    if (dl_job || i <= 0 || i >= n_entries || entry_dir[i] != K_URL) return 0; end
+    if (dl_job || !dl_possible(i)) return 0; end
+    durl = entry_url[i]; dhdr = entry_aargs[i];
+    if (entry_dir[i] == K_AFOLDER)
+        // se ejecuta la pagina del elemento (la lista de la pantalla sigue como esta: no se toca) y se coge su primer video
+        if (addon_run(entry_url[i], entry_aargs[i]) != 0) return 0; end
+        k = 0; while (k < ad_nit && ad_it_kind[k] != 1) k++; end
+        if (k >= ad_nit) toast(tr("t_dl_fail")); return 0; end
+        durl = ad_it_url[k]; dhdr = ad_it_hdr[k];
+    end
     mkdir(downloads_dir);
     dname = "";
     for (r = 0; r < len(entries[i]); r++)                                     // sin los caracteres que un nombre de fichero no admite
@@ -924,7 +943,7 @@ begin
     if (dname == "") dname = "video"; end
     dpath = join_path(downloads_dir, dname + ".mp4"); dn = 1;
     while (fexists(dpath)) dn++; dpath = join_path(downloads_dir, dname + " (" + dn + ").mp4"); end
-    r = video_download_begin(entry_url[i], entry_aargs[i], dpath);            // en un video de addon, aargs lleva las cabeceras
+    r = video_download_begin(durl, dhdr, dpath);
     if (r != 0) toast(tr("t_dl_fail")); return 0; end
     dl_job = 1; dl_path = dpath; dl_title = entries[i];
     s_amsg = tr("s_downloading") + " " + dl_title; addon_busy = 1;

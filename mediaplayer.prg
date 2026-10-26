@@ -1505,7 +1505,7 @@ begin
     menu_clear();
     if (addon_mode > 0)
         // un video de un addon se puede guardar en la consola (los avisos de radio y audio no)
-        if (addon_mode == 2 && sel > 0 && sel < n_entries && entry_dir[sel] == K_URL && entry_akind[sel] == 1) menu_add(tr("m_download"), MA_DOWNLOAD); end
+        if (dl_possible(sel)) menu_add(tr("m_download"), MA_DOWNLOAD); end
         if (addon_mode == 2 || (sel > 0 && sel < n_entries && entry_dir[sel] == K_ADDON)) menu_add(tr("m_addon_settings"), MA_ASETTINGS); end
         menu_add(tr("m_settings"), MA_SETTINGS);
         menu_add(tr("m_cancel"), MA_CANCEL);
