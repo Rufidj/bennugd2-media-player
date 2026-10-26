@@ -296,14 +296,14 @@ index 00000000..4003adfe
 +#endif
 diff --git a/modules/libmod_misc/m_progress.c b/modules/libmod_misc/m_progress.c
 new file mode 100644
-index 00000000..9f269bb4
+index 00000000..cabdddc5
 --- /dev/null
 +++ b/modules/libmod_misc/m_progress.c
-@@ -0,0 +1,150 @@
+@@ -0,0 +1,230 @@
 +/*
 + *  m_progress.c - system progress bar (PS5 message dialog, progress mode), see m_progress.h
 + *
-+ *  libSceMsgDialog is imported statically against a link stub (ps5/tools/build-msgdialog-stub.sh), as libSceImeDialog is.
++ *  libSceMsgDialog is loaded at run time and its functions are looked up (see resolve_msgdialog).
 + *  Struct layouts as in SharpProspero's MessageDialog.cs.
 + */
 +#include <stdint.h>
@@ -338,13 +338,92 @@ index 00000000..9f269bb4
 +_Static_assert( sizeof( DlgProgBar ) == 80, "bar" );
 +_Static_assert( sizeof( DlgParam ) == 136, "param" );
 +
-+int sceMsgDialogInitialize( void );
-+int sceMsgDialogTerminate( void );
-+int sceMsgDialogOpen( DlgParam * param );
-+int sceMsgDialogUpdateStatus( void );
-+int sceMsgDialogClose( void );
-+int sceMsgDialogProgressBarSetValue( int target, uint32_t rate );
-+int sceMsgDialogProgressBarSetMsg( int target, const char * msg );
++/* libSceMsgDialog is NOT linked: a static import of it was left unbound by the console's loader (a call to address 0).
++   The module is loaded on request and its functions are looked up in it, by name and, failing that, by NID. */
++int sceKernelLoadStartModule( const char * path, size_t args, const void * argp, unsigned flags, const void * opt, int * res );
++int sceKernelDlsym( int handle, const char * name, void ** addr );
++
++static int ( * sceMsgDialogInitialize )( void );
++static int ( * sceMsgDialogTerminate )( void );
++static int ( * sceMsgDialogOpen )( DlgParam * param );
++static int ( * sceMsgDialogUpdateStatus )( void );
++static int ( * sceMsgDialogClose )( void );
++static int ( * sceMsgDialogProgressBarSetValue )( int target, uint32_t rate );
++static int ( * sceMsgDialogProgressBarSetMsg )( int target, const char * msg );
++
++/* NID of a function name: first 8 bytes of SHA-1(name + salt), read little-endian, base64 big-endian ('/' -> '-') */
++static uint32_t rol( uint32_t v, int n ) { return ( v << n ) | ( v >> ( 32 - n ) ); }
++static void sha1( const uint8_t * msg, size_t len, uint8_t out[20] ) {
++    uint32_t h[5] = { 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0 };
++    uint8_t buf[128]; size_t i, total = ( ( len + 8 ) / 64 + 1 ) * 64;
++    memset( buf, 0, sizeof buf ); memcpy( buf, msg, len ); buf[len] = 0x80;
++    for ( i = 0; i < 8; i++ ) buf[total - 1 - i] = ( uint8_t ) ( ( ( uint64_t ) len * 8 ) >> ( 8 * i ) );
++    for ( size_t off = 0; off < total; off += 64 ) {
++        uint32_t w[80], a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], t;
++        for ( i = 0; i < 16; i++ ) w[i] = ( uint32_t ) buf[off + 4*i] << 24 | buf[off + 4*i + 1] << 16 | buf[off + 4*i + 2] << 8 | buf[off + 4*i + 3];
++        for ( i = 16; i < 80; i++ ) w[i] = rol( w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16], 1 );
++        for ( i = 0; i < 80; i++ ) {
++            uint32_t f, k;
++            if ( i < 20 ) { f = ( b & c ) | ( ~b & d ); k = 0x5A827999; }
++            else if ( i < 40 ) { f = b ^ c ^ d; k = 0x6ED9EBA1; }
++            else if ( i < 60 ) { f = ( b & c ) | ( b & d ) | ( c & d ); k = 0x8F1BBCDC; }
++            else { f = b ^ c ^ d; k = 0xCA62C1D6; }
++            t = rol( a, 5 ) + f + e + k + w[i]; e = d; d = c; c = rol( b, 30 ); b = a; a = t;
++        }
++        h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e;
++    }
++    for ( i = 0; i < 20; i++ ) out[i] = ( uint8_t ) ( h[i / 4] >> ( 24 - 8 * ( i % 4 ) ) );
++}
++static void nid_of( const char * name, char out[16] ) {
++    static const uint8_t salt[16] = { 0x51, 0x8D, 0x64, 0xA6, 0x35, 0xDE, 0xD8, 0xC1, 0xE6, 0xB0, 0x39, 0xB1, 0xC3, 0xE5, 0x52, 0x30 };
++    static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-";
++    uint8_t in[64], d[20], be[8]; uint64_t v = 0; size_t n = strlen( name ); int o = 0;
++    memcpy( in, name, n ); memcpy( in + n, salt, 16 );
++    sha1( in, n + 16, d );
++    for ( int i = 7; i >= 0; i-- ) v = ( v << 8 ) | d[i];
++    for ( int i = 0; i < 8; i++ ) be[i] = ( uint8_t ) ( v >> ( 56 - 8 * i ) );
++    for ( int i = 0; i < 8; i += 3 ) {
++        uint32_t x = ( uint32_t ) be[i] << 16 | ( i + 1 < 8 ? ( uint32_t ) be[i+1] << 8 : 0 ) | ( i + 2 < 8 ? be[i+2] : 0 );
++        out[o++] = b64[( x >> 18 ) & 63]; out[o++] = b64[( x >> 12 ) & 63];
++        if ( i + 1 < 8 ) out[o++] = b64[( x >> 6 ) & 63];
++        if ( i + 2 < 8 ) out[o++] = b64[x & 63];
++    }
++    out[o] = 0;
++}
++
++static void * find_sym( int h, const char * name ) {
++    void * p = NULL; char nid[16]; int rc = sceKernelDlsym( h, name, &p );
++    if ( rc == 0 && p ) return p;
++    p = NULL; nid_of( name, nid );
++    rc = sceKernelDlsym( h, nid, &p );
++    if ( rc == 0 && p ) { ps5_dialog_log( "  %s found by NID %s", name, nid ); return p; }
++    ps5_dialog_log( "  %s NOT found (nid %s, rc %#x)", name, nid, ( unsigned ) rc );
++    return NULL;
++}
++
++static int g_resolved = 0;      /* 1 = all functions found, -1 = not available */
++static int resolve_msgdialog( void ) {
++    static const char * paths[] = { "libSceMsgDialog.sprx", "/system/common/lib/libSceMsgDialog.sprx" };
++    int h = -1, res = 0;
++    if ( g_resolved ) return g_resolved > 0;
++    g_resolved = -1;
++    for ( int i = 0; i < 2 && h <= 0; i++ ) {
++        h = sceKernelLoadStartModule( paths[i], 0, NULL, 0, NULL, &res );
++        ps5_dialog_log( "sceKernelLoadStartModule(%s) -> %#x", paths[i], ( unsigned ) h );
++    }
++    if ( h <= 0 ) return 0;
++    *( void ** ) &sceMsgDialogInitialize = find_sym( h, "sceMsgDialogInitialize" );
++    *( void ** ) &sceMsgDialogTerminate = find_sym( h, "sceMsgDialogTerminate" );
++    *( void ** ) &sceMsgDialogOpen = find_sym( h, "sceMsgDialogOpen" );
++    *( void ** ) &sceMsgDialogUpdateStatus = find_sym( h, "sceMsgDialogUpdateStatus" );
++    *( void ** ) &sceMsgDialogClose = find_sym( h, "sceMsgDialogClose" );
++    *( void ** ) &sceMsgDialogProgressBarSetValue = find_sym( h, "sceMsgDialogProgressBarSetValue" );
++    *( void ** ) &sceMsgDialogProgressBarSetMsg = find_sym( h, "sceMsgDialogProgressBarSetMsg" );
++    if ( !sceMsgDialogInitialize || !sceMsgDialogTerminate || !sceMsgDialogOpen || !sceMsgDialogUpdateStatus ||
++         !sceMsgDialogClose || !sceMsgDialogProgressBarSetValue || !sceMsgDialogProgressBarSetMsg ) return 0;
++    g_resolved = 1;
++    return 1;
++}
 +
 +#define SYSMODULE_MSG_DIALOG    0x00A4
 +#define USER_SYSTEM             0xFF
@@ -363,6 +442,7 @@ index 00000000..9f269bb4
 +
 +    if ( g_open ) { ret = -2; goto done; }
 +    if ( ps5_dialogs_init( SYSMODULE_MSG_DIALOG ) != 0 ) { ret = -3; goto done; }
++    if ( !resolve_msgdialog() ) { ret = -6; goto done; }
 +
 +    rc = sceMsgDialogInitialize();
 +    ps5_dialog_log( "sceMsgDialogInitialize -> %#x", ( unsigned ) rc );
