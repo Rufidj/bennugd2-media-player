@@ -26,6 +26,7 @@ global
     int    fo_fi, fo_fo;                                                   // archivo que se esta copiando (lectura / escritura)
     byte pointer fo_buf;
     int    fo_info_bytes, fo_info_files, fo_info_dirs;
+    string fo_i_mod = "", fo_i_cre = "", fo_i_path = ""; int fo_i_hid, fo_i_ro, fo_i_isdir;   // propiedades del elemento (cuando es uno solo)
     string fo_in[255]; int fo_in_dir[255]; int fo_in_n; string fo_cap = "";
     int    fo_delafter;                                                    // mover entre discos: tras copiar hay que borrar los originales
 end
@@ -119,6 +120,17 @@ begin
     return clip_n;
 end
 
+// tamano de un archivo (abriendolo; hace falta para pesar bien lo que se copia en el primer nivel)
+function int file_bytes(string path)
+private int fh, n;
+begin
+    fh = fopen(path, O_READ);
+    if (!fh) return 0; end
+    n = flength(fh);
+    fclose(fh);
+    return n;
+end
+
 // ---------------------------------------------------------------- el trabajo
 function fo_note_error(string what, string path)
 begin
@@ -133,16 +145,91 @@ begin
     fo_n++;
 end
 
+// bytes con su tamano legible: "9.4 MB (9836112 bytes)"
+function string fo_bytes(int b)
+begin
+    if (b <= 0) return "0 bytes"; end
+    if (b < 1024) return b + " bytes"; end
+    return fmt_size(b) + " (" + b + " bytes)";
+end
+
+// fecha, atributos... del elemento: solo se pueden leer recorriendo su carpeta
+function fo_gather(string path)
+private int dh; string nm, want;
+begin
+    fo_i_mod = ""; fo_i_cre = ""; fo_i_hid = 0; fo_i_ro = 0; fo_i_path = path;      // (las fechas solo se muestran si el sistema las da: en algunos aparece 1900)
+    want = base_name(path);
+    dh = diropen(join_path(parent_of(path), "*"));
+    if (!dh) return 0; end
+    nm = dirread(dh);
+    while (nm != "")
+        if (nm == want) fo_i_mod = fileinfo.modified; fo_i_cre = fileinfo.created; fo_i_hid = fileinfo.hidden; fo_i_ro = fileinfo.readonly; break; end
+        nm = dirread(dh);
+    end
+    dirclose(dh);
+    if (find(fo_i_mod, "1900") >= 0) fo_i_mod = ""; end
+    if (find(fo_i_cre, "1900") >= 0) fo_i_cre = ""; end
+end
+
+function fo_line(string t)
+begin
+    menu_add(fit_text(utf8_to_latin1(t), 780), MA_CANCEL);
+end
+
+// ventana de propiedades: una linea por dato (nombre, ruta, tipo, tamano exacto, fechas, atributos, y en video/audio resolucion, duracion y pistas)
+function fo_show_info()
+private int h, n, k; string t, ex;
+begin
+    menu_clear();
+    if (fo_in_n == 1)
+        ex = lcase(ext_of(fo_i_path));
+        fo_line(tr("p_name") + base_name(fo_i_path));
+        menu_add(tail_fit(utf8_to_latin1(tr("p_path") + parent_of(fo_i_path)), 780), MA_CANCEL);
+        if (fo_i_isdir) t = tr("p_k_folder");
+        elseif (is_video(fo_i_path)) t = tr("p_k_video") + " " + ucase(ex);
+        elseif (is_audio(fo_i_path)) t = tr("p_k_audio") + " " + ucase(ex);
+        elseif (ex == "m3u" || ex == "m3u8") t = tr("p_k_list");
+        else t = tr("p_k_file") + (ex != "" ? " " + ucase(ex) : ""); end
+        fo_line(tr("p_type") + t);
+        fo_line(tr("s_size") + fo_bytes(fo_info_bytes));
+        if (fo_i_isdir) fo_line(tr("p_contents") + fo_info_files + " " + tr("p_files") + ", " + (fo_info_dirs - 1) + " " + tr("p_folders")); end
+        if (fo_i_mod != "") fo_line(tr("p_modified") + fo_i_mod); end
+        if (fo_i_cre != "" && fo_i_cre != fo_i_mod) fo_line(tr("p_created") + fo_i_cre); end
+        t = (fo_i_hid ? tr("p_hidden") : "") + (fo_i_hid && fo_i_ro ? ", " : "") + (fo_i_ro ? tr("p_readonly") : "");
+        if (t != "") fo_line(tr("p_attr") + t); end
+        if (!fo_i_isdir && (is_video(fo_i_path) || is_audio(fo_i_path)))
+            h = video_open(fo_i_path);
+            if (h)
+                if (!video_is_audio_only(h)) fo_line(tr("s_res") + video_width(h) + "x" + video_height(h)); end
+                k = video_duration(h);
+                if (k > 0) fo_line(tr("s_dur") + fmt_time(k)); end
+                n = video_audio_tracks(h); t = "";
+                for (k = 0; k < n && k < 6; k++) t += (k > 0 ? ", " : "") + lang_or_dash(video_audio_lang(h, k)); end
+                fo_line(tr("s_audio_n") + n + "): " + t);
+                n = video_subtitle_tracks(h); t = "";
+                for (k = 0; k < n && k < 6; k++) t += (k > 0 ? ", " : "") + lang_or_dash(video_subtitle_lang(h, k)); end
+                if (n > 0) fo_line(tr("s_subs_n") + n + "): " + t); end
+                video_close(h);
+            end
+        end
+    else
+        fo_line(fo_in_n + " " + tr("p_sel"));
+        menu_add(tail_fit(utf8_to_latin1(tr("p_path") + cur_dir), 780), MA_CANCEL);
+        fo_line(tr("p_contents") + fo_info_files + " " + tr("p_files") + ", " + fo_info_dirs + " " + tr("p_folders"));
+        fo_line(tr("s_size") + fo_bytes(fo_info_bytes));
+    end
+    menu_add(tr("m_back"), MA_CANCEL);
+    menu_sel = menu_n - 1;
+    menu_show(tr("m_props"));
+end
+
 function fo_finish(int st)                    // st: 0 bien, -2 cancelado
 begin
     if (fo_fi) fclose(fo_fi); fo_fi = 0; end
     if (fo_fo) fclose(fo_fo); fo_fo = 0; end
     if (fo_buf) free(fo_buf); fo_buf = 0; end
     fo_job = 0; fo_phase = 0; prog_stop();
-    if (fo_mode == FO_INFO)
-        show_error(tr("m_props"), tr("p_items") + ": " + fo_info_files + " / " + fo_info_dirs + "   " + tr("s_size") + fmt_size(fo_info_bytes));
-        return 0;
-    end
+    if (fo_mode == FO_INFO) fo_show_info(); return 0; end
     if (fo_mode == FO_MOVE && clip_mode == 2 && st == 0 && fo_errs == 0) clip_n = 0; end
     read_dir();
     if (st == -2)
@@ -167,6 +254,7 @@ begin
         fo_in_n = clip_n;
         for (i = 0; i < clip_n; i++) fo_in[i] = clip_path[i]; fo_in_dir[i] = clip_dir[i]; end
     end
+    if (mode == FO_INFO && fo_in_n == 1) fo_i_isdir = fo_in_dir[0]; fo_gather(fo_in[0]); end
     for (i = 0; i < fo_in_n; i++)
         spath = fo_in[i]; isd = fo_in_dir[i];
         if (mode == FO_COPY || mode == FO_MOVE)
@@ -180,7 +268,7 @@ begin
         else
             dpath = "";
         end
-        fo_add(spath, dpath, isd, 0);
+        fo_add(spath, dpath, isd, isd ? 0 : file_bytes(spath));
     end
     fo_top = fo_n;
     if (fo_n == 0)
