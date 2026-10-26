@@ -296,10 +296,10 @@ index 00000000..4003adfe
 +#endif
 diff --git a/modules/libmod_misc/m_progress.c b/modules/libmod_misc/m_progress.c
 new file mode 100644
-index 00000000..cabdddc5
+index 00000000..94efda6f
 --- /dev/null
 +++ b/modules/libmod_misc/m_progress.c
-@@ -0,0 +1,230 @@
+@@ -0,0 +1,234 @@
 +/*
 + *  m_progress.c - system progress bar (PS5 message dialog, progress mode), see m_progress.h
 + *
@@ -339,8 +339,7 @@ index 00000000..cabdddc5
 +_Static_assert( sizeof( DlgParam ) == 136, "param" );
 +
 +/* libSceMsgDialog is NOT linked: a static import of it was left unbound by the console's loader (a call to address 0).
-+   The module is loaded on request and its functions are looked up in it, by name and, failing that, by NID. */
-+int sceKernelLoadStartModule( const char * path, size_t args, const void * argp, unsigned flags, const void * opt, int * res );
++   The sysmodule is loaded on request and its functions are looked up in the loaded modules, by name and, failing that, by NID. */
 +int sceKernelDlsym( int handle, const char * name, void ** addr );
 +
 +static int ( * sceMsgDialogInitialize )( void );
@@ -391,34 +390,39 @@ index 00000000..cabdddc5
 +    out[o] = 0;
 +}
 +
-+static void * find_sym( int h, const char * name ) {
-+    void * p = NULL; char nid[16]; int rc = sceKernelDlsym( h, name, &p );
-+    if ( rc == 0 && p ) return p;
++int sceKernelGetModuleList( int * handles, size_t max, size_t * num );
++
++/* looks the function up in one module: by name first, then by NID (silent) */
++static void * try_sym( int h, const char * name ) {
++    void * p = NULL; char nid[16];
++    if ( sceKernelDlsym( h, name, &p ) == 0 && p ) return p;
 +    p = NULL; nid_of( name, nid );
-+    rc = sceKernelDlsym( h, nid, &p );
-+    if ( rc == 0 && p ) { ps5_dialog_log( "  %s found by NID %s", name, nid ); return p; }
-+    ps5_dialog_log( "  %s NOT found (nid %s, rc %#x)", name, nid, ( unsigned ) rc );
++    if ( sceKernelDlsym( h, nid, &p ) == 0 && p ) return p;
 +    return NULL;
 +}
 +
 +static int g_resolved = 0;      /* 1 = all functions found, -1 = not available */
 +static int resolve_msgdialog( void ) {
-+    static const char * paths[] = { "libSceMsgDialog.sprx", "/system/common/lib/libSceMsgDialog.sprx" };
-+    int h = -1, res = 0;
++    int h[256], found = -1; size_t n = 0;
 +    if ( g_resolved ) return g_resolved > 0;
 +    g_resolved = -1;
-+    for ( int i = 0; i < 2 && h <= 0; i++ ) {
-+        h = sceKernelLoadStartModule( paths[i], 0, NULL, 0, NULL, &res );
-+        ps5_dialog_log( "sceKernelLoadStartModule(%s) -> %#x", paths[i], ( unsigned ) h );
-+    }
-+    if ( h <= 0 ) return 0;
-+    *( void ** ) &sceMsgDialogInitialize = find_sym( h, "sceMsgDialogInitialize" );
-+    *( void ** ) &sceMsgDialogTerminate = find_sym( h, "sceMsgDialogTerminate" );
-+    *( void ** ) &sceMsgDialogOpen = find_sym( h, "sceMsgDialogOpen" );
-+    *( void ** ) &sceMsgDialogUpdateStatus = find_sym( h, "sceMsgDialogUpdateStatus" );
-+    *( void ** ) &sceMsgDialogClose = find_sym( h, "sceMsgDialogClose" );
-+    *( void ** ) &sceMsgDialogProgressBarSetValue = find_sym( h, "sceMsgDialogProgressBarSetValue" );
-+    *( void ** ) &sceMsgDialogProgressBarSetMsg = find_sym( h, "sceMsgDialogProgressBarSetMsg" );
++    /* sysmodule 0xA4 has loaded the library: find the module that exports the dialog */
++    if ( sceKernelGetModuleList( h, 256, &n ) != 0 ) { ps5_dialog_log( "module list unavailable" ); return 0; }
++    ps5_dialog_log( "%zu modules loaded", n );
++    for ( size_t i = 0; i < n && i < 256; i++ )
++        if ( try_sym( h[i], "sceMsgDialogInitialize" ) ) { found = h[i]; break; }
++    if ( found < 0 ) { ps5_dialog_log( "sceMsgDialogInitialize not found in any module" ); return 0; }
++    ps5_dialog_log( "dialog module handle %d", found );
++    *( void ** ) &sceMsgDialogInitialize = try_sym( found, "sceMsgDialogInitialize" );
++    *( void ** ) &sceMsgDialogTerminate = try_sym( found, "sceMsgDialogTerminate" );
++    *( void ** ) &sceMsgDialogOpen = try_sym( found, "sceMsgDialogOpen" );
++    *( void ** ) &sceMsgDialogUpdateStatus = try_sym( found, "sceMsgDialogUpdateStatus" );
++    *( void ** ) &sceMsgDialogClose = try_sym( found, "sceMsgDialogClose" );
++    *( void ** ) &sceMsgDialogProgressBarSetValue = try_sym( found, "sceMsgDialogProgressBarSetValue" );
++    *( void ** ) &sceMsgDialogProgressBarSetMsg = try_sym( found, "sceMsgDialogProgressBarSetMsg" );
++    ps5_dialog_log( "functions: init %p term %p open %p update %p close %p setvalue %p setmsg %p",
++        ( void * ) sceMsgDialogInitialize, ( void * ) sceMsgDialogTerminate, ( void * ) sceMsgDialogOpen, ( void * ) sceMsgDialogUpdateStatus,
++        ( void * ) sceMsgDialogClose, ( void * ) sceMsgDialogProgressBarSetValue, ( void * ) sceMsgDialogProgressBarSetMsg );
 +    if ( !sceMsgDialogInitialize || !sceMsgDialogTerminate || !sceMsgDialogOpen || !sceMsgDialogUpdateStatus ||
 +         !sceMsgDialogClose || !sceMsgDialogProgressBarSetValue || !sceMsgDialogProgressBarSetMsg ) return 0;
 +    g_resolved = 1;
