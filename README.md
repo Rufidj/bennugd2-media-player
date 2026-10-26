@@ -9,6 +9,7 @@ Interface drawn at 1080p with a PlayStation-style skin, designed to be driven wi
 
 - File explorer with **preview** (a random frame, duration, resolution, audio/subtitle tracks), icons and folders
 - Video, **music mode with visualizer** (spectrum / waveform), cover art
+- **File manager**: copy, move, delete, rename, new folder, mark several items and properties from the options menu (square) > Files, with a progress bar and cancel; it never overwrites (a free name like `video (2).mp4` is used). Settings can show hidden files and all file types
 - **Subtitles** (embedded + external `.srt`), **multiple audio tracks**, seeking, volume
 - **Streaming URLs**, `.m3u` / `.m3u8` lists with logos, list editor with an on-screen keyboard
 - **6 UI languages** with TrueType fonts: Spanish, English, Russian, Japanese, Chinese, Korean

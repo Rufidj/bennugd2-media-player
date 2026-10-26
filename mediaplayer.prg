@@ -56,15 +56,16 @@ const
     STORE_URL = "https://raw.githubusercontent.com/Rufidj/bennugd2-media-player/main/addons";
     M_NONE = 0; M_MENU = 1; M_KB = 2; M_CREDITS = 3; M_SYSKB = 4; M_SETTINGS = 5;                             // pantallas modales (menu / teclado)
     KB_NEWLIST = 1; KB_RENAME_LIST = 2; KB_URL = 3; KB_NEW_TITLE = 4; KB_ENTRY_TITLE = 5; KB_LOGO = 6; KB_ADDON = 7; KB_ASET = 8;
-    KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11; KB_AUTH_SERVER = 12; KB_ADDON_URL = 14; KB_STORE_URL = 15;
+    KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11; KB_AUTH_SERVER = 12; KB_ADDON_URL = 14; KB_STORE_URL = 15; KB_FRENAME = 16; KB_NEWDIR = 17;
     MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
     MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_ASET = 300; MA_PICK = 100;
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
     MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27; MA_DOWNLOAD = 29; MA_DELETE_DL = 30; MA_DELETE_DL_YES = 31; MA_DL_VIDEO = 32; MA_DL_AUDIO = 33; MA_DL_FMT = 400; MA_UNK_YES = 34; MA_CACHE_YES = 35; MA_ST_BACK = 36;
+    MA_FILES = 37; MA_FCOPY = 38; MA_FMOVE = 39; MA_FPASTE = 40; MA_FRENAME = 41; MA_FDEL = 42; MA_FDEL_YES = 43; MA_FNEWDIR = 44; MA_FMARK = 45; MA_FMARKALL = 46; MA_FPROPS = 47;
     // ajustes: tipo de fila y su identificador
     STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
     ST_LANG = 1; ST_SKIN = 2; ST_PREVIEW = 3; ST_SEEK = 4; ST_VIZ = 5; ST_UNKNOWN = 6; ST_INSTALL = 7; ST_STOREURL = 8; ST_ACCOUNTS = 9;
-    ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18;
+    ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18; ST_HIDDEN = 19; ST_ALLFILES = 20;
     APP_VERSION = "1.2";
 end
 
@@ -168,6 +169,7 @@ global
     int tab_focus, tab_cur;                     // 1 = el foco esta en la barra de secciones; tab_cur = la casilla con el foco
     // ajustes (guardados en config.cfg)
     int set_preview = 1, set_seek = 1, set_unknown, set_dlfmt;
+    int set_hidden, set_allfiles;               // explorador: mostrar ocultos / todos los archivos (no solo videos y audio)
     int set_view = 2;                           // listados con imagenes: 0 lista, 1 caratulas, 2 automatico
     string set_store_url = "";
     // pantalla de ajustes (estilo Kodi): categorias a la izquierda, opciones a la derecha
@@ -216,6 +218,8 @@ declare function string lang_or_dash(string l) end
 declare function string fmt_size(int b) end
 declare function string cut_text(string t, int n) end
 declare function string fit_text(string t, int maxw) end
+declare function read_dir() end
+declare function toast(string t) end
 declare function string tail_fit(string t, int maxw) end
 declare function string utf8_chop(string t) end
 declare function string store_state(int i) end
@@ -279,6 +283,7 @@ include "addon.prg";
 include "auth.prg";
 include "xtream.prg";
 include "addon_ui.prg";
+include "fileops.prg";
 
 process main()
 private
@@ -614,6 +619,7 @@ private
     string nm, t_s; int t_d, t_z;
 begin
     n_entries = 0; addon_mode = 0; store_mode = 0;
+    marks_clear();
     sel = 0; top_row = 0; dir_ver++;
     grid_mode = 0;
     au_reset();                                           // fuera de una lista no hay ninguna cuenta activa
@@ -625,10 +631,10 @@ begin
     if (dh)
         nm = dirread(dh);
         while (nm != "" && n_entries < MAX_ENTRIES)
-            if (nm != "." && nm != ".." && substr(nm, 0, 1) != ".")
+            if (nm != "." && nm != ".." && (set_hidden || substr(nm, 0, 1) != "."))
                 d = fileinfo.directory;
                 if (!d && (lcase(ext_of(nm)) == "m3u" || lcase(ext_of(nm)) == "m3u8")) d = K_LIST; end
-                if (d || is_video(nm) || is_audio(nm))
+                if (d || set_allfiles || is_video(nm) || is_audio(nm))
                     entries[n_entries] = nm; entry_dir[n_entries] = d; entry_size[n_entries] = fileinfo.size; entry_logo[n_entries] = ""; n_entries++;
                 end
             end
@@ -839,6 +845,7 @@ private int old, r;
 begin
     if (xt_job) xt_step(); return 0; end                          // Xtream: cargando categorías o canales
     if (store_job == 1) store_step(); return 0; end                // instalando: no se atiende al mando
+    if (fo_job == 1) fo_step(); return 0; end                      // copiando, moviendo o borrando: solo se puede cancelar
     if (dl_job == 1) dl_step(); return 0; end                      // descargando un video: solo se puede cancelar
     if (store_load) store_fetch(); return 0; end                   // la tienda se pide en el fotograma siguiente (primero addons y después listas)
     if (act_press[A_MUTE]) if (store_mode == 1) open_store_menu(); else open_context_menu(); end return 0; end
@@ -1059,6 +1066,8 @@ begin
         s_toast = tr("s_connecting"); toast_t = 600;
         load_path = au_apply(entry_url[i]); load_wait = 3;
         if (addon_mode > 0 && entry_aargs[i] != "") load_path = addon_signed_playlist(entry_url[i], entry_aargs[i]); if (load_path == "") load_wait = 0; s_toast = ""; toast_t = 0; end end
+    elseif (!is_video(entries[i]) && !is_audio(entries[i]))
+        toast(tr("t_notmedia"));
     else
         start_video(entry_path(i));
     end
@@ -1369,6 +1378,7 @@ end
 
 function string disp_name(int i)
 begin
+    if (entry_mark[i]) return "* " + entries[i]; end
     return entries[i];
 end
 
@@ -1428,6 +1438,8 @@ begin
             if (k == "unk") set_unknown = atoi(v) ? 1 : 0; end
             if (k == "dlfmt") set_dlfmt = atoi(v); if (set_dlfmt < 0 || set_dlfmt > 3) set_dlfmt = 0; end end
             if (k == "storeurl") set_store_url = v; end
+            if (k == "hidden") set_hidden = atoi(v); end
+            if (k == "allfiles") set_allfiles = atoi(v); end
             if (k == "view") set_view = atoi(v); if (set_view < 0 || set_view > 2) set_view = 2; end end
         end
     end
@@ -1448,6 +1460,8 @@ begin
     fputs(fh, "dlfmt=" + set_dlfmt);
     fputs(fh, "storeurl=" + set_store_url);
     fputs(fh, "view=" + set_view);
+    fputs(fh, "hidden=" + set_hidden);
+    fputs(fh, "allfiles=" + set_allfiles);
     fclose(fh);
 end
 
@@ -1488,6 +1502,8 @@ begin
             st_row(n, ST_SKIN, STT_CHOICE, tr("st_skin"), skin ? tr("skin_ps") : tr("skin_classic")); n++;
             st_row(n, ST_VIEW, STT_CHOICE, tr("st_view"), set_view == 0 ? tr("st_view_list") : (set_view == 1 ? tr("st_view_grid") : tr("st_view_auto"))); n++;
             st_row(n, ST_PREVIEW, STT_TOGGLE, tr("st_preview"), st_onoff(set_preview)); n++;
+            st_row(n, ST_HIDDEN, STT_TOGGLE, tr("st_hidden"), st_onoff(set_hidden)); n++;
+            st_row(n, ST_ALLFILES, STT_TOGGLE, tr("st_allfiles"), st_onoff(set_allfiles)); n++;
         end
         case 1:                                                  // reproduccion
             st_row(n, ST_SEEK, STT_CHOICE, tr("st_seek"), seek_txt()); n++;
@@ -1533,6 +1549,8 @@ begin
             cfg_save();
         end
         case ST_SKIN: skin = !skin; cfg_save(); end
+        case ST_HIDDEN: set_hidden = !set_hidden; cfg_save(); end
+        case ST_ALLFILES: set_allfiles = !set_allfiles; cfg_save(); end
         case ST_VIEW: set_view = (set_view + 3 + d) % 3; cfg_save(); if (xt_screen == 0 && (addon_mode > 0 || store_mode == 1)) auto_grid(); end end
         case ST_PREVIEW: set_preview = !set_preview; if (!set_preview) close_preview(); pv_idx = -1; end cfg_save(); end
         case ST_SEEK: set_seek = (set_seek + 4 + d) % 4; cfg_save(); end
@@ -1809,6 +1827,28 @@ begin
     menu_title = title; modal = M_MENU; modal_ver++;
 end
 
+// menu de archivos del explorador: copiar, mover, pegar, renombrar, eliminar, carpeta nueva, marcar, propiedades
+function open_file_menu()
+private int real, many;
+begin
+    menu_clear();
+    real = mark_n > 0 || entry_is_real(sel);
+    if (real)
+        menu_add(tr("m_copy"), MA_FCOPY);
+        menu_add(tr("m_move"), MA_FMOVE);
+    end
+    if (clip_n > 0) menu_add(tr("m_paste") + " (" + clip_n + ")", MA_FPASTE); end
+    if (real)
+        if (mark_n <= 1) menu_add(tr("m_rename"), MA_FRENAME); end
+        menu_add(tr("m_fdelete"), MA_FDEL);
+        menu_add(tr("m_props"), MA_FPROPS);
+    end
+    menu_add(tr("m_newdir"), MA_FNEWDIR);
+    if (entry_is_real(sel)) menu_add(entry_mark[sel] ? tr("m_unmark") : tr("m_mark"), MA_FMARK); end
+    menu_add(mark_n > 0 ? tr("m_unmark_all") : tr("m_mark_all"), MA_FMARKALL);
+    menu_show(tr("mt_files"));
+end
+
 function open_context_menu()
 private string nm;
 begin
@@ -1842,6 +1882,7 @@ begin
             menu_add(tr("m_add_to"), MA_ADD_TO);
             if (cur_dir == downloads_dir) menu_add(tr("m_delete_dl"), MA_DELETE_DL); end
         end
+        menu_add(tr("m_files"), MA_FILES);
         menu_add(tr("m_new_list"), MA_NEW_LIST);
         menu_add(tr("m_open_list"), MA_OPEN_LIST);
         menu_add(tr("m_goto_lists"), MA_GOTO_LISTS);
@@ -1908,6 +1949,30 @@ begin
             menu_show(tr("mt_sure"));
         end
         case MA_DELETE_DL_YES: fremove(op_path); toast(tr("t_dl_deleted")); read_dir(); end
+        case MA_FILES: open_file_menu(); end
+        case MA_FCOPY: toast(clip_take(1) + " " + tr("t_fo_copied")); marks_clear(); end
+        case MA_FMOVE: toast(clip_take(2) + " " + tr("t_fo_cut")); marks_clear(); end
+        case MA_FPASTE:
+            if (clip_n == 0) toast(tr("t_fo_empty")); else fo_start(clip_mode == 2 ? FO_MOVE : FO_COPY); end
+        end
+        case MA_FRENAME:
+            k = -1;
+            if (mark_n == 1) for (op_idx = 0; op_idx < n_entries; op_idx++) if (entry_mark[op_idx]) k = op_idx; end end
+            elseif (entry_is_real(sel)) k = sel; end
+            if (k >= 0) op_path = join_path(cur_dir, entries[k]); kb_open(tr("k_fo_rename"), entries[k], KB_FRENAME); end
+        end
+        case MA_FDEL:
+            k = sel_take();
+            if (k > 0)
+                menu_clear(); menu_add(tr("m_yes_delete") + " " + (k == 1 ? "\"" + cut_text(utf8_to_latin1(base_name(fo_in[0])), 24) + "\"" : k + " " + tr("p_elements")), MA_FDEL_YES); menu_add(tr("m_no"), MA_CANCEL);
+                menu_show(tr("mt_sure"));
+            end
+        end
+        case MA_FDEL_YES: fo_start(FO_DEL); end
+        case MA_FPROPS: fo_start(FO_INFO); end
+        case MA_FNEWDIR: kb_open(tr("k_newdir"), "", KB_NEWDIR); end
+        case MA_FMARK: mark_toggle(sel); if (sel + 1 < n_entries) sel++; if (sel >= top_row + ROWS) top_row++; end end end
+        case MA_FMARKALL: if (mark_n > 0) marks_clear(); else mark_all(); end end
         case MA_STORE_REFRESH: store_open(); end
         case MA_SKIN:
             skin = !skin; cfg_save(); open_settings_menu(1);
@@ -2102,6 +2167,20 @@ begin
             nm = safe_name(kb_text);
             if (nm == "") return 0; end
             fmove(op_path, join_path(parent_of(op_path), nm + ".m3u")); toast(tr("t_renamed")); read_dir();
+        end
+        case KB_FRENAME:
+            nm = safe_name(kb_text);
+            if (nm == "" || nm == "." || nm == ".." || nm == base_name(op_path)) return 0; end
+            if (path_exists(join_path(parent_of(op_path), nm))) toast(tr("t_fo_exists")); return 0; end
+            if (fmove(op_path, join_path(parent_of(op_path), nm)) == 0) toast(tr("t_renamed_f")); else toast(tr("t_fo_fail")); end
+            read_dir();
+        end
+        case KB_NEWDIR:
+            nm = safe_name(kb_text);
+            if (nm == "" || nm == "." || nm == "..") return 0; end
+            if (path_exists(join_path(cur_dir, nm))) toast(tr("t_fo_exists")); return 0; end
+            if (mkdir(join_path(cur_dir, nm)) == 0) toast(tr("t_dir_created")); else toast(tr("t_fo_fail")); end
+            read_dir();
         end
         case KB_OPEN_LIST:
             op_path = kb_text;
