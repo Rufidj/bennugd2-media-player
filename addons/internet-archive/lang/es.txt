@@ -1,0 +1,8 @@
+# Traducción al español: "texto original => traducción"
+Feature films => Películas
+Classic cartoons => Dibujos animados clásicos
+Live music (concerts) => Música en directo (conciertos)
+Search... => Buscar...
+Search the archive (for example: sintel) => Buscar en el archivo (por ejemplo: sintel)
+Movies and videos for '{words}' => Películas y vídeos para '{words}'
+Audio for '{words}' => Audio para '{words}'

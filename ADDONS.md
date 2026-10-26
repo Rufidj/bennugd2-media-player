@@ -132,6 +132,17 @@ Other: `json parse_json default now uuid format_time join_url`
 
 See `addons/demo/main.addon` in the source: it uses `ask`, `message`, `wait` and `save` to show a code, poll a server and store the token the server returns.
 
+## Translating an addon
+
+An addon is written in English, but it can ship translations. Put a file `lang/<code>.txt` next to `main.addon` (`es`, `ru`, `ja`, `zh`, `ko`; there is nothing to do for English). Every line is one text of the addon and its translation, separated by ` => `:
+
+```
+Sign out => Cerrar sesión
+Nothing found for '{words}'. => No se ha encontrado nada para '{words}'.
+```
+
+The player translates every text of the addon (titles, `info`, `message`, `fail`, `ask` and the labels of the settings) with the file of its own language, the one chosen in the player's settings; a text without a translation is shown as written. The left part must be the text exactly as it is written in `main.addon`, and the parts between braces (`{words}`) are kept as they are in the translation. The names of the values of a `choice` setting are not translated on purpose: the addon compares them and they are saved in the settings. At most 400 lines per language. The file is read when the addon is opened, so a language change shows after leaving and opening the addon again.
+
 ## Limits and safety
 
 - Both `http://` and `https://` work for `fetch` (redirects are followed; HTTPS is done by the engine, no certificates to manage in the addon).

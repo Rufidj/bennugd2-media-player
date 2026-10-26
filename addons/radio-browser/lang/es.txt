@@ -1,0 +1,8 @@
+# Traducción al español: "texto original => traducción"
+Most voted => Más votadas
+Most listened now => Más escuchadas ahora
+Search by name... => Buscar por nombre...
+By country => Por país
+Station name (for example: jazz) => Nombre de la emisora (por ejemplo: jazz)
+No station found with that name => No se encontró ninguna emisora con ese nombre
+Server => Servidor

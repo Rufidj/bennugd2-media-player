@@ -7,7 +7,7 @@
 
 addon "Jellyfin"
 id jellyfin
-version 0.1
+version 0.2
 author "BennuGD2 Media Player"
 description "Movies, shows and music from your own Jellyfin server (or the public demo server)."
 

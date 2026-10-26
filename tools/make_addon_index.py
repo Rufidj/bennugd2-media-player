@@ -39,6 +39,11 @@ def main():
         files = ["main.addon"]
         if os.path.isfile(os.path.join(d, "logo.png")):
             files.append("logo.png")
+        langdir = os.path.join(d, "lang")                      # traducciones del addon (lang/es.txt...)
+        if os.path.isdir(langdir):
+            for fn in sorted(os.listdir(langdir)):
+                if fn.endswith(".txt"):
+                    files.append("lang/" + fn)
         desc = h.get("description", "").replace("|", "/")
         rows.append((h.get("addon", name), name, h.get("version", "1.0"), ",".join(files), desc))
     rows.sort(key=lambda r: r[0].lower())

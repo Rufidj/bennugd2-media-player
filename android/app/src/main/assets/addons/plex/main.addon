@@ -6,7 +6,7 @@
 
 addon "Plex"
 id plex
-version 0.1
+version 0.2
 author "BennuGD2 Media Player"
 description "Plex free catalogue (watch.plex.tv) and your own Plex Media Server."
 

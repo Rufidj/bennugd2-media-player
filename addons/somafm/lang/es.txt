@@ -1,0 +1,2 @@
+# Traducción al español: "texto original => traducción"
+Stream quality => Calidad de la emisión

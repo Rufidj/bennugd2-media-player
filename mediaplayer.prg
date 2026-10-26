@@ -1709,7 +1709,7 @@ begin
         if (purpose == KB_URL || purpose == KB_LOGO || purpose == KB_AUTH_SERVER) k |= 2; end
         r = system_keyboard_open(kb_title, kb_text, 220, k);
         if (r == 0) modal = M_SYSKB; modal_ver++; return 0; end
-        if (r != -2) syskb_off = 1; end
+        if (r != -2 && !kb_secret) syskb_off = 1; end      // una contrasena que el teclado del sistema no admite usa el propio solo esta vez
     end
     modal = M_KB; modal_ver++;
 end

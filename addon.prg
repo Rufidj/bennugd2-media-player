@@ -40,6 +40,8 @@ global
     char   ad_chunk[4100];
     char   ad_work[8300];
     int    ad_ji, ad_jn;        // posición y final del lector de JSON
+    // traducciones del addon (lang/<idioma>.txt junto a main.addon: "texto en inglés => traducción", una por línea)
+    string ad_tr_k[400]; string ad_tr_v[400]; int ad_tr_n;
 end
 
 function ad_fail(string msg)
@@ -1009,10 +1011,46 @@ begin
     return l;
 end
 
+// Carga las traducciones del addon para el idioma del reproductor (si no hay fichero, el addon se ve en su idioma original)
+function ad_tr_load(string path)
+private int fh, p, i; string dir, ln;
+begin
+    ad_tr_n = 0;
+    if (lang_cur == "en") return 0; end
+    dir = path; i = len(dir) - 1;
+    while (i >= 0 && substr(dir, i, 1) != "/") i--; end
+    if (i < 0) return 0; end
+    dir = substr(dir, 0, i + 1);
+    fh = fopen(dir + "lang/" + lang_cur + ".txt", O_READ);
+    if (!fh) return 0; end
+    while (!feof(fh) && ad_tr_n < 400)
+        ln = fgets(fh);
+        while (len(ln) > 0 && (substr(ln, len(ln) - 1, 1) == chr(10) || substr(ln, len(ln) - 1, 1) == chr(13))) ln = substr(ln, 0, len(ln) - 1); end
+        p = find(ln, " => ");
+        if (p > 0 && substr(ln, 0, 1) != "#")
+            ad_tr_k[ad_tr_n] = substr(ln, 0, p); ad_tr_v[ad_tr_n] = substr(ln, p + 4); ad_tr_n++;
+        end
+    end
+    fclose(fh);
+    return ad_tr_n;
+end
+
+// el texto de un literal del addon, traducido si el addon trae su traduccion (las partes {expresion} se dejan tal cual)
+function string ad_translate(string s)
+private int i;
+begin
+    if (ad_tr_n == 0) return s; end
+    for (i = 0; i < ad_tr_n; i++)
+        if (ad_tr_k[i] == s) return ad_tr_v[i]; end
+    end
+    return s;
+end
+
 // "texto {expresion} más texto" -> nodo XK_STR con partes (XK_LIT o expresiones) encadenadas
 function ad_parse_interp(string s)
 private int e, last, part, i, n, depth, save_ct, lit_start, first_tok, ex; string lit, src;
 begin
+    s = ad_translate(s);
     e = ad_nx_new(XK_STR); last = 0;
     n = len(s); i = 0;
     while (i < n && ad_perr == "")
@@ -2186,6 +2224,7 @@ function ad_load(string path)
 begin
     ad_loaded = 0;
     ad_values_reset();
+    ad_tr_load(path);
     if (!ad_parse_program(path)) return 0; end
     ad_loaded = 1; ad_loaded_path = path;
     return 1;

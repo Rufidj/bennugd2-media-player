@@ -895,6 +895,7 @@ begin
             store_ji = 1;
         else
             fn = field_of(store_jfiles, ",", store_jcur);
+            if (find(fn, "/") > 0) mkdir(join_path(store_jdir, substr(fn, 0, find(fn, "/")))); end      // ficheros en subcarpetas (lang/es.txt)
             if (st != 200) store_jerr = st > 0 ? st : 1;
             elseif (!http_save(join_path(store_jdir, fn))) store_jerr = -1; end
             store_ji = store_jcur;

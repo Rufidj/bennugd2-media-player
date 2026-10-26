@@ -6,7 +6,7 @@
 
 addon "PeerTube"
 id peertube
-version 1.0
+version 1.1
 author "BennuGD2 Media Player"
 description "Watch videos from the federated PeerTube network: trending, categories, channels and search."
 

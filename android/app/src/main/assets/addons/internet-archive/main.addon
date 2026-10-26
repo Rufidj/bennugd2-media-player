@@ -3,7 +3,7 @@
 
 addon "Internet Archive"
 id internet-archive
-version 1.0
+version 1.1
 author "BennuGD2 Media Player"
 description "Free movies, cartoons, concerts and audio from the Internet Archive."
 

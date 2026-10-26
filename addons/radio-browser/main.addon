@@ -3,7 +3,7 @@
 
 addon "Radio Browser"
 id radio-browser
-version 1.0
+version 1.1
 author "BennuGD2 Media Player"
 description "Search thousands of internet radios by name, country or popularity."
 
