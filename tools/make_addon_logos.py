@@ -70,5 +70,14 @@ def youtube():
         d.ellipse([cx + x * s - 12 * s, cy + y * s - 12 * s, cx + x * s + 12 * s, cy + y * s + 12 * s], fill=(255, 190, 186, 255))
     save(im, "youtube")
 
-for f in (plex, radio, soma, archive, peertube, youtube):
+def jellyfin():
+    # forma propia: pantalla con un triangulo de reproduccion sobre fondo violeta/azul, no es el logotipo oficial
+    im, d = canvas((20, 22, 46, 255)); s = K
+    cx, cy = 240 * s, 135 * s
+    d.rounded_rectangle([cx - 140 * s, cy - 84 * s, cx + 140 * s, cy + 84 * s], radius=30 * s, fill=(86, 70, 170, 255))
+    d.rounded_rectangle([cx - 122 * s, cy - 66 * s, cx + 122 * s, cy + 66 * s], radius=18 * s, fill=(34, 150, 190, 255))
+    d.polygon([(cx - 30 * s, cy - 44 * s), (cx + 50 * s, cy), (cx - 30 * s, cy + 44 * s)], fill=(250, 250, 250, 255))
+    save(im, "jellyfin")
+
+for f in (plex, radio, soma, archive, peertube, youtube, jellyfin):
     f()

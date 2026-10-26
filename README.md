@@ -13,7 +13,7 @@ Interface drawn at 1080p with a PlayStation-style skin, designed to be driven wi
 - **Streaming URLs**, `.m3u` / `.m3u8` lists with logos, list editor with an on-screen keyboard
 - **6 UI languages** with TrueType fonts: Spanish, English, Russian, Japanese, Chinese, Korean
 - **Addons** written in a small English-like language, no compiler needed (see [ADDONS.md](ADDONS.md)):
-  Plex (free ad-supported catalogue + your own server, login by code), Radio Browser, SomaFM, Internet Archive,
+  Plex (free ad-supported catalogue + your own server, login by code), Jellyfin (your own server, or the official public demo), Radio Browser, SomaFM, Internet Archive,
   PeerTube (federated video network), YouTube (popular videos, search of videos, channels and playlists)
 - **Store**: installs and updates the addons, and downloads free TV/radio lists (TDTChannels, iptv-org...), from the official repository in the app itself (no FTP, no PC)
 - **Hardware video decoding on PC**: on Linux and Windows the player uses the system's GPU decoder
@@ -156,13 +156,13 @@ password `clave-secreta`. To try it on the PS5, give the PC's address: `python3 
 ## Credits
 
 Created by Rufidj and Claude. Thanks to SplinterGU for BennuGD2, to Panreyes for the TTF implementation, and to FFmpeg, SDL, sdl-gpu,
-FreeType, Google Noto fonts, OpenSSL, Plex, SomaFM, Radio Browser, Internet Archive, PeerTube/Framasoft, YouTube, TDTChannels,
+FreeType, Google Noto fonts, OpenSSL, Plex, Jellyfin, SomaFM, Radio Browser, Internet Archive, PeerTube/Framasoft, YouTube, TDTChannels,
 iptv-org and the PS5 homebrew community.
 
 ## License
 
 MIT for the player code (see [LICENSE](LICENSE)). Third-party components keep their own licenses (BennuGD2, FFmpeg, SDL, FreeType, OpenSSL, Noto fonts: SIL OFL).
-Plex, SomaFM, Radio Browser, Internet Archive, PeerTube and YouTube are trademarks/services of their owners; the addons only use their public APIs. The TV/radio lists of the Store belong to their authors (TDTChannels, iptv-org) and each channel is streamed from its own source. DRM-protected content is not supported.
+Plex, Jellyfin, SomaFM, Radio Browser, Internet Archive, PeerTube and YouTube are trademarks/services of their owners; the addons only use their public APIs. The TV/radio lists of the Store belong to their authors (TDTChannels, iptv-org) and each channel is streamed from its own source. DRM-protected content is not supported.
 
 ---
 

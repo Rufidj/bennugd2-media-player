@@ -1,6 +1,7 @@
 # BennuGD2 Media Player - addons de la tienda
 # id | nombre | version | ficheros | descripcion
 internet-archive | Internet Archive | 1.0 | main.addon,logo.png | Free movies, cartoons, concerts and audio from the Internet Archive.
+jellyfin | Jellyfin | 0.1 | main.addon,logo.png | Movies, shows and music from your own Jellyfin server (or the public demo server).
 peertube | PeerTube | 1.0 | main.addon,logo.png | Watch videos from the federated PeerTube network: trending, categories, channels and search.
 plex | Plex | 0.1 | main.addon,logo.png | Plex free catalogue (watch.plex.tv) and your own Plex Media Server.
 radio-browser | Radio Browser | 1.0 | main.addon,logo.png | Search thousands of internet radios by name, country or popularity.

@@ -1,0 +1,133 @@
+# Jellyfin addon for the BennuGD2 Media Player
+# Browse the libraries of a Jellyfin server (movies, shows, music) and play the files directly ("direct play").
+#
+# Jellyfin is self-hosted: you need the address of a server (yours, or one shared with you). There is also an
+# official public demo server with free sample media, handy to try the addon: "Try the public demo server".
+# Nothing secret is written in this file: the address, the user and the access token are saved in the addon settings.
+
+addon "Jellyfin"
+id jellyfin
+version 0.1
+author "BennuGD2 Media Player"
+description "Movies, shows and music from your own Jellyfin server (or the public demo server)."
+
+setting server is text, label "Server address (like http://192.168.1.50:8096)"
+setting username is text, label "User name"
+setting token is secret text, label "Access token (filled by Sign in)"
+setting userid is text, label "User id (filled by Sign in)"
+setting device is text, label "Device id (made automatically)"
+
+# ---- signing in: the server address, the user and the password are typed once; only the token is kept
+page login:
+    if server is empty:
+        ask "Server address (like http://192.168.1.50:8096)" into addr
+        save server as clean_address(addr)
+    if username is empty:
+        ask "User name" into who
+        save username as trim(who)
+    ask "Password (leave empty if the user has none)" into pass secret
+    sign_in(clean_address_or(server), username, pass)
+    show folder "Signed in! Press circle and open Jellyfin again" opening home
+
+page demo:
+    # the official demo server: user "demo", no password
+    save server as "https://demo.jellyfin.org/stable"
+    save username as "demo"
+    sign_in("https://demo.jellyfin.org/stable", "demo", "")
+    show folder "Signed in to the demo server! Press circle and open Jellyfin again" opening home
+
+page signout:
+    save token as ""
+    save userid as ""
+    show folder "Signed out. Press circle and open Jellyfin again" opening home
+
+# ---- the first page
+page home:
+    if token is empty or server is empty:
+        show folder "Sign in to a Jellyfin server" opening login info "Type the address of the server, your user and your password. Only an access token is stored, in the addon settings."
+        show folder "Try the public demo server" opening demo info "The official Jellyfin demo server, with free sample movies, shows and music. No account needed."
+        stop
+    fetch json from "{base()}/UserViews?userId={userid}" with header "Authorization" is auth()
+    for each view in result.Items:
+        show folder view.Name opening items with id is view.Id with title is view.Name logo picture(view) info "Library"
+    show folder "Continue watching" opening resume info "What you were watching"
+    show folder "Search..." opening search
+    show folder "Sign out" opening signout
+
+page resume:
+    fetch json from "{base()}/Items/Resume?userId={userid}&MediaTypes=Video&Fields=Overview,ProductionYear,RunTimeTicks&Limit=100" with header "Authorization" is auth()
+    for each item in result.Items:
+        show_entry(item)
+
+page search:
+    ask "Search the server" into words
+    fetch json from "{base()}/Items?userId={userid}&searchTerm={url_encode(words)}&Recursive=true&IncludeItemTypes=Movie,Series,Episode,Audio,MusicAlbum,MusicArtist,Video&Fields=Overview,ProductionYear,RunTimeTicks&Limit=100" with header "Authorization" is auth()
+    for each item in result.Items:
+        show_entry(item)
+    if length(result.Items) is 0:
+        fail "Nothing found for '{words}'."
+
+# the children of a library, folder, show, season, artist or album
+page items with id, title:
+    fetch json from "{base()}/Items?userId={userid}&ParentId={id}&SortBy=ParentIndexNumber,IndexNumber,SortName&Fields=Overview,ProductionYear,RunTimeTicks&Limit=1000" with header "Authorization" is auth()
+    for each item in result.Items:
+        show_entry(item)
+
+# shows one record of the server: a folder to open or something to play
+define show_entry(item):
+    set name to item.Name
+    if has(item, "IndexNumber") and (item.Type is "Episode" or item.Type is "Audio"):
+        set name to "{item.IndexNumber}. {item.Name}"
+    set what to default(item.Overview, "")
+    if item.Type is "Audio":
+        set artist to default(item.AlbumArtist, "")
+        if length(artist) is greater than 0:
+            set what to artist
+        show audio name playing stream_url("Audio", item.Id) logo picture(item) info shorten(what, 200) duration round(default(item.RunTimeTicks, 0) / 10000000)
+        give back 0
+    if item.Type is "Movie" or item.Type is "Episode" or item.Type is "Video" or item.Type is "MusicVideo":
+        show video name playing stream_url("Videos", item.Id) logo picture(item) info shorten(what, 200) year default(item.ProductionYear, 0) duration round(default(item.RunTimeTicks, 0) / 10000000)
+        give back 0
+    if item.IsFolder:
+        show folder name opening items with id is item.Id with title is item.Name logo picture(item) info shorten(what, 200) year default(item.ProductionYear, 0)
+    give back 0
+
+# ---- helpers
+define sign_in(address, who, pass):
+    if device is empty:
+        set made to uuid()
+        save device as made
+    try:
+        fetch json from "{address}/Users/AuthenticateByName" with method "POST" with header "Content-Type" is "application/json" with header "Authorization" is "MediaBrowser Client=BennuGD2MediaPlayer, Device=Console, DeviceId={device}, Version=1.0" with body json({Username: who, Pw: pass})
+    on error:
+        fail "Could not sign in. Check the address, the user and the password. ({error})"
+    save token as result.AccessToken
+    save userid as result.User.Id
+    give back 0
+
+# the address as typed (with or without http://) without a final slash
+define clean_address(addr):
+    set a to trim(addr)
+    if not (a starts with "http"):
+        set a to "http://{a}"
+    while a ends with "/":
+        set a to slice(a, 1, length(a) - 1)
+    give back a
+
+define clean_address_or(addr):
+    give back clean_address(addr)
+
+define base():
+    give back clean_address(server)
+
+define auth():
+    give back "MediaBrowser Token={token}"
+
+# direct play: the player gets the original file (kind is "Videos" or "Audio")
+define stream_url(kind, id):
+    give back "{base()}/{kind}/{id}/stream?static=true&api_key={url_encode(token)}"
+
+define picture(item):
+    if has(item, "ImageTags") and has(item.ImageTags, "Primary"):
+        give back "{base()}/Items/{item.Id}/Images/Primary?maxWidth=480&api_key={url_encode(token)}"
+    give back ""

@@ -29,7 +29,7 @@ FF=${FF:-}
 LIN=$ENGINE/build/linux-gnu/bin
 WIN=$ENGINE/build/x86_64-w64-mingw32/bin
 NAME=bennugd2-media-player
-ADDONS="demo internet-archive peertube plex radio-browser somafm youtube"
+ADDONS="demo internet-archive jellyfin peertube plex radio-browser somafm youtube"
 
 # ------------------------------------------------------------------------------------- .dcb
 echo "== compilando el reproductor =="

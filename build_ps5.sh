@@ -21,7 +21,7 @@ cp lang/*.txt "$STAGE/lang/"
 cp lists/*.m3u "$STAGE/videos/"
 if [ -d samples ]; then cp samples/* "$STAGE/videos/" 2>/dev/null || true; fi
 mkdir -p "$STAGE/addons"
-for a in plex radio-browser somafm internet-archive peertube youtube; do cp -r "addons/$a" "$STAGE/addons/"; done  # incluye logo.png
+for a in plex radio-browser somafm internet-archive peertube youtube jellyfin; do cp -r "addons/$a" "$STAGE/addons/"; done  # incluye logo.png
 cp ADDONS.md ADDONS.es.md "$STAGE/addons/" 2>/dev/null || true
 
 # sce_sys: el empaquetador pide los dos fondos de presentacion (3840x2160 BC7 DX10, sin mipmaps)
