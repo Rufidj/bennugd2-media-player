@@ -34,8 +34,9 @@ const
     S_VIDEO = 0; S_SHADE_BOT = 1; S_SHADE_TOP = 2; S_BTN = 3;          // 3..11
     S_FOCUS = 12; S_BAR_BG = 13; S_BAR_FG = 14; S_KNOB = 15;
     S_BROWSE_BG = 16; S_SEL = 17; S_ROWICON = 18;                      // 18..29
-    S_HEADER = 30; S_PREVIEW = 31; S_PANEL = 32; S_VIZ = 33; S_MSEL = 34; S_BG = 35; S_WAVE = 36; S_HICON = 39; S_COUNT = 45;
+    S_HEADER = 30; S_PREVIEW = 31; S_PANEL = 32; S_VIZ = 33; S_MSEL = 34; S_BG = 35; S_WAVE = 36; S_HICON = 39; S_OVDIM = 45; S_OVBOX = 46; S_OVBG = 47; S_OVFG = 48; S_OVBTN = 49; S_OVICO = 50; S_COUNT = 51;
     HINT_Y = 684;
+    OV_TY = 290; OV_BARY = 350; OV_PY = 392; OV_BY = 452;              // ventana de progreso: titulo, barra, porcentaje y boton (en la rejilla de 1280x720)
     GK_MAX = 8192;
     VIZ_W = 660; VIZ_H = 340; VIZ_BASE = 270; VIZ_MAXH = 260;
 
@@ -67,7 +68,7 @@ global
     int sf_id[4], sf_cur = -1;                    // fuentes de subtitulos por escritura: 0 latino/cirilico, 1 japones, 2 chino, 3 coreano
     int fnt_t, texts_ready; string cur_font = "";    // fuentes TrueType de la interfaz y de los subtitulos
     int g_icon[20];                      // 0 play 1 pause 2 stop 3 next 4 prev 5 ff 6 rw 7 subs 8 vol 9 mute 10 folder 11 video 12 back
-    int g_shade, g_shade_top, g_knob, g_white, g_barbg, g_sel, g_ring;
+    int g_shade, g_shade_top, g_knob, g_white, g_barbg, g_sel, g_ring, g_ovdim, g_ovbox, g_ovfill;
 
     // sprites genericos controlados desde el bucle principal
     int   spr_graph[S_COUNT];
@@ -315,7 +316,7 @@ begin
         apply_script();
         // con la tecla ESC se sale; en Android el boton de atras del sistema
         // tambien es ESC, y ahi solo se sale cuando ya no hay donde volver
-        if (act_press[A_BACK] && state == ST_BROWSE && key(_ESC))
+        if (act_press[A_BACK] && state == ST_BROWSE && key(_ESC) && !ov_on)
             if (!touch_mode) exit(); end
             if (cur_dir == home_dir && modal == M_NONE && addon_mode == 0 && store_mode == 0 && cur_list == "") exit(); end
         end
@@ -328,7 +329,6 @@ begin
             load_wait--;
             if (load_wait == 0) s_toast = ""; toast_t = 0; start_video(load_path); load_path = ""; end
         end
-        if (prog_on) prog_status = system_progress_update(); end                                                    // la barra de progreso del sistema (PS5) avanza con cada fotograma
         if (modal != M_NONE) update_modal(); elseif (state == ST_BROWSE) update_browser(); else update_player(); end
         layout_all();
         apply_texts();
@@ -382,6 +382,9 @@ begin
     g_white = map_new(8, 8);   map_clear(0, g_white, rgba(255, 255, 255, 255));
     g_barbg = map_new(8, 8);   map_clear(0, g_barbg, rgba(255, 255, 255, 70));
     g_sel   = map_new(8, 8);   map_clear(0, g_sel, rgba(70, 130, 255, 120));
+    g_ovdim = map_new(8, 8);   map_clear(0, g_ovdim, rgba(0, 0, 0, 160));            // ventana de progreso: fondo atenuado, caja y relleno
+    g_ovbox = map_new(8, 8);   map_clear(0, g_ovbox, rgba(16, 28, 60, 250));
+    g_ovfill = map_new(8, 8);  map_clear(0, g_ovfill, rgba(90, 170, 255, 255));
     g_bg_ps = map_load("res/bg_ps.png"); hires(g_bg_ps);
     for (i = 0; i < 3; i++) g_wave[i] = map_load("res/wave" + i + ".png"); hires(g_wave[i]); end
     g_pill  = map_load("res/sel_pill.png"); hires(g_pill);
@@ -463,6 +466,9 @@ begin
     for (i = 0; i < 6; i++) txt_h[i] = write_var(fnt_t, ur(0), ur(HINT_Y), -30, 3, s_h[i]); end
     txt_toast = write_var(fnt_t, ur(SW / 2), ur(120), -20, 4, s_toast);
     txt_amsg = write_var(fnt_t, ur(SW / 2), ur(SH / 2), -25, 4, s_amsg);
+    txt_ovt = write_var(fnt_t, ur(SW / 2), ur(OV_TY), -30, 4, s_ovt);
+    txt_ovp = write_var(fnt_t, ur(SW / 2), ur(OV_PY), -30, 4, s_ovp);
+    txt_ovh = write_var(fnt_t, ur(SW / 2), ur(OV_BY), -30, 4, s_ovh);
     create_sub_texts(sub_font_id(lang_script()));
 end
 
@@ -2272,7 +2278,7 @@ begin
     txt_want[txt_time] = 8589934336 + (0); txt_want[txt_title] = 8589934336 + (0); txt_want[txt_toast] = 8589934336 + (0);
     for (i = 0; i < 6; i++) txt_want[txt_sub[i]] = 8589934336 + (0); end
     for (i = 0; i < 7; i++) txt_want[txt_info[i]] = 8589934336 + (0); end
-    txt_want[txt_amsg] = 8589934336 + (0);
+    txt_want[txt_amsg] = 8589934336 + (0); txt_want[txt_ovt] = 8589934336 + (0); txt_want[txt_ovp] = 8589934336 + (0); txt_want[txt_ovh] = 8589934336 + (0);
     txt_want[txt_mtitle] = 8589934336 + (0); txt_want[txt_mhint] = 8589934336 + (0); txt_want[txt_kbin] = 8589934336 + (0); for (i = 0; i < 6; i++) txt_want[txt_kbs[i]] = 8589934336 + (0); end
     for (i = 0; i < 10; i++) txt_want[txt_mopt[i]] = 8589934336 + (0); end
     for (i = 0; i < 5; i++) txt_want[txt_kbrow[i]] = 8589934336 + (0); end
@@ -2374,7 +2380,8 @@ begin
         end
         for (i = 0; i < 7; i++) txt_want[txt_info[i]] = 8589934336 + (i == 0 ? 255 : 200); end
         if (pv_phase == 3) s_info[2] = tr("s_nopreview"); end
-        if (addon_busy) txt_want[txt_amsg] = 8589934336 + (255); end
+        if (addon_busy && !ov_on) txt_want[txt_amsg] = 8589934336 + (255); end
+        if (ov_on) draw_overlay(); end
         if (toast_t > 0) toast_t--; end
         if (toast_t > 0) txt_want[txt_toast] = 8589934336 + (255); end
         return 0;

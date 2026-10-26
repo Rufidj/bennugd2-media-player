@@ -37,8 +37,10 @@ global
     int    store_jreq, store_jcur;      // una descarga en segundo plano en curso, y el numero de fichero que baja
     int    dl_job;                      // 1 = descargando un video a "Descargas"
     string dl_path, dl_title;
-    int    prog_status;                 // lo que contesto la barra del sistema en este fotograma (3 = el usuario pulso cancelar)
-    int    prog_on, prog_off, prog_last;  // barra de progreso del sistema (PS5): abierta / no disponible / ultimo valor puesto
+    // ventana de progreso propia (la barra del sistema de la PS5 no se puede usar desde un titulo)
+    int    ov_on, ov_pct, ov_cancel;    // visible / porcentaje 0-100 / con boton de cancelar
+    string ov_title = "", s_ovt = "", s_ovp = "", s_ovh = "";
+    int    txt_ovt, txt_ovp, txt_ovh;
     string store_seen[64]; int store_seen_n;   // carpetas ya listadas (el addon del usuario manda sobre el que trae el reproductor)
 end
 
@@ -775,31 +777,61 @@ end
 
 // ---- barra de progreso del sistema (PS5). Si no hay (PC) o falla, no pasa nada: queda el texto propio de la pantalla
 function prog_start(string caption, int cancel)
-private int r;
 begin
-    if (prog_on || prog_off) return 0; end
-    r = system_progress_open(caption, cancel);
-    if (r == 0) prog_on = 1; prog_last = -1; prog_status = 0; else if (r != -2) prog_off = 1; end end
+    ov_on = 1; ov_title = caption; ov_cancel = cancel; ov_pct = 0;
 end
 
 function prog_stop()
 begin
-    if (!prog_on) return 0; end
-    system_progress_set(100);
-    system_progress_close();
-    prog_on = 0;
+    ov_on = 0;
 end
 
-// porcentaje de la instalacion en curso: ficheros ya bajados + lo que lleva el actual
+// ventana de progreso: fondo atenuado, caja con el nombre, barra con el porcentaje real y, si se puede, boton de cancelar
+function draw_overlay()
+private int w, ty;
+begin
+    put(S_OVDIM, g_ovdim, SW / 2, SH / 2, 100, 255, -21);
+    spr_sizex[S_OVDIM] = SW / 8 * 100; spr_sizey[S_OVDIM] = SH / 8 * 100;
+    put(S_OVBOX, g_ovbox, SW / 2, SH / 2, 100, 255, -22);
+    spr_sizex[S_OVBOX] = 820 / 8 * 100; spr_sizey[S_OVBOX] = 270 / 8 * 100;
+    put(S_OVBG, g_barbg, SW / 2, OV_BARY, 100, 255, -23);
+    spr_sizex[S_OVBG] = 700 / 8 * 100; spr_sizey[S_OVBG] = 16 * 100 / 8;
+    w = ov_pct * 700 / 100;
+    if (w > 0)
+        put(S_OVFG, g_ovfill, SW / 2 - 350 + w / 2, OV_BARY, 100, 255, -24);
+        spr_sizex[S_OVFG] = w * 100 / 8; spr_sizey[S_OVFG] = 16 * 100 / 8;
+    end
+    if (s_ovt != fit_text(ov_title, 760)) s_ovt = fit_text(ov_title, 760); end
+    if (s_ovp != ov_pct + " %") s_ovp = ov_pct + " %"; end
+    txt_want[txt_ovt] = 8589934336 + (255);
+    txt_want[txt_ovp] = 8589934336 + (230);
+    if (ov_cancel)
+        if (s_ovh != tr("h_cancel")) s_ovh = tr("h_cancel"); end
+        put_sel(S_OVBTN, SW / 2, OV_BY, 280, 50, -23);
+        if (!touch_mode) put(S_OVICO, g_sym[1], SW / 2 - tw(s_ovh) / 2 - 22, OV_BY + 2, 80, 255, -26); end
+        write_move(txt_ovh, ur(SW / 2 + (touch_mode ? 0 : 22)), ur(OV_BY));
+        txt_want[txt_ovh] = 8589934336 + (255);
+    end
+end
+
+// ¿se ha pedido cancelar?  Boton atras / circulo, o un toque sobre el boton en el movil
+function ov_cancel_asked()
+begin
+    if (!ov_cancel) return 0; end
+    if (act_press[A_BACK]) return 1; end
+    if (touch_mode && act_press[A_OK] && abs(touch_x - SW / 2) < 140 && abs(touch_y - OV_BY) < 40) return 1; end
+    return 0;
+end
+
 function store_prog()
 private int p, tot, got;
 begin
-    if (!prog_on) return 0; end
+    if (!ov_on) return 0; end
     p = store_ji * 100 / store_jn;
     tot = http_total(); got = http_progress();
     if (tot > 0) if (got > tot) got = tot; end p += (got * 100 / tot) / store_jn; end
     if (p > 99) p = 99; end
-    if (p != prog_last) system_progress_set(p); prog_last = p; end
+    ov_pct = p;
 end
 
 // prepara la instalación de la entrada i (un addon o una lista): se hace en el fotograma siguiente
@@ -905,7 +937,7 @@ begin
             if (store_jkind == 1) toast(tr("t_store_listok") + " " + store_jname); else toast(tr("t_store_ok") + " " + store_jname); end
         end
     else
-        s_amsg = tr("s_installing") + " " + store_jname + "  " + store_ji + "/" + store_jn;
+        s_amsg = tr("s_installing") + " " + store_jname + "  " + store_ji + "/" + store_jn; ov_title = s_amsg;
     end
 end
 
@@ -954,11 +986,11 @@ end
 function dl_step()
 private int st, p; string why;
 begin
-    if ((prog_on && prog_status == 3) || (!prog_on && act_press[A_BACK])) video_download_cancel(); end
+    if (ov_cancel_asked()) video_download_cancel(); end
     st = video_download_poll();
     if (st == -1)
         p = video_download_percent();
-        if (prog_on && p != prog_last) system_progress_set(p); prog_last = p; end
+        ov_pct = p;
         s_amsg = tr("s_downloading") + " " + dl_title + "  " + p + "%";
         return 0;
     end
