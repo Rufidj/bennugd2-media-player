@@ -1,0 +1,305 @@
+diff --git a/modules/libmod_misc/libmod_misc.h b/modules/libmod_misc/libmod_misc.h
+index 545cb984..88686834 100644
+--- a/modules/libmod_misc/libmod_misc.h
++++ b/modules/libmod_misc/libmod_misc.h
+@@ -38,6 +38,7 @@
+ #include "m_file.h"
+ #include "m_math.h"
+ #include "m_mem.h"
++#include "m_ime.h"
+ #include "m_proc.h"
+ #include "m_rand.h"
+ #include "m_regex.h"
+diff --git a/modules/libmod_misc/libmod_misc_exports.h b/modules/libmod_misc/libmod_misc_exports.h
+index cf5699d0..bc47ecf2 100644
+--- a/modules/libmod_misc/libmod_misc_exports.h
++++ b/modules/libmod_misc/libmod_misc_exports.h
+@@ -360,6 +360,11 @@ DLSYSFUNCS  __bgdexport( libmod_misc, functions_exports)[] =
+ 
+     FUNC( "GETENV"                  , "S"           , TYPE_STRING       , libmod_misc_sys_getenv                    ),
+     FUNC( "EXEC"                    , "ISIP"        , TYPE_INT          , libmod_misc_sys_exec                      ),
++    FUNC( "SYSTEM_KEYBOARD_OPEN"    , "SSII"        , TYPE_INT          , libmod_misc_syskb_open                    ),
++    FUNC( "SYSTEM_KEYBOARD_STATUS"  , ""            , TYPE_INT          , libmod_misc_syskb_status                  ),
++    FUNC( "SYSTEM_KEYBOARD_OK"      , ""            , TYPE_INT          , libmod_misc_syskb_ok                      ),
++    FUNC( "SYSTEM_KEYBOARD_TEXT"    , ""            , TYPE_STRING       , libmod_misc_syskb_text                    ),
++    FUNC( "SYSTEM_KEYBOARD_CLOSE"   , ""            , TYPE_INT          , libmod_misc_syskb_close                   ),
+ 	FUNC( "GET_PREF_LANGUAGE"       , ""            , TYPE_STRING       , libmod_misc_sys_get_pref_language         ),
+ 
+     /* Date/Time & Timers */
+diff --git a/modules/libmod_misc/m_ime.c b/modules/libmod_misc/m_ime.c
+new file mode 100644
+index 00000000..06d0eda2
+--- /dev/null
++++ b/modules/libmod_misc/m_ime.c
+@@ -0,0 +1,211 @@
++/*
++ *  m_ime.c - system on-screen keyboard (PS5 IME dialog), see m_ime.h
++ *
++ *  The console's libSceImeDialog / libSceCommonDialog are imported statically against link stubs (like libSceVideodec2 in
++ *  libmod_video): the stubs are built by ps5/tools/build-commondialog-stub.sh and the SDK's own libSceImeDialog.so.
++ */
++#include <stdint.h>
++#include <stdio.h>
++#include <string.h>
++#include <stdlib.h>
++
++#include "bgddl.h"
++#include "dlvaracc.h"
++#include "xstrings.h"
++#include "m_ime.h"
++
++#ifdef __PROSPERO__
++
++/* ---- the console's API (UTF-16 text, see SharpProspero's ImeDialog.cs) ---------------------------------------- */
++typedef struct {
++    int32_t         userId;
++    int32_t         type;                   /* 0 default, 1 basic latin, 2 url, 3 mail, 4 number */
++    uint64_t        supportedLanguages;
++    int32_t         enterLabel;
++    int32_t         inputMethod;
++    void *          filter;
++    uint32_t        option;                 /* 4 = password */
++    uint32_t        maxTextLength;
++    uint16_t *      inputTextBuffer;
++    float           posx, posy;
++    int32_t         halign, valign;
++    const uint16_t * placeholder;
++    const uint16_t * title;
++    int8_t          reserved[16];
++} ImeParam;
++
++typedef struct { int32_t outcome; int8_t reserved[12]; } ImeResult;   /* 0 ok, 1 user canceled, 2 aborted */
++
++_Static_assert( sizeof( ImeParam ) == 96, "SceImeDialogParam" );
++_Static_assert( sizeof( ImeResult ) == 16, "SceImeDialogResult" );
++
++int sceSysmoduleLoadModule( uint16_t id );
++int sceCommonDialogInitialize( void );
++int sceUserServiceInitialize( void * params );
++int sceUserServiceGetForegroundUser( int * user );
++int sceUserServiceGetInitialUser( int * user );
++int sceImeDialogInit( ImeParam * param, void * extended );
++int sceImeDialogGetStatus( void );
++int sceImeDialogGetResult( ImeResult * result );
++int sceImeDialogAbort( void );
++int sceImeDialogTerm( void );
++int sceImeDialogGetPanelSizeExtended( ImeParam * param, void * extended, uint32_t * width, uint32_t * height );
++
++#define SYSMODULE_IME_DIALOG    0x0096
++#define IME_MAX                 2048
++
++static int       g_inited = 0, g_open = 0, g_read = 0, g_ok = 0;
++static uint16_t  g_buf[ IME_MAX + 2 ];
++static uint16_t  g_title[ 128 ];
++static char      g_text[ IME_MAX * 4 + 8 ];
++
++/* a line per step in /data/ime.log (opened and closed each time, so it survives a crash): says where it stopped */
++static void ime_log( const char * fmt, ... ) {
++    __builtin_va_list ap;
++    FILE * f = fopen( "/data/ime.log", "ab" );
++    if ( !f ) return;
++    __builtin_va_start( ap, fmt );
++    vfprintf( f, fmt, ap );
++    __builtin_va_end( ap );
++    fputc( '\n', f );
++    fclose( f );
++}
++
++static size_t utf8_to_utf16( const char * s, uint16_t * out, size_t cap ) {
++    size_t n = 0;
++    const unsigned char * p = ( const unsigned char * ) s;
++    while ( *p && n + 2 < cap ) {
++        uint32_t c = *p++, extra = 0;
++        if ( c >= 0xF0 ) { c &= 0x07; extra = 3; } else if ( c >= 0xE0 ) { c &= 0x0F; extra = 2; } else if ( c >= 0xC0 ) { c &= 0x1F; extra = 1; }
++        while ( extra-- && ( *p & 0xC0 ) == 0x80 ) c = ( c << 6 ) | ( *p++ & 0x3F );
++        if ( c >= 0x10000 ) { c -= 0x10000; out[ n++ ] = ( uint16_t ) ( 0xD800 + ( c >> 10 ) ); out[ n++ ] = ( uint16_t ) ( 0xDC00 + ( c & 0x3FF ) ); }
++        else out[ n++ ] = ( uint16_t ) c;
++    }
++    out[ n ] = 0;
++    return n;
++}
++
++static void utf16_to_utf8( const uint16_t * s, char * out, size_t cap ) {
++    size_t n = 0;
++    while ( *s && n + 5 < cap ) {
++        uint32_t c = *s++;
++        if ( c >= 0xD800 && c < 0xDC00 && *s >= 0xDC00 && *s < 0xE000 ) c = 0x10000 + ( ( c - 0xD800 ) << 10 ) + ( *s++ - 0xDC00 );
++        if ( c < 0x80 ) out[ n++ ] = ( char ) c;
++        else if ( c < 0x800 ) { out[ n++ ] = ( char ) ( 0xC0 | ( c >> 6 ) ); out[ n++ ] = ( char ) ( 0x80 | ( c & 0x3F ) ); }
++        else if ( c < 0x10000 ) { out[ n++ ] = ( char ) ( 0xE0 | ( c >> 12 ) ); out[ n++ ] = ( char ) ( 0x80 | ( ( c >> 6 ) & 0x3F ) ); out[ n++ ] = ( char ) ( 0x80 | ( c & 0x3F ) ); }
++        else { out[ n++ ] = ( char ) ( 0xF0 | ( c >> 18 ) ); out[ n++ ] = ( char ) ( 0x80 | ( ( c >> 12 ) & 0x3F ) ); out[ n++ ] = ( char ) ( 0x80 | ( ( c >> 6 ) & 0x3F ) ); out[ n++ ] = ( char ) ( 0x80 | ( c & 0x3F ) ); }
++    }
++    out[ n ] = 0;
++}
++
++int64_t libmod_misc_syskb_open( INSTANCE * my, int64_t * params ) {
++    const char * title = ( const char * ) string_get( params[0] );
++    const char * initial = ( const char * ) string_get( params[1] );
++    int64_t maxlen = params[2], flags = params[3];
++    ImeParam p;
++    uint32_t w = 0, h = 0;
++    int rc, user = 0;
++    int64_t ret = 0;
++
++    if ( g_open ) { ret = -2; goto done; }
++    if ( maxlen < 1 ) maxlen = 1;
++    if ( maxlen > IME_MAX ) maxlen = IME_MAX;
++
++    if ( !g_inited ) {
++        rc = sceSysmoduleLoadModule( SYSMODULE_IME_DIALOG );
++        ime_log( "sceSysmoduleLoadModule(IME) -> %#x", ( unsigned ) rc );       /* a module that is already loaded answers an error too: go on */
++        rc = sceCommonDialogInitialize();
++        ime_log( "sceCommonDialogInitialize -> %#x", ( unsigned ) rc );
++        if ( rc < 0 && ( unsigned ) rc != 0x80B80002u ) { ret = -3; goto done; }
++        rc = sceUserServiceInitialize( 0 );
++        ime_log( "sceUserServiceInitialize -> %#x", ( unsigned ) rc );          /* already initialised is fine */
++        g_inited = 1;
++    }
++
++    rc = sceUserServiceGetForegroundUser( &user );
++    if ( rc != 0 ) rc = sceUserServiceGetInitialUser( &user );
++    ime_log( "user -> %#x (%d)", ( unsigned ) rc, user );
++    if ( rc != 0 ) { ret = -4; goto done; }
++
++    memset( &p, 0, sizeof p );
++    memset( g_buf, 0, sizeof g_buf );
++    utf8_to_utf16( initial ? initial : "", g_buf, ( size_t ) maxlen + 1 );
++    utf8_to_utf16( title ? title : "", g_title, sizeof g_title / sizeof g_title[0] );
++    p.userId = user;
++    p.type = ( flags & 2 ) ? 2 : 0;
++    p.option = ( flags & 1 ) ? 4u : 0u;
++    p.maxTextLength = ( uint32_t ) maxlen;
++    p.inputTextBuffer = g_buf;
++    p.title = g_title;
++    if ( sceImeDialogGetPanelSizeExtended( &p, 0, &w, &h ) == 0 && w && h ) {      /* centred on a 1080p screen */
++        p.posx = ( 1920.0f - ( float ) w ) / 2.0f; p.posy = ( 1080.0f - ( float ) h ) / 2.0f;
++        p.halign = 0; p.valign = 0;
++    }
++    rc = sceImeDialogInit( &p, 0 );
++    ime_log( "sceImeDialogInit -> %#x (panel %ux%u, flags %d)", ( unsigned ) rc, w, h, ( int ) flags );
++    if ( rc != 0 ) { ret = -5; goto done; }
++    g_open = 1; g_read = 0; g_ok = 0; g_text[0] = 0;
++done:
++    string_discard( params[0] ); string_discard( params[1] );
++    return ret;
++}
++
++int64_t libmod_misc_syskb_status( INSTANCE * my, int64_t * params ) {
++    int st;
++    if ( !g_open ) return 0;
++    st = sceImeDialogGetStatus();
++    if ( st == 2 && !g_read ) {
++        ImeResult r;
++        memset( &r, 0, sizeof r );
++        if ( sceImeDialogGetResult( &r ) == 0 ) g_ok = ( r.outcome == 0 );
++        if ( g_ok ) utf16_to_utf8( g_buf, g_text, sizeof g_text ); else g_text[0] = 0;
++        g_read = 1;
++        ime_log( "result: outcome %d, text %d bytes", ( int ) r.outcome, ( int ) strlen( g_text ) );
++    }
++    return st;
++}
++
++int64_t libmod_misc_syskb_ok( INSTANCE * my, int64_t * params ) { return g_read ? g_ok : 0; }
++
++int64_t libmod_misc_syskb_text( INSTANCE * my, int64_t * params ) {
++    int64_t str = string_new( g_read ? g_text : "" );
++    string_use( str );
++    return str;
++}
++
++int64_t libmod_misc_syskb_close( INSTANCE * my, int64_t * params ) {
++    if ( !g_open ) return 0;
++    if ( sceImeDialogGetStatus() != 2 ) sceImeDialogAbort();
++    sceImeDialogTerm();
++    g_open = 0;
++    ime_log( "closed" );
++    return 0;
++}
++
++#else   /* no system keyboard on this platform: the script keeps its own */
++
++/* for testing a script on a PC: MP_FAKE_SYSKB="text" makes the keyboard "open", stay up for a while and answer that text */
++static int g_fake = 0, g_fake_polls = 0;
++static char g_fake_text[ 256 ];
++
++int64_t libmod_misc_syskb_open( INSTANCE * my, int64_t * params ) {
++    const char * e = getenv( "MP_FAKE_SYSKB" );
++    string_discard( params[0] ); string_discard( params[1] );
++    if ( !e ) return -100;
++    snprintf( g_fake_text, sizeof g_fake_text, "%s", e );
++    g_fake = 1; g_fake_polls = 0;
++    return 0;
++}
++int64_t libmod_misc_syskb_status( INSTANCE * my, int64_t * params ) {
++    if ( !g_fake ) return 0;
++    return ++g_fake_polls < 30 ? 1 : 2;
++}
++int64_t libmod_misc_syskb_ok( INSTANCE * my, int64_t * params ) { return g_fake && g_fake_polls >= 30 && strcmp( g_fake_text, "<cancel>" ) != 0; }
++int64_t libmod_misc_syskb_text( INSTANCE * my, int64_t * params ) {
++    int64_t str = string_new( g_fake ? g_fake_text : "" );
++    string_use( str );
++    return str;
++}
++int64_t libmod_misc_syskb_close( INSTANCE * my, int64_t * params ) { g_fake = 0; return 0; }
++
++#endif
+diff --git a/modules/libmod_misc/m_ime.h b/modules/libmod_misc/m_ime.h
+new file mode 100644
+index 00000000..d95b4fb6
+--- /dev/null
++++ b/modules/libmod_misc/m_ime.h
+@@ -0,0 +1,25 @@
++/*
++ *  m_ime.h - system on-screen keyboard (PS5 IME dialog)
++ *
++ *  SYSTEM_KEYBOARD_OPEN( title, initial_text, max_length, flags ) -> 0 if it opened, < 0 if not available / failed
++ *        flags: 1 = mask the text (password), 2 = keyboard laid out for web addresses
++ *  SYSTEM_KEYBOARD_STATUS()  -> 0 not open, 1 on screen, 2 closed (read the result)
++ *  SYSTEM_KEYBOARD_OK()      -> 1 if the user accepted the text (valid once the status is 2)
++ *  SYSTEM_KEYBOARD_TEXT()    -> the text (UTF-8)
++ *  SYSTEM_KEYBOARD_CLOSE()   -> shuts the dialog down (call after reading the result, or to cancel)
++ *
++ *  Only the PS5 build has a keyboard; everywhere else OPEN returns < 0 and a script keeps using its own.
++ *  The dialog is non-blocking: the script must keep running its frames (and presenting) while it is open.
++ */
++#ifndef __M_IME_H
++#define __M_IME_H
++
++#include "bgddl.h"
++
++extern int64_t libmod_misc_syskb_open( INSTANCE * my, int64_t * params );
++extern int64_t libmod_misc_syskb_status( INSTANCE * my, int64_t * params );
++extern int64_t libmod_misc_syskb_ok( INSTANCE * my, int64_t * params );
++extern int64_t libmod_misc_syskb_text( INSTANCE * my, int64_t * params );
++extern int64_t libmod_misc_syskb_close( INSTANCE * my, int64_t * params );
++
++#endif
+diff --git a/ps5/tools/build-commondialog-stub.sh b/ps5/tools/build-commondialog-stub.sh
+new file mode 100755
+index 00000000..de248f78
+--- /dev/null
++++ b/ps5/tools/build-commondialog-stub.sh
+@@ -0,0 +1,12 @@
++#!/bin/sh
++# Builds libSceCommonDialog.so (a link stub, soname libSceCommonDialog.sprx) and installs it in the payload SDK's
++# target/lib, where native-app-boilerplate's `make app` picks every *.so up as an import library.
++# (libSceImeDialog / libSceUserService / libSceSysmodule stubs already ship with the SDK.)
++#   ps5/tools/build-commondialog-stub.sh /path/to/native-app-boilerplate
++set -e
++BP="${1:?path to native-app-boilerplate}"; SDK="$BP/.deps/native/ps5-payload-sdk"
++HERE="$(cd "$(dirname "$0")" && pwd)"; OUT="$(mktemp -d)"
++PS5_PAYLOAD_SDK="$SDK" PS5_CLANG="${PS5_CLANG:-/usr/bin/clang-18}" USE_CCACHE=0 \
++  sh "$BP/tooling/prospero-clang18" -std=c11 -O2 -fPIC -c "$HERE/commondialog_link_stub.c" -o "$OUT/stub.o"
++"$SDK/bin/prospero-lld" --shared -soname libSceCommonDialog.sprx -o "$SDK/target/lib/libSceCommonDialog.so" "$OUT/stub.o"
++rm -rf "$OUT"; echo "installed $SDK/target/lib/libSceCommonDialog.so"
+diff --git a/ps5/tools/commondialog_link_stub.c b/ps5/tools/commondialog_link_stub.c
+new file mode 100644
+index 00000000..f8635731
+--- /dev/null
++++ b/ps5/tools/commondialog_link_stub.c
+@@ -0,0 +1,5 @@
++/* Link stub for the console's libSceCommonDialog (the shared dialog subsystem the on-screen keyboard rides on, see
++ * libmod_misc/m_ime.c). Only linked against, never run: the console's own library answers these calls.
++ * Build with ps5/tools/build-commondialog-stub.sh. */
++int sceCommonDialogInitialize(void) { return -1; }
++int sceCommonDialogIsUsed(void) { return 0; }

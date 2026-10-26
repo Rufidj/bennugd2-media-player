@@ -36,6 +36,10 @@ Tested on firmware 9.00 with etaHEN and ShadowMount+ v1.7-beta5fix1 (kstuff acti
 (it writes its PID to `/download0/etahen_jailbreak`) so it can browse the whole system; without etaHEN it still runs, sandboxed (own folder and `/data/mediaplayer` only).
 If the app does not open: check the firmware, that kstuff is loaded before ShadowMount+, copy `eboot.bin` last, and change the title id if a failed launch left it registered with error `0x80020008`.
 
+## System keyboard (PS5)
+
+On the PS5 the player opens the console's own on-screen keyboard (`libSceImeDialog`) whenever it needs text, and falls back to its built-in keyboard if the system one is not available. It needs `engine/libmod_misc-system-keyboard.patch` (functions `SYSTEM_KEYBOARD_OPEN/STATUS/OK/TEXT/CLOSE`) and the `libSceCommonDialog` link stub (`ps5/tools/build-commondialog-stub.sh`). Each step is logged to `/data/ime.log` on the console. On PC, `MP_FAKE_SYSKB="text"` simulates it for testing.
+
 ## Controls
 
 | Gamepad | Keyboard | Action |

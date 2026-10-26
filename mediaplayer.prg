@@ -53,7 +53,7 @@ const
     K_XCAT = 12; K_XSTR = 13; K_XSER = 14;   // entradas de una pantalla de Xtream (categoría, canal, serie)
     // tienda de addons: repositorio oficial del reproductor (se puede apuntar a otro con MP_STORE_URL)
     STORE_URL = "https://raw.githubusercontent.com/Rufidj/bennugd2-media-player/main/addons";
-    M_NONE = 0; M_MENU = 1; M_KB = 2; M_CREDITS = 3;                             // pantallas modales (menu / teclado)
+    M_NONE = 0; M_MENU = 1; M_KB = 2; M_CREDITS = 3; M_SYSKB = 4;                             // pantallas modales (menu / teclado)
     KB_NEWLIST = 1; KB_RENAME_LIST = 2; KB_URL = 3; KB_NEW_TITLE = 4; KB_ENTRY_TITLE = 5; KB_LOGO = 6; KB_ADDON = 7; KB_ASET = 8;
     KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11; KB_AUTH_SERVER = 12; KB_TMDB = 13;
     MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
@@ -161,6 +161,7 @@ global
     int modal, modal_ver, mlbl_ver = -1;
     string menu_title = "", menu_opt[10]; int menu_act[10], menu_n, menu_sel; string pick_name[10];
     int kb_secret, kb_secret_next;
+    int syskb_off;                                // 1 = no hay teclado del sistema (PC) o fallo: se usa el propio
     string kb_title = "", kb_text = "", kb_rows[5], kb_sp[6]; int kb_spx[6], kb_spw[6];
     int kb_purpose, kb_r, kb_c, kb_shift, kb_dirty;
     string op_title = "", op_url = "", op_logo = "", op_path = ""; int op_after, op_idx;
@@ -1120,9 +1121,9 @@ begin
                 hint_ic[0] = 0; s_h[0] = tr("h_type"); hint_ic[1] = 3; s_h[1] = tr("h_delete"); hint_ic[2] = 2; s_h[2] = tr("h_space");
                 s_h[3] = "L1 " + tr("h_shift"); s_h[4] = "START " + tr("h_accept"); hint_ic[5] = 1; s_h[5] = tr("h_cancel");
             end
-        // en el movil no hay botones de consola: los simbolos sobran
-        if (touch_mode) for (k = 0; k < 6; k++) hint_ic[k] = -1; end
         end
+        // en el movil no hay botones de consola: los simbolos sobran
+        if (touch_mode) for (k = 0; k < 6; k++) hint_ic[k] = -1; end end
         wtot = 0;
         for (k = 0; k < hint_n; k++) wtot += (hint_ic[k] >= 0 ? 44 : 0) + tw(s_h[k]) + (k < hint_n - 1 ? 44 : 0); end
         x0 = (SW - wtot) / 2;
@@ -1663,6 +1664,15 @@ begin
     kb_spx[0] = (SW - k) / 2;
     for (r = 1; r < 6; r++) kb_spx[r] = kb_spx[r - 1] + kb_spw[r - 1] + 44; end
     kb_r = 0; kb_c = 0; kb_shift = 0; kb_dirty = 1;
+    // PS5: el teclado de la consola (si no esta disponible o falla, se usa este)
+    if (!syskb_off && getenv("MP_KB_TEXT") == "")
+        k = 0;
+        if (kb_secret) k |= 1; end
+        if (purpose == KB_URL || purpose == KB_LOGO || purpose == KB_AUTH_SERVER) k |= 2; end
+        r = system_keyboard_open(kb_title, kb_text, 220, k);
+        if (r == 0) modal = M_SYSKB; modal_ver++; return 0; end
+        if (r != -2) syskb_off = 1; end
+    end
     modal = M_KB; modal_ver++;
 end
 
@@ -1842,6 +1852,7 @@ begin
 end
 
 function update_modal()
+private int st, ok, i;
 begin
     if (modal == M_MENU)
         if (act_press[A_UP])   menu_sel = (menu_sel + menu_n - 1) % menu_n; end
@@ -1853,6 +1864,16 @@ begin
         if (act_press[A_OK]) cr_fast = !cr_fast; end
         if (act_press[A_BACK] || act_press[A_MUTE]) credits_close(); return 0; end
         if (cr_n > 0 && SH + 40 + (cr_n - 1) * 56 - cr_pos / 100 < -30) credits_close(); end
+    elseif (modal == M_SYSKB)
+        // el teclado de la consola va en su propia ventana: aqui solo se espera a que se cierre (los botones los lee el)
+        st = system_keyboard_status();
+        if (st == 2)
+            ok = system_keyboard_ok(); kb_text = system_keyboard_text(); system_keyboard_close();
+            for (i = 0; i < A_COUNT; i++) act_press[i] = 0; end        // el boton que cerro el teclado no debe llegar al explorador
+            if (ok) kb_accept(); else modal = M_NONE; end
+        elseif (st == 0)
+            modal = M_NONE;
+        end
     elseif (modal == M_KB)
         if (act_press[A_UP])
             if (kb_r == 5) kb_c = kb_c * 10 / 6; if (kb_c > 9) kb_c = 9; end end
@@ -1908,7 +1929,9 @@ begin
         mlbl_ver = modal_ver;
     end
     txt_want[txt_mtitle] = 8589934336 + (255);
-    if (skin) hint_set(modal == M_MENU ? 2 : 3); else txt_want[txt_mhint] = 8589934336 + (170); end
+    if (modal == M_SYSKB)
+        txt_want[txt_mhint] = 8589934336 + (0);
+    elseif (skin) hint_set(modal == M_MENU ? 2 : 3); else txt_want[txt_mhint] = 8589934336 + (170); end
     if (modal == M_MENU)
         for (i = 0; i < menu_n; i++)
             txt_want[txt_mopt[i]] = 8589934336 + (i == menu_sel ? 255 : 190);
