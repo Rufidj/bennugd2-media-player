@@ -188,6 +188,7 @@ begin
         if (fo_i_isdir) t = tr("p_k_folder");
         elseif (is_video(fo_i_path)) t = tr("p_k_video") + " " + ucase(ex);
         elseif (is_audio(fo_i_path)) t = tr("p_k_audio") + " " + ucase(ex);
+        elseif (is_image(fo_i_path)) t = tr("p_k_image") + " " + ucase(ex);
         elseif (ex == "m3u" || ex == "m3u8") t = tr("p_k_list");
         else t = tr("p_k_file") + (ex != "" ? " " + ucase(ex) : ""); end
         fo_line(tr("p_type") + t);
@@ -197,6 +198,10 @@ begin
         if (fo_i_cre != "" && fo_i_cre != fo_i_mod) fo_line(tr("p_created") + fo_i_cre); end
         t = (fo_i_hid ? tr("p_hidden") : "") + (fo_i_hid && fo_i_ro ? ", " : "") + (fo_i_ro ? tr("p_readonly") : "");
         if (t != "") fo_line(tr("p_attr") + t); end
+        if (!fo_i_isdir && is_image(fo_i_path))
+            h = video_open(fo_i_path);
+            if (h) fo_line(tr("s_res") + video_width(h) + "x" + video_height(h)); video_close(h); end
+        end
         if (!fo_i_isdir && (is_video(fo_i_path) || is_audio(fo_i_path)))
             h = video_open(fo_i_path);
             if (h)

@@ -34,7 +34,7 @@ const
     S_VIDEO = 0; S_SHADE_BOT = 1; S_SHADE_TOP = 2; S_BTN = 3;          // 3..11
     S_FOCUS = 12; S_BAR_BG = 13; S_BAR_FG = 14; S_KNOB = 15;
     S_BROWSE_BG = 16; S_SEL = 17; S_ROWICON = 18;                      // 18..29
-    S_HEADER = 30; S_PREVIEW = 31; S_PANEL = 32; S_VIZ = 33; S_MSEL = 34; S_BG = 35; S_WAVE = 36; S_HICON = 39; S_OVDIM = 45; S_OVBOX = 46; S_OVBG = 47; S_OVFG = 48; S_OVBTN = 49; S_OVICO = 50; S_TABUL = 51; S_TABSEL = 52; S_COUNT = 53;
+    S_HEADER = 30; S_PREVIEW = 31; S_PANEL = 32; S_VIZ = 33; S_MSEL = 34; S_BG = 35; S_WAVE = 36; S_HICON = 39; S_OVDIM = 45; S_OVBOX = 46; S_OVBG = 47; S_OVFG = 48; S_OVBTN = 49; S_OVICO = 50; S_TABUL = 51; S_TABSEL = 52; S_IMG = 53; S_IMG2 = 54; S_IBG = 55; S_COUNT = 56;
     HINT_Y = 684;
     OV_TY = 290; OV_BARY = 350; OV_PY = 392; OV_BY = 452;              // ventana de progreso: titulo, barra, porcentaje y boton (en la rejilla de 1280x720)
     GK_MAX = 8192;
@@ -49,7 +49,7 @@ const
     HIDE_AFTER = 200;       // fotogramas sin tocar nada hasta ocultar los iconos
     MAX_ENTRIES = 2047;
 
-    ST_BROWSE = 0; ST_PLAY = 1;
+    ST_BROWSE = 0; ST_PLAY = 1; ST_IMAGE = 2;
     K_FILE = 0; K_DIR = 1; K_LIST = 2; K_URL = 3; K_MYLISTS = 4; K_ADDONS = 5; K_ADDON = 6; K_AFOLDER = 7; K_STORE = 8; K_SITEM = 9; K_DOWNLOADS = 10;
     K_XCAT = 12; K_XSTR = 13; K_XSER = 14;   // entradas de una pantalla de Xtream (categoría, canal, serie)
     // tienda de addons: repositorio oficial del reproductor (se puede apuntar a otro con MP_STORE_URL)
@@ -62,6 +62,7 @@ const
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
     MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27; MA_DOWNLOAD = 29; MA_DELETE_DL = 30; MA_DELETE_DL_YES = 31; MA_DL_VIDEO = 32; MA_DL_AUDIO = 33; MA_DL_FMT = 400; MA_UNK_YES = 34; MA_CACHE_YES = 35; MA_ST_BACK = 36;
     MA_FILES = 37; MA_FCOPY = 38; MA_FMOVE = 39; MA_FPASTE = 40; MA_FRENAME = 41; MA_FDEL = 42; MA_FDEL_YES = 43; MA_FNEWDIR = 44; MA_FMARK = 45; MA_FMARKALL = 46; MA_FPROPS = 47;
+    MA_IMG_SLIDE = 48; MA_IMG_INT = 49; MA_IMG_TR = 50; MA_IMG_SHUF = 51; MA_IMG_ROT = 52; MA_IMG_INFO = 53; MA_IMG_CLOSE = 54;
     // ajustes: tipo de fila y su identificador
     STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
     ST_LANG = 1; ST_SKIN = 2; ST_PREVIEW = 3; ST_SEEK = 4; ST_VIZ = 5; ST_UNKNOWN = 6; ST_INSTALL = 7; ST_STOREURL = 8; ST_ACCOUNTS = 9;
@@ -78,6 +79,7 @@ global
 
     // sprites genericos controlados desde el bucle principal
     int   spr_graph[S_COUNT];
+    int   spr_angle[S_COUNT];                  // giro en milesimas de grado (solo lo usa el visor de imagenes)
     int   spr_x[S_COUNT];
     int   spr_y[S_COUNT];
     int   spr_sizey[S_COUNT];
@@ -284,6 +286,7 @@ include "auth.prg";
 include "xtream.prg";
 include "addon_ui.prg";
 include "fileops.prg";
+include "imageviewer.prg";
 
 process main()
 private
@@ -350,7 +353,7 @@ begin
             load_wait--;
             if (load_wait == 0) s_toast = ""; toast_t = 0; start_video(load_path); load_path = ""; end
         end
-        if (modal != M_NONE) update_modal(); elseif (state == ST_BROWSE) update_browser(); else update_player(); end
+        if (modal != M_NONE) update_modal(); elseif (state == ST_BROWSE) update_browser(); elseif (state == ST_IMAGE) update_image(); else update_player(); end
         layout_all();
         apply_texts();
 
@@ -385,11 +388,11 @@ end
 
 function load_assets()
 private
-    string names[17] = "play", "pause", "stop", "next", "prev", "ff", "rw", "subs", "vol", "mute", "folder", "video", "back", "lang", "cloud", "note", "addon";
+    string names[18] = "play", "pause", "stop", "next", "prev", "ff", "rw", "subs", "vol", "mute", "folder", "video", "back", "lang", "cloud", "note", "addon", "image";
     int i;
 begin
     for (i = 0; i < GK_MAX; i++) g_k[i] = 150; end
-    for (i = 0; i <= 16; i++)
+    for (i = 0; i <= 17; i++)
         g_icon[i] = map_load("res/" + names[i] + ".png");
         center_set(0, g_icon[i], 72, 72); hires(g_icon[i]);
     end
@@ -401,6 +404,7 @@ begin
     g_ring      = map_load("res/ring.png"); center_set(0, g_ring, 72, 72); hires(g_ring);
     g_knob      = map_load("res/knob.png"); center_set(0, g_knob, 20, 20); hires(g_knob);
     g_white = map_new(8, 8);   map_clear(0, g_white, rgba(255, 255, 255, 255));
+    g_black = map_new(8, 8);   map_clear(0, g_black, rgba(0, 0, 0, 255));
     g_barbg = map_new(8, 8);   map_clear(0, g_barbg, rgba(255, 255, 255, 70));
     g_sel   = map_new(8, 8);   map_clear(0, g_sel, rgba(70, 130, 255, 120));
     g_ovdim = map_new(8, 8);   map_clear(0, g_ovdim, rgba(0, 0, 0, 160));            // ventana de progreso: fondo atenuado, caja y relleno
@@ -510,6 +514,7 @@ begin
         size_x = spr_sizex[slot] * gk / 100;
         alpha  = spr_alpha[slot];
         z      = spr_z[slot];
+        angle  = spr_angle[slot];
         frame;
     end
 end
@@ -634,7 +639,7 @@ begin
             if (nm != "." && nm != ".." && (set_hidden || substr(nm, 0, 1) != "."))
                 d = fileinfo.directory;
                 if (!d && (lcase(ext_of(nm)) == "m3u" || lcase(ext_of(nm)) == "m3u8")) d = K_LIST; end
-                if (d || set_allfiles || is_video(nm) || is_audio(nm))
+                if (d || set_allfiles || is_video(nm) || is_audio(nm) || is_image(nm))
                     entries[n_entries] = nm; entry_dir[n_entries] = d; entry_size[n_entries] = fileinfo.size; entry_logo[n_entries] = ""; n_entries++;
                 end
             end
@@ -1015,6 +1020,7 @@ begin
             t = "";
             for (k = 0; k < n && k < 4; k++) t += (k > 0 ? ", " : "") + lang_or_dash(video_subtitle_lang(pv_h, k)); end
             s_info[5] = tr("s_subs_n") + n + "): " + cut_text(utf8_to_latin1(t), 12);
+            if (is_image(entries[sel])) s_info[2] = tr("s_size") + fmt_size(entry_size[sel]); s_info[3] = ""; s_info[4] = ""; s_info[5] = ""; end      // una imagen no tiene duracion ni pistas
             end
         end
     end
@@ -1066,6 +1072,8 @@ begin
         s_toast = tr("s_connecting"); toast_t = 600;
         load_path = au_apply(entry_url[i]); load_wait = 3;
         if (addon_mode > 0 && entry_aargs[i] != "") load_path = addon_signed_playlist(entry_url[i], entry_aargs[i]); if (load_path == "") load_wait = 0; s_toast = ""; toast_t = 0; end end
+    elseif (is_image(entries[i]))
+        open_image(i);
     elseif (!is_video(entries[i]) && !is_audio(entries[i]))
         toast(tr("t_notmedia"));
     else
@@ -1231,6 +1239,7 @@ begin
         switch (ctx)
             case 1: hint_n = 3; hint_ic[0] = 0; s_h[0] = tr("h_open"); hint_ic[1] = 1; s_h[1] = tr("h_back"); hint_ic[2] = 3; s_h[2] = tr("h_options"); end
             case 5: hint_n = 3; hint_ic[0] = 0; s_h[0] = tr("h_install"); hint_ic[1] = 1; s_h[1] = tr("h_back"); hint_ic[2] = 3; s_h[2] = tr("h_options"); end
+            case 6: hint_n = 4; hint_ic[0] = 0; s_h[0] = tr("h_options"); hint_ic[1] = 1; s_h[1] = tr("h_back"); hint_ic[2] = 2; s_h[2] = tr("h_rotate"); s_h[3] = "START " + tr("h_slideshow"); end
             case 4: hint_n = 1; hint_ic[0] = 1; s_h[0] = tr("h_back"); end
             case 2: hint_n = 2; hint_ic[0] = 0; s_h[0] = tr("h_choose"); hint_ic[1] = 1; s_h[1] = tr("h_cancel"); end
             default:
@@ -1438,6 +1447,9 @@ begin
             if (k == "unk") set_unknown = atoi(v) ? 1 : 0; end
             if (k == "dlfmt") set_dlfmt = atoi(v); if (set_dlfmt < 0 || set_dlfmt > 3) set_dlfmt = 0; end end
             if (k == "storeurl") set_store_url = v; end
+            if (k == "imgint") set_img_int = atoi(v); if (set_img_int < 0 || set_img_int > 5) set_img_int = 1; end end
+            if (k == "imgtr") set_img_tr = atoi(v); if (set_img_tr < 0 || set_img_tr > 4) set_img_tr = 3; end end
+            if (k == "imgshuf") set_img_shuf = atoi(v); end
             if (k == "hidden") set_hidden = atoi(v); end
             if (k == "allfiles") set_allfiles = atoi(v); end
             if (k == "view") set_view = atoi(v); if (set_view < 0 || set_view > 2) set_view = 2; end end
@@ -1460,6 +1472,9 @@ begin
     fputs(fh, "dlfmt=" + set_dlfmt);
     fputs(fh, "storeurl=" + set_store_url);
     fputs(fh, "view=" + set_view);
+    fputs(fh, "imgint=" + set_img_int);
+    fputs(fh, "imgtr=" + set_img_tr);
+    fputs(fh, "imgshuf=" + set_img_shuf);
     fputs(fh, "hidden=" + set_hidden);
     fputs(fh, "allfiles=" + set_allfiles);
     fclose(fh);
@@ -1973,6 +1988,16 @@ begin
         case MA_FNEWDIR: kb_open(tr("k_newdir"), "", KB_NEWDIR); end
         case MA_FMARK: mark_toggle(sel); if (sel + 1 < n_entries) sel++; if (sel >= top_row + ROWS) top_row++; end end end
         case MA_FMARKALL: if (mark_n > 0) marks_clear(); else mark_all(); end end
+        case MA_IMG_SLIDE:
+            img_slide = !img_slide; img_t = 0; img_kb = img_slide && set_img_tr == 3; img_ovt = HIDE_AFTER - 80;
+            toast(img_slide ? tr("t_img_slide_on") : tr("t_img_slide_off"));
+        end
+        case MA_IMG_INT: set_img_int = (set_img_int + 1) % 6; cfg_save(); open_image_menu(1); end
+        case MA_IMG_TR: set_img_tr = (set_img_tr + 1) % 5; cfg_save(); open_image_menu(2); end
+        case MA_IMG_SHUF: set_img_shuf = !set_img_shuf; cfg_save(); k = img_ord[img_pos]; img_pos = img_collect(k); open_image_menu(3); end
+        case MA_IMG_ROT: img_rot = (img_rot + 1) % 4; img_px = 0; img_py = 0; end
+        case MA_IMG_INFO: img_info(); end
+        case MA_IMG_CLOSE: close_image(); end
         case MA_STORE_REFRESH: store_open(); end
         case MA_SKIN:
             skin = !skin; cfg_save(); open_settings_menu(1);
@@ -2688,7 +2713,7 @@ function hide_sprites()
 private int i;
 begin
     for (i = 0; i < S_COUNT; i++)
-        if (i != S_VIDEO) spr_alpha[i] = 0; spr_graph[i] = 0; end
+        if (i != S_VIDEO) spr_alpha[i] = 0; spr_graph[i] = 0; spr_angle[i] = 0; end
     end
 end
 
@@ -2733,7 +2758,13 @@ begin
     for (i = 0; i < 6; i++) txt_want[txt_h[i]] = 8589934336 + (0); end
     for (i = 0; i < 6; i += 2) txt_want[txt_sub[i]] = 4294967296; end
 
-    if (modal != M_NONE && !(modal == M_MENU && state == ST_BROWSE)) draw_modal(); return 0; end
+    if (modal != M_NONE && !(modal == M_MENU && (state == ST_BROWSE || state == ST_IMAGE))) draw_modal(); return 0; end
+
+    if (state == ST_IMAGE)
+        draw_image();
+        if (modal == M_MENU) draw_menu_dialog(); end
+        return 0;
+    end
 
     if (state == ST_BROWSE)
         // ---- explorador
@@ -2785,7 +2816,7 @@ begin
                     case K_SITEM: if (entry_skind[rowi] == 1) g = entry_siver[rowi] != "" ? g_icon[11] : g_icon[14]; else g = entry_siver[rowi] != "" ? g_icon[16] : g_icon[14]; end end
                     case K_LIST: g = g_icon[14]; end
                     case K_URL: g = (addon_mode == 2 && entry_akind[rowi] == 1) ? g_icon[11] : ((addon_mode == 2 && entry_akind[rowi] >= 2) ? g_icon[15] : g_icon[14]); end
-                    default: g = is_audio(entries[rowi]) ? g_icon[15] : g_icon[11]; end
+                    default: g = is_audio(entries[rowi]) ? g_icon[15] : (is_image(entries[rowi]) ? g_icon[17] : g_icon[11]); end
                 end
                 if (entries[rowi] == "..") g = g_icon[12]; end
                 if (grid_mode == 1)
