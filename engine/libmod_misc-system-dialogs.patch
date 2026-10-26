@@ -296,14 +296,14 @@ index 00000000..4003adfe
 +#endif
 diff --git a/modules/libmod_misc/m_progress.c b/modules/libmod_misc/m_progress.c
 new file mode 100644
-index 00000000..94efda6f
+index 00000000..d4052242
 --- /dev/null
 +++ b/modules/libmod_misc/m_progress.c
-@@ -0,0 +1,234 @@
+@@ -0,0 +1,161 @@
 +/*
 + *  m_progress.c - system progress bar (PS5 message dialog, progress mode), see m_progress.h
 + *
-+ *  libSceMsgDialog is loaded at run time and its functions are looked up (see resolve_msgdialog).
++ *  libSceMsgDialog is not reachable from a title (see the comment on resolve_msgdialog).
 + *  Struct layouts as in SharpProspero's MessageDialog.cs.
 + */
 +#include <stdint.h>
@@ -338,10 +338,13 @@ index 00000000..94efda6f
 +_Static_assert( sizeof( DlgProgBar ) == 80, "bar" );
 +_Static_assert( sizeof( DlgParam ) == 136, "param" );
 +
-+/* libSceMsgDialog is NOT linked: a static import of it was left unbound by the console's loader (a call to address 0).
-+   The sysmodule is loaded on request and its functions are looked up in the loaded modules, by name and, failing that, by NID. */
-+int sceKernelDlsym( int handle, const char * name, void ** addr );
-+
++/* The system progress bar (libSceMsgDialog) cannot be reached from a title on the consoles tested so far:
++ *  - a static import against a link stub is never bound by the console's loader (the first call jumps to address 0),
++ *    whatever the stub's soname ("libSceMsgDialog.sprx" or "libSceMsgDialog.native.sprx");
++ *  - sysmodule 0xA4 only loads libSceMsgDialog.native.sprx, a 64 KB helper that holds no public functions (its only
++ *    strings are "SceMsgDialog" and "SceCdlgMsgUti"; no NID or suffix variant is found by sceKernelDlsym);
++ *  - loading libSceMsgDialog.sprx itself by path answers "not found" / "not executable".
++ * So OPEN answers -6 here and the player keeps its own on-screen progress text. The calls below stay as the shape of the API. */
 +static int ( * sceMsgDialogInitialize )( void );
 +static int ( * sceMsgDialogTerminate )( void );
 +static int ( * sceMsgDialogOpen )( DlgParam * param );
@@ -350,86 +353,11 @@ index 00000000..94efda6f
 +static int ( * sceMsgDialogProgressBarSetValue )( int target, uint32_t rate );
 +static int ( * sceMsgDialogProgressBarSetMsg )( int target, const char * msg );
 +
-+/* NID of a function name: first 8 bytes of SHA-1(name + salt), read little-endian, base64 big-endian ('/' -> '-') */
-+static uint32_t rol( uint32_t v, int n ) { return ( v << n ) | ( v >> ( 32 - n ) ); }
-+static void sha1( const uint8_t * msg, size_t len, uint8_t out[20] ) {
-+    uint32_t h[5] = { 0x67452301, 0xEFCDAB89, 0x98BADCFE, 0x10325476, 0xC3D2E1F0 };
-+    uint8_t buf[128]; size_t i, total = ( ( len + 8 ) / 64 + 1 ) * 64;
-+    memset( buf, 0, sizeof buf ); memcpy( buf, msg, len ); buf[len] = 0x80;
-+    for ( i = 0; i < 8; i++ ) buf[total - 1 - i] = ( uint8_t ) ( ( ( uint64_t ) len * 8 ) >> ( 8 * i ) );
-+    for ( size_t off = 0; off < total; off += 64 ) {
-+        uint32_t w[80], a = h[0], b = h[1], c = h[2], d = h[3], e = h[4], t;
-+        for ( i = 0; i < 16; i++ ) w[i] = ( uint32_t ) buf[off + 4*i] << 24 | buf[off + 4*i + 1] << 16 | buf[off + 4*i + 2] << 8 | buf[off + 4*i + 3];
-+        for ( i = 16; i < 80; i++ ) w[i] = rol( w[i-3] ^ w[i-8] ^ w[i-14] ^ w[i-16], 1 );
-+        for ( i = 0; i < 80; i++ ) {
-+            uint32_t f, k;
-+            if ( i < 20 ) { f = ( b & c ) | ( ~b & d ); k = 0x5A827999; }
-+            else if ( i < 40 ) { f = b ^ c ^ d; k = 0x6ED9EBA1; }
-+            else if ( i < 60 ) { f = ( b & c ) | ( b & d ) | ( c & d ); k = 0x8F1BBCDC; }
-+            else { f = b ^ c ^ d; k = 0xCA62C1D6; }
-+            t = rol( a, 5 ) + f + e + k + w[i]; e = d; d = c; c = rol( b, 30 ); b = a; a = t;
-+        }
-+        h[0] += a; h[1] += b; h[2] += c; h[3] += d; h[4] += e;
-+    }
-+    for ( i = 0; i < 20; i++ ) out[i] = ( uint8_t ) ( h[i / 4] >> ( 24 - 8 * ( i % 4 ) ) );
-+}
-+static void nid_of( const char * name, char out[16] ) {
-+    static const uint8_t salt[16] = { 0x51, 0x8D, 0x64, 0xA6, 0x35, 0xDE, 0xD8, 0xC1, 0xE6, 0xB0, 0x39, 0xB1, 0xC3, 0xE5, 0x52, 0x30 };
-+    static const char b64[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+-";
-+    uint8_t in[64], d[20], be[8]; uint64_t v = 0; size_t n = strlen( name ); int o = 0;
-+    memcpy( in, name, n ); memcpy( in + n, salt, 16 );
-+    sha1( in, n + 16, d );
-+    for ( int i = 7; i >= 0; i-- ) v = ( v << 8 ) | d[i];
-+    for ( int i = 0; i < 8; i++ ) be[i] = ( uint8_t ) ( v >> ( 56 - 8 * i ) );
-+    for ( int i = 0; i < 8; i += 3 ) {
-+        uint32_t x = ( uint32_t ) be[i] << 16 | ( i + 1 < 8 ? ( uint32_t ) be[i+1] << 8 : 0 ) | ( i + 2 < 8 ? be[i+2] : 0 );
-+        out[o++] = b64[( x >> 18 ) & 63]; out[o++] = b64[( x >> 12 ) & 63];
-+        if ( i + 1 < 8 ) out[o++] = b64[( x >> 6 ) & 63];
-+        if ( i + 2 < 8 ) out[o++] = b64[x & 63];
-+    }
-+    out[o] = 0;
-+}
-+
-+int sceKernelGetModuleList( int * handles, size_t max, size_t * num );
-+
-+/* looks the function up in one module: by name first, then by NID (silent) */
-+static void * try_sym( int h, const char * name ) {
-+    void * p = NULL; char nid[16];
-+    if ( sceKernelDlsym( h, name, &p ) == 0 && p ) return p;
-+    p = NULL; nid_of( name, nid );
-+    if ( sceKernelDlsym( h, nid, &p ) == 0 && p ) return p;
-+    return NULL;
-+}
-+
-+static int g_resolved = 0;      /* 1 = all functions found, -1 = not available */
 +static int resolve_msgdialog( void ) {
-+    int h[256], found = -1; size_t n = 0;
-+    if ( g_resolved ) return g_resolved > 0;
-+    g_resolved = -1;
-+    /* sysmodule 0xA4 has loaded the library: find the module that exports the dialog */
-+    if ( sceKernelGetModuleList( h, 256, &n ) != 0 ) { ps5_dialog_log( "module list unavailable" ); return 0; }
-+    ps5_dialog_log( "%zu modules loaded", n );
-+    for ( size_t i = 0; i < n && i < 256; i++ )
-+        if ( try_sym( h[i], "sceMsgDialogInitialize" ) ) { found = h[i]; break; }
-+    if ( found < 0 ) { ps5_dialog_log( "sceMsgDialogInitialize not found in any module" ); return 0; }
-+    ps5_dialog_log( "dialog module handle %d", found );
-+    *( void ** ) &sceMsgDialogInitialize = try_sym( found, "sceMsgDialogInitialize" );
-+    *( void ** ) &sceMsgDialogTerminate = try_sym( found, "sceMsgDialogTerminate" );
-+    *( void ** ) &sceMsgDialogOpen = try_sym( found, "sceMsgDialogOpen" );
-+    *( void ** ) &sceMsgDialogUpdateStatus = try_sym( found, "sceMsgDialogUpdateStatus" );
-+    *( void ** ) &sceMsgDialogClose = try_sym( found, "sceMsgDialogClose" );
-+    *( void ** ) &sceMsgDialogProgressBarSetValue = try_sym( found, "sceMsgDialogProgressBarSetValue" );
-+    *( void ** ) &sceMsgDialogProgressBarSetMsg = try_sym( found, "sceMsgDialogProgressBarSetMsg" );
-+    ps5_dialog_log( "functions: init %p term %p open %p update %p close %p setvalue %p setmsg %p",
-+        ( void * ) sceMsgDialogInitialize, ( void * ) sceMsgDialogTerminate, ( void * ) sceMsgDialogOpen, ( void * ) sceMsgDialogUpdateStatus,
-+        ( void * ) sceMsgDialogClose, ( void * ) sceMsgDialogProgressBarSetValue, ( void * ) sceMsgDialogProgressBarSetMsg );
-+    if ( !sceMsgDialogInitialize || !sceMsgDialogTerminate || !sceMsgDialogOpen || !sceMsgDialogUpdateStatus ||
-+         !sceMsgDialogClose || !sceMsgDialogProgressBarSetValue || !sceMsgDialogProgressBarSetMsg ) return 0;
-+    g_resolved = 1;
-+    return 1;
++    ps5_dialog_log( "the system progress bar is not available on this console" );
++    return 0;
 +}
 +
-+#define SYSMODULE_MSG_DIALOG    0x00A4
 +#define USER_SYSTEM             0xFF
 +#define MAGIC_NUMBER            0xC0D1A109ull
 +
@@ -445,7 +373,6 @@ index 00000000..94efda6f
 +    int64_t ret = 0;
 +
 +    if ( g_open ) { ret = -2; goto done; }
-+    if ( ps5_dialogs_init( SYSMODULE_MSG_DIALOG ) != 0 ) { ret = -3; goto done; }
 +    if ( !resolve_msgdialog() ) { ret = -6; goto done; }
 +
 +    rc = sceMsgDialogInitialize();
@@ -582,24 +509,6 @@ index 00000000..de248f78
 +  sh "$BP/tooling/prospero-clang18" -std=c11 -O2 -fPIC -c "$HERE/commondialog_link_stub.c" -o "$OUT/stub.o"
 +"$SDK/bin/prospero-lld" --shared -soname libSceCommonDialog.sprx -o "$SDK/target/lib/libSceCommonDialog.so" "$OUT/stub.o"
 +rm -rf "$OUT"; echo "installed $SDK/target/lib/libSceCommonDialog.so"
-diff --git a/ps5/tools/build-msgdialog-stub.sh b/ps5/tools/build-msgdialog-stub.sh
-new file mode 100755
-index 00000000..d0cd2772
---- /dev/null
-+++ b/ps5/tools/build-msgdialog-stub.sh
-@@ -0,0 +1,12 @@
-+#!/bin/sh
-+# Builds libSceMsgDialog.so (a link stub, soname libSceMsgDialog.sprx) and installs it in the payload SDK's
-+# target/lib, where native-app-boilerplate's `make app` picks every *.so up as an import library.
-+# (the SDK does not ship libSceMsgDialog)
-+#   ps5/tools/build-commondialog-stub.sh /path/to/native-app-boilerplate
-+set -e
-+BP="${1:?path to native-app-boilerplate}"; SDK="$BP/.deps/native/ps5-payload-sdk"
-+HERE="$(cd "$(dirname "$0")" && pwd)"; OUT="$(mktemp -d)"
-+PS5_PAYLOAD_SDK="$SDK" PS5_CLANG="${PS5_CLANG:-/usr/bin/clang-18}" USE_CCACHE=0 \
-+  sh "$BP/tooling/prospero-clang18" -std=c11 -O2 -fPIC -c "$HERE/msgdialog_link_stub.c" -o "$OUT/stub.o"
-+"$SDK/bin/prospero-lld" --shared -soname libSceMsgDialog.sprx -o "$SDK/target/lib/libSceMsgDialog.so" "$OUT/stub.o"
-+rm -rf "$OUT"; echo "installed $SDK/target/lib/libSceMsgDialog.so"
 diff --git a/ps5/tools/commondialog_link_stub.c b/ps5/tools/commondialog_link_stub.c
 new file mode 100644
 index 00000000..f8635731
@@ -611,22 +520,3 @@ index 00000000..f8635731
 + * Build with ps5/tools/build-commondialog-stub.sh. */
 +int sceCommonDialogInitialize(void) { return -1; }
 +int sceCommonDialogIsUsed(void) { return 0; }
-diff --git a/ps5/tools/msgdialog_link_stub.c b/ps5/tools/msgdialog_link_stub.c
-new file mode 100644
-index 00000000..c2581c7f
---- /dev/null
-+++ b/ps5/tools/msgdialog_link_stub.c
-@@ -0,0 +1,13 @@
-+/* Link stub for the console's libSceMsgDialog (the system message / progress dialog, see libmod_misc/m_progress.c).
-+ * Only linked against, never run: the console's own library answers these calls once its sysmodule (0xA4) is loaded.
-+ * Build with ps5/tools/build-msgdialog-stub.sh. */
-+int sceMsgDialogInitialize(void) { return -1; }
-+int sceMsgDialogTerminate(void) { return -1; }
-+int sceMsgDialogOpen(void *p) { (void)p; return -1; }
-+int sceMsgDialogUpdateStatus(void) { return 0; }
-+int sceMsgDialogGetStatus(void) { return 0; }
-+int sceMsgDialogGetResult(void *p) { (void)p; return -1; }
-+int sceMsgDialogClose(void) { return -1; }
-+int sceMsgDialogProgressBarInc(int t, unsigned d) { (void)t; (void)d; return -1; }
-+int sceMsgDialogProgressBarSetValue(int t, unsigned r) { (void)t; (void)r; return -1; }
-+int sceMsgDialogProgressBarSetMsg(int t, const char *m) { (void)t; (void)m; return -1; }
