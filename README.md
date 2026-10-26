@@ -38,7 +38,7 @@ If the app does not open: check the firmware, that kstuff is loaded before Shado
 
 ## System keyboard (PS5)
 
-On the PS5 the player opens the console's own on-screen keyboard (`libSceImeDialog`) whenever it needs text, and falls back to its built-in keyboard if the system one is not available. It needs `engine/libmod_misc-system-keyboard.patch` (functions `SYSTEM_KEYBOARD_OPEN/STATUS/OK/TEXT/CLOSE`) and the `libSceCommonDialog` link stub (`ps5/tools/build-commondialog-stub.sh`). Each step is logged to `/data/ime.log` on the console. On PC, `MP_FAKE_SYSKB="text"` simulates it for testing.
+On the PS5 the player uses the console's own system dialogs: the on-screen keyboard and the progress bar (while the Store installs an addon or a list). On the PS5 it opens the console's own on-screen keyboard (`libSceImeDialog`) whenever it needs text, and falls back to its built-in keyboard if the system one is not available. It needs `engine/libmod_misc-system-dialogs.patch` (functions `SYSTEM_KEYBOARD_*` and `SYSTEM_PROGRESS_OPEN/SET/MESSAGE/UPDATE/CLOSE`) and the `libSceCommonDialog` / `libSceMsgDialog` link stubs (`ps5/tools/build-commondialog-stub.sh`, `ps5/tools/build-msgdialog-stub.sh`). Downloads run in the background with `HTTP_FETCH_BEGIN/POLL` and `HTTP_PROGRESS/TOTAL` (`engine/libmod_video-async-http.patch`, on top of `libmod_video-mediaplayer.patch`; both are already committed in the author's engine fork, branch `ps5`). Each step is logged to `/data/ime.log` on the console. On PC, `MP_FAKE_SYSKB="text"` and `MP_FAKE_PROGRESS=1` simulate them for testing.
 
 ## Controls
 

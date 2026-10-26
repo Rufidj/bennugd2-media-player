@@ -33,6 +33,8 @@ global
     int    store_ji, store_jn, store_jrow, store_jerr; string store_jid, store_jdir, store_jfiles, store_jname;
     int    store_jkind;                 // 0 = addon, 1 = lista de TV/radio
     string store_jurl, store_jfile;     // lista: de dónde se baja y con qué nombre se guarda
+    int    store_jreq, store_jcur;      // una descarga en segundo plano en curso, y el numero de fichero que baja
+    int    prog_on, prog_off, prog_last;  // barra de progreso del sistema (PS5): abierta / no disponible / ultimo valor puesto
     string store_seen[64]; int store_seen_n;   // carpetas ya listadas (el addon del usuario manda sobre el que trae el reproductor)
 end
 
@@ -767,6 +769,35 @@ begin
     return 0;
 end
 
+// ---- barra de progreso del sistema (PS5). Si no hay (PC) o falla, no pasa nada: queda el texto propio de la pantalla
+function prog_start(string caption)
+private int r;
+begin
+    if (prog_on || prog_off) return 0; end
+    r = system_progress_open(caption);
+    if (r == 0) prog_on = 1; prog_last = -1; else prog_off = 1; end
+end
+
+function prog_stop()
+begin
+    if (!prog_on) return 0; end
+    system_progress_set(100);
+    system_progress_close();
+    prog_on = 0;
+end
+
+// porcentaje de la instalacion en curso: ficheros ya bajados + lo que lleva el actual
+function store_prog()
+private int p, tot, got;
+begin
+    if (!prog_on) return 0; end
+    p = store_ji * 100 / store_jn;
+    tot = http_total(); got = http_progress();
+    if (tot > 0) if (got > tot) got = tot; end p += (got * 100 / tot) / store_jn; end
+    if (p > 99) p = 99; end
+    if (p != prog_last) system_progress_set(p); prog_last = p; end
+end
+
 // prepara la instalación de la entrada i (un addon o una lista): se hace en el fotograma siguiente
 function store_install(int i)
 begin
@@ -800,44 +831,60 @@ begin
         store_jn = field_n(store_jfiles, ",");
         store_jdir = join_path(addon_root_user(), store_jid);
     end
+    store_jreq = 0; store_jcur = 0;
     s_amsg = tr("s_installing") + " " + store_jname; addon_busy = 1;
+    prog_start(tr("s_installing") + " " + store_jname);
 end
 
-// una descarga por fotograma: la pantalla se repinta entre fichero y fichero y se ve el avance
+// una descarga por vez, en segundo plano: cada fotograma se mira como va (la pantalla y la barra del sistema siguen vivas)
 function store_step()
-private int st; string fn, url, why, dest;
+private int st, r; string fn, url, why, dest;
 begin
-    if (store_jkind == 1)
-        // lista de TV/radio: se baja de su dirección de origen directamente a "Mis listas"
-        mkdir(store_jdir);
-        dest = join_path(store_jdir, store_jfile);
-        au_load(dest);                                        // las credenciales de esta lista, si tiene
-        st = http_fetch(au_apply(store_jurl), au_headers(), "GET", "");
-        if (st != 200)
-            store_jerr = st > 0 ? st : 1;
-        elseif (!http_save(dest))
-            store_jerr = -1;
-        else
-            if (!list_file_ok(dest))
-                store_jerr = -2; fremove(dest); end              // el origen devolvió algo que no es una lista
-        end
-        store_ji = 1;
-    else
-        if (store_ji == 0) mkdir(store_jdir); end
-        if (store_jerr == 0)
-            store_ji++;
-            fn = field_of(store_jfiles, ",", store_ji);
-            if (fn != "")
-                url = store_root() + "/" + store_jid + "/" + fn;
-                st = http_fetch(url, "", "GET", "");
-                if (st != 200) store_jerr = st > 0 ? st : 1;
-                elseif (!http_save(join_path(store_jdir, fn))) store_jerr = -1; end
+    if (store_jreq)
+        st = http_fetch_poll();
+        if (st == -1) store_prog(); return 0; end            // sigue bajando
+        store_jreq = 0;
+        if (store_jkind == 1)
+            // lista de TV/radio: llega de su direccion de origen y se guarda en "Mis listas"
+            dest = join_path(store_jdir, store_jfile);
+            if (st != 200)
+                store_jerr = st > 0 ? st : 1;
+            elseif (!http_save(dest))
+                store_jerr = -1;
+            else
+                if (!list_file_ok(dest))
+                    store_jerr = -2; fremove(dest); end              // el origen devolvio algo que no es una lista
             end
+            store_ji = 1;
+        else
+            fn = field_of(store_jfiles, ",", store_jcur);
+            if (st != 200) store_jerr = st > 0 ? st : 1;
+            elseif (!http_save(join_path(store_jdir, fn))) store_jerr = -1; end
+            store_ji = store_jcur;
             if (store_jerr == 0 && store_ji >= store_jn && !ad_peek_info(join_path(store_jdir, "main.addon"))) store_jerr = -2; end
         end
+    else
+        // empieza la siguiente descarga
+        if (store_jkind == 1)
+            mkdir(store_jdir);
+            dest = join_path(store_jdir, store_jfile);
+            au_load(dest);                                        // las credenciales de esta lista, si tiene
+            if (http_fetch_begin(au_apply(store_jurl), au_headers(), "GET", "") != 0) store_jerr = 1; else store_jreq = 1; end
+        else
+            if (store_ji == 0) mkdir(store_jdir); end
+            store_jcur = store_ji + 1;
+            fn = field_of(store_jfiles, ",", store_jcur);
+            if (fn == "")
+                store_ji = store_jcur;                            // un hueco en la lista de ficheros: se salta
+            else
+                url = store_root() + "/" + store_jid + "/" + fn;
+                if (http_fetch_begin(url, "", "GET", "") != 0) store_jerr = 1; else store_jreq = 1; end
+            end
+        end
+        if (store_jreq) store_prog(); return 0; end
     end
     if (store_jerr != 0 || store_ji >= store_jn)
-        store_job = 0; addon_busy = 0; s_amsg = "";
+        store_job = 0; addon_busy = 0; s_amsg = ""; prog_stop();
         if (store_jerr != 0)
             if (store_jerr == -2 && store_jkind == 0) fremove(join_path(store_jdir, "main.addon")); end   // el fichero bajado no es un addon
             if (store_jerr == -1)

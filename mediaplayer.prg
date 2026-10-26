@@ -328,6 +328,7 @@ begin
             load_wait--;
             if (load_wait == 0) s_toast = ""; toast_t = 0; start_video(load_path); load_path = ""; end
         end
+        if (prog_on) system_progress_update(); end                                                    // la barra de progreso del sistema (PS5) avanza con cada fotograma
         if (modal != M_NONE) update_modal(); elseif (state == ST_BROWSE) update_browser(); else update_player(); end
         layout_all();
         apply_texts();

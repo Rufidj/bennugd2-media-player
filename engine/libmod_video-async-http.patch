@@ -1,0 +1,187 @@
+diff --git a/modules/libmod_video/libmod_video.c b/modules/libmod_video/libmod_video.c
+index 78d0dd94..4133e9b3 100644
+--- a/modules/libmod_video/libmod_video.c
++++ b/modules/libmod_video/libmod_video.c
+@@ -1805,13 +1805,12 @@ static int http_interrupt( void * p ) {
+     return ( t.tv_sec + t.tv_nsec / 1e9 ) > ( ( HttpInt * ) p )->deadline;
+ }
+ 
+-int64_t libmod_video_http_fetch( INSTANCE * my, int64_t * params ) {
+-    char * url = strdup( ( const char * ) string_get( params[0] ) );
+-    char * hdr = strdup( ( const char * ) string_get( params[1] ) );
+-    char * method = strdup( ( const char * ) string_get( params[2] ) );
+-    const char * bodyp = ( const char * ) string_get( params[3] );
+-    size_t blen = strlen( bodyp );
+-    char * body = strdup( bodyp );
++/* progress of the request in course (read by HTTP_PROGRESS / HTTP_TOTAL while HTTP_FETCH_BEGIN's request runs) */
++static volatile int64_t g_http_prog = 0, g_http_tot = 0;
++
++/* the request itself: returns the status (200 ok, 400/401/403/404/500 http errors, 0 = no connection) */
++static int http_do( const char * url, const char * hdr, const char * method, const char * body ) {
++    size_t blen = strlen( body );
+     int status = 0;
+     AVDictionary * o = NULL;
+     AVIOContext * io = NULL;
+@@ -1820,11 +1819,9 @@ int64_t libmod_video_http_fetch( INSTANCE * my, int64_t * params ) {
+     AVIOInterruptCB cb;
+     int r;
+     static int net_ready = 0;
+-    string_discard( params[0] ); string_discard( params[1] ); string_discard( params[2] ); string_discard( params[3] );
+ 
+-    free( g_http_body ); g_http_body = NULL; g_http_len = 0; g_http_err[0] = 0;
+-    if ( !url || !hdr || !method || !body ) { snprintf( g_http_err, sizeof g_http_err, "out of memory" ); goto done; }
+-    if ( strncmp( url, "http://", 7 ) && strncmp( url, "https://", 8 ) ) { snprintf( g_http_err, sizeof g_http_err, "only http:// and https:// addresses" ); goto done; }
++    free( g_http_body ); g_http_body = NULL; g_http_len = 0; g_http_err[0] = 0; g_http_prog = 0; g_http_tot = 0;
++    if ( strncmp( url, "http://", 7 ) && strncmp( url, "https://", 8 ) ) { snprintf( g_http_err, sizeof g_http_err, "only http:// and https:// addresses" ); return 0; }
+     if ( !net_ready ) { avformat_network_init(); net_ready = 1; }
+ 
+     av_dict_set( &o, "rw_timeout", "15000000", 0 );
+@@ -1834,7 +1831,7 @@ int64_t libmod_video_http_fetch( INSTANCE * my, int64_t * params ) {
+     if ( method[0] && strcmp( method, "GET" ) ) av_dict_set( &o, "method", method, 0 );
+     if ( blen ) {
+         char * hx = ( char * ) malloc( blen * 2 + 1 );
+-        if ( !hx ) { snprintf( g_http_err, sizeof g_http_err, "out of memory" ); goto done; }
++        if ( !hx ) { av_dict_free( &o ); snprintf( g_http_err, sizeof g_http_err, "out of memory" ); return 0; }
+         http_hex( body, blen, hx );
+         av_dict_set( &o, "post_data", hx, 0 );                  /* binary options are given as hex text */
+         free( hx );
+@@ -1854,11 +1851,13 @@ int64_t libmod_video_http_fetch( INSTANCE * my, int64_t * params ) {
+         else if ( r == AVERROR_HTTP_OTHER_4XX ) status = 400;
+         else if ( r == AVERROR_HTTP_SERVER_ERROR ) status = 500;
+         else { char e[128]; av_strerror( r, e, sizeof e ); snprintf( g_http_err, sizeof g_http_err, "%s", e ); }
+-        goto done;
++        return status;
+     }
+     {
+         size_t cap = 64 << 10, n = 0, max = 8u << 20;
+         char * buf = ( char * ) malloc( cap + 1 );
++        int64_t total = avio_size( io );
++        g_http_tot = total > 0 ? total : 0;                     /* 0 = the server did not say how big it is */
+         while ( buf ) {
+             int k;
+             if ( n + 16384 > cap ) {
+@@ -1871,16 +1870,83 @@ int64_t libmod_video_http_fetch( INSTANCE * my, int64_t * params ) {
+             k = avio_read( io, ( unsigned char * ) buf + n, 16384 );
+             if ( k <= 0 ) break;
+             n += ( size_t ) k;
++            g_http_prog = ( int64_t ) n;
+         }
+         avio_closep( &io );
+-        if ( !buf ) { snprintf( g_http_err, sizeof g_http_err, "out of memory" ); goto done; }
++        if ( !buf ) { snprintf( g_http_err, sizeof g_http_err, "out of memory" ); return 0; }
+         buf[n] = 0; g_http_body = buf; g_http_len = n; status = 200;
+     }
+-done:
++    return status;
++}
++
++/* HTTP_FETCH(url, headers, method, body): the request, waiting for it */
++int64_t libmod_video_http_fetch( INSTANCE * my, int64_t * params ) {
++    char * url = strdup( ( const char * ) string_get( params[0] ) );
++    char * hdr = strdup( ( const char * ) string_get( params[1] ) );
++    char * method = strdup( ( const char * ) string_get( params[2] ) );
++    char * body = strdup( ( const char * ) string_get( params[3] ) );
++    int status = 0;
++    string_discard( params[0] ); string_discard( params[1] ); string_discard( params[2] ); string_discard( params[3] );
++    if ( url && hdr && method && body ) status = http_do( url, hdr, method, body );
++    else snprintf( g_http_err, sizeof g_http_err, "out of memory" );
+     free( url ); free( hdr ); free( method ); free( body );
+     return status;
+ }
+ 
++/* HTTP_FETCH_BEGIN(url, headers, method, body): the same request in the background (0 = started); then HTTP_FETCH_POLL() every frame
++   (-1 while it runs, the status once it is done), with HTTP_PROGRESS() / HTTP_TOTAL() to draw a progress bar. The answer is read with
++   HTTP_LENGTH / HTTP_READ / HTTP_SAVE as usual. One request at a time. */
++typedef struct { char * url, * hdr, * method, * body; } HttpJob;
++static SDL_atomic_t g_hasync_state;           /* 0 idle, 1 running, 2 done */
++static volatile int g_hasync_status = 0;
++
++static int http_thread( void * arg ) {
++    HttpJob * j = ( HttpJob * ) arg;
++    int st = http_do( j->url, j->hdr, j->method, j->body );
++    free( j->url ); free( j->hdr ); free( j->method ); free( j->body ); free( j );
++    g_hasync_status = st;
++    SDL_AtomicSet( &g_hasync_state, 2 );
++    return 0;
++}
++
++int64_t libmod_video_http_fetch_begin( INSTANCE * my, int64_t * params ) {
++    HttpJob * j;
++    SDL_Thread * th;
++    int64_t ret = 0;
++    char * url = strdup( ( const char * ) string_get( params[0] ) );
++    char * hdr = strdup( ( const char * ) string_get( params[1] ) );
++    char * method = strdup( ( const char * ) string_get( params[2] ) );
++    char * body = strdup( ( const char * ) string_get( params[3] ) );
++    string_discard( params[0] ); string_discard( params[1] ); string_discard( params[2] ); string_discard( params[3] );
++    if ( SDL_AtomicGet( &g_hasync_state ) == 1 ) ret = -1;                      /* one at a time */
++    else if ( !url || !hdr || !method || !body || !( j = ( HttpJob * ) malloc( sizeof( *j ) ) ) ) ret = -2;
++    else {
++        j->url = url; j->hdr = hdr; j->method = method; j->body = body;
++        g_http_prog = 0; g_http_tot = 0;
++        SDL_AtomicSet( &g_hasync_state, 1 );
++        th = SDL_CreateThread( http_thread, "http", j );
++        if ( !th ) {
++            SDL_AtomicSet( &g_hasync_state, 0 );
++            free( url ); free( hdr ); free( method ); free( body ); free( j );
++            return -3;
++        }
++        SDL_DetachThread( th );
++        return 0;
++    }
++    free( url ); free( hdr ); free( method ); free( body );
++    return ret;
++}
++
++int64_t libmod_video_http_fetch_poll( INSTANCE * my, int64_t * params ) {
++    int st = SDL_AtomicGet( &g_hasync_state );
++    if ( st == 1 ) return -1;
++    if ( st == 2 ) { SDL_AtomicSet( &g_hasync_state, 0 ); return g_hasync_status; }
++    return -3;                                                                  /* nothing was started */
++}
++
++int64_t libmod_video_http_progress( INSTANCE * my, int64_t * params ) { return g_http_prog; }
++int64_t libmod_video_http_total( INSTANCE * my, int64_t * params ) { return g_http_tot; }
++
+ int64_t libmod_video_http_length( INSTANCE * my, int64_t * params ) { return ( int64_t ) g_http_len; }
+ 
+ /* HTTP_READ(pointer, max): copies up to max bytes of the last answer; returns the bytes copied */
+diff --git a/modules/libmod_video/libmod_video.h b/modules/libmod_video/libmod_video.h
+index 88bd1a2d..8679dfb1 100644
+--- a/modules/libmod_video/libmod_video.h
++++ b/modules/libmod_video/libmod_video.h
+@@ -35,6 +35,8 @@
+  *  decoder/resampler and may be heard as a brief gap; the video keeps playing.
+  *    VIDEO_AUDIO_TRACKS(handle)              -> number of audio tracks
+  *    HTTP_FETCH(url, headers, method, body) -> status (200 ok, 400/401/403/404/500 http errors, 0 = no connection; see HTTP_ERROR())
++ *    HTTP_FETCH_BEGIN(url, headers, method, body) -> 0 started (in the background); HTTP_FETCH_POLL() -> -1 running, else the status;
++ *    HTTP_PROGRESS() -> bytes received so far; HTTP_TOTAL() -> bytes expected (0 = unknown)
+  *    HTTP_LENGTH() -> bytes of the answer; HTTP_READ(pointer, max) -> copies them; HTTP_ERROR() -> text of the last failure
+  *    HTTP_WRITE(path, text) -> 1 if the text was written to that file
+  *    HTTP_SAVE(path) -> 1 if the last answer was written to that file
+@@ -85,6 +87,10 @@ extern int64_t libmod_video_subtitle_text( INSTANCE * my, int64_t * params );
+ extern int64_t libmod_video_audio_tracks( INSTANCE * my, int64_t * params );
+ extern int64_t libmod_video_audio_lang( INSTANCE * my, int64_t * params );
+ extern int64_t libmod_video_http_fetch( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_http_fetch_begin( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_http_fetch_poll( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_http_progress( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_http_total( INSTANCE * my, int64_t * params );
+ extern int64_t libmod_video_http_length( INSTANCE * my, int64_t * params );
+ extern int64_t libmod_video_http_read( INSTANCE * my, int64_t * params );
+ extern int64_t libmod_video_http_error( INSTANCE * my, int64_t * params );
+diff --git a/modules/libmod_video/libmod_video_exports.h b/modules/libmod_video/libmod_video_exports.h
+index 0766efb2..5dc822b8 100644
+--- a/modules/libmod_video/libmod_video_exports.h
++++ b/modules/libmod_video/libmod_video_exports.h
+@@ -45,6 +45,10 @@ DLSYSFUNCS __bgdexport( libmod_video, functions_exports )[] = {
+     FUNC( "VIDEO_WAVE"           , "II" , TYPE_INT   , libmod_video_wave            ),
+ 
+     FUNC( "HTTP_FETCH"           , "SSSS", TYPE_INT   , libmod_video_http_fetch     ),
++    FUNC( "HTTP_FETCH_BEGIN"     , "SSSS", TYPE_INT   , libmod_video_http_fetch_begin ),
++    FUNC( "HTTP_FETCH_POLL"      , ""   , TYPE_INT   , libmod_video_http_fetch_poll  ),
++    FUNC( "HTTP_PROGRESS"        , ""   , TYPE_INT   , libmod_video_http_progress    ),
++    FUNC( "HTTP_TOTAL"           , ""   , TYPE_INT   , libmod_video_http_total       ),
+     FUNC( "HTTP_LENGTH"          , ""   , TYPE_INT   , libmod_video_http_length    ),
+     FUNC( "HTTP_READ"            , "PI" , TYPE_INT   , libmod_video_http_read      ),
+     FUNC( "HTTP_SAVE"            , "S"  , TYPE_INT   , libmod_video_http_save      ),
