@@ -162,7 +162,7 @@ iptv-org and the PS5 homebrew community.
 ## License
 
 MIT for the player code (see [LICENSE](LICENSE)). Third-party components keep their own licenses (BennuGD2, FFmpeg, SDL, FreeType, OpenSSL, Noto fonts: SIL OFL).
-Plex, Jellyfin, SomaFM, Radio Browser, Internet Archive, PeerTube and YouTube are trademarks/services of their owners; the addons only use their public APIs. The TV/radio lists of the Store belong to their authors (TDTChannels, iptv-org) and each channel is streamed from its own source. DRM-protected content is not supported.
+Plex, Jellyfin, SomaFM, Radio Browser, Internet Archive, PeerTube and YouTube are trademarks/services of their owners; the addons only use their public APIs. The addon logos are the official ones (see `addons/LOGOS.md` for their sources); they belong to their owners and are not under this project's MIT licence. The TV/radio lists of the Store belong to their authors (TDTChannels, iptv-org) and each channel is streamed from its own source. DRM-protected content is not supported.
 
 ---
 
