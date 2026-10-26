@@ -776,8 +776,12 @@ begin
     ts = cur_section();
     if (ts < 0) tab_focus = 0; return 0; end
     n = tab_count();
-    if (act_press[A_SEEKB]) tab_goto(tab_id((tab_index(ts) + n - 2) % (n - 1))); return 1; end      // L1 / R1: de seccion en seccion (sin pasar por Ajustes)
-    if (act_press[A_SEEKF]) tab_goto(tab_id((tab_index(ts) + 1) % (n - 1))); return 1; end
+    // L1 / R1: de casilla en casilla por toda la barra (al llegar a Ajustes se abre su ventana)
+    if (act_press[A_SEEKB] || act_press[A_SEEKF])
+        i = (tab_index(ts) + (act_press[A_SEEKF] ? 1 : n - 1)) % n;
+        if (tab_id(i) == 5) settings_open(); else tab_goto(tab_id(i)); end
+        return 1;
+    end
     // un toque sobre una casilla
     if (touch_mode && act_press[A_OK] && touch_age <= 8 && touch_y < 84)
         for (i = 0; i < n; i++)
@@ -1527,7 +1531,7 @@ begin
         end
         case 2:                                                  // addons y fuentes
             st_row(n, ST_UNKNOWN, STT_TOGGLE, tr("st_unknown"), st_onoff(set_unknown)); n++;
-            st_row(n, ST_INSTALL, STT_ACTION, tr("st_install_url"), set_unknown ? "" : tr("st_needs_unknown")); n++;
+            st_row(n, ST_INSTALL, STT_ACTION, tr("st_install_url"), set_unknown ? "" : "-"); n++;        // sin origenes desconocidos no esta disponible (al pulsar se avisa)
             if (set_unknown) st_row(n, ST_STOREURL, STT_ACTION, tr("st_store_url"), set_store_url == "" ? tr("st_default") : fit_text(set_store_url, 380)); n++; end
             st_row(n, ST_ACCOUNTS, STT_ACTION, tr("m_accounts"), ""); n++;
             st_row(n, ST_TMDB, STT_ACTION, tr("m_tmdb"), tmdb_key == "" ? "-" : "********"); n++;
@@ -1626,6 +1630,9 @@ end
 // control de la pantalla de ajustes (sin Kodi no se entenderia: izquierda = categorias, derecha = opciones)
 function update_settings()
 begin
+    // L1 / R1 cambian de categoria estando en cualquier columna
+    if (act_press[A_SEEKB]) st_cat = (st_cat + 5) % 6; st_sel = 0; st_build(); return 0; end
+    if (act_press[A_SEEKF]) st_cat = (st_cat + 1) % 6; st_sel = 0; st_build(); return 0; end
     if (st_col == 0)
         if (act_press[A_UP])   st_cat = (st_cat + 5) % 6; st_sel = 0; st_build(); end
         if (act_press[A_DOWN]) st_cat = (st_cat + 1) % 6; st_sel = 0; st_build(); end
