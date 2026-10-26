@@ -185,3 +185,4 @@ m_dl_video=Video con audio (.mp4)
 m_dl_audio=Solo audio, sin convertir
 mt_dl_format=Formato de la descarga
 m_dl_conv=Convertir a
+s_files=Archivos

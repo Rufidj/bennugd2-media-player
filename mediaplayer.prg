@@ -34,7 +34,7 @@ const
     S_VIDEO = 0; S_SHADE_BOT = 1; S_SHADE_TOP = 2; S_BTN = 3;          // 3..11
     S_FOCUS = 12; S_BAR_BG = 13; S_BAR_FG = 14; S_KNOB = 15;
     S_BROWSE_BG = 16; S_SEL = 17; S_ROWICON = 18;                      // 18..29
-    S_HEADER = 30; S_PREVIEW = 31; S_PANEL = 32; S_VIZ = 33; S_MSEL = 34; S_BG = 35; S_WAVE = 36; S_HICON = 39; S_OVDIM = 45; S_OVBOX = 46; S_OVBG = 47; S_OVFG = 48; S_OVBTN = 49; S_OVICO = 50; S_COUNT = 51;
+    S_HEADER = 30; S_PREVIEW = 31; S_PANEL = 32; S_VIZ = 33; S_MSEL = 34; S_BG = 35; S_WAVE = 36; S_HICON = 39; S_OVDIM = 45; S_OVBOX = 46; S_OVBG = 47; S_OVFG = 48; S_OVBTN = 49; S_OVICO = 50; S_TABUL = 51; S_TABSEL = 52; S_COUNT = 53;
     HINT_Y = 684;
     OV_TY = 290; OV_BARY = 350; OV_PY = 392; OV_BY = 452;              // ventana de progreso: titulo, barra, porcentaje y boton (en la rejilla de 1280x720)
     GK_MAX = 8192;
@@ -160,6 +160,10 @@ global
     string store_dir = "", lists_dir = "", home_dir = "", downloads_dir = "";
     string wl_t[2048]; string wl_u[2048]; string wl_l[2048]; int wl_n;     // lista de trabajo
     int modal, modal_ver, mlbl_ver = -1;
+    // menu horizontal del inicio (estilo Kodi): secciones 0 Archivos, 1 Addons, 2 Tienda, 3 Mis listas, 4 Descargas
+    int tab_focus;                              // 1 = el foco esta en la barra de secciones
+    string s_tab[5]; int txt_tab[5]; int tab_x[5], tab_w[5]; int tab_key = -1;
+    int dlg_key = -1;                           // forma de la ventana del menu (para recolocar sus textos solo cuando cambia)
     string menu_title = "", menu_opt[10]; int menu_act[10], menu_n, menu_sel; string pick_name[10];
     int kb_secret, kb_secret_next;
     int syskb_off;                                // 1 = no hay teclado del sistema (PC) o fallo: se usa el propio
@@ -469,6 +473,7 @@ begin
     txt_ovt = write_var(fnt_t, ur(SW / 2), ur(OV_TY), -30, 4, s_ovt);
     txt_ovp = write_var(fnt_t, ur(SW / 2), ur(OV_PY), -30, 4, s_ovp);
     txt_ovh = write_var(fnt_t, ur(SW / 2), ur(OV_BY), -30, 4, s_ovh);
+    for (i = 0; i < 5; i++) txt_tab[i] = write_var(fnt_t, ur(0), ur(44), -20, 3, s_tab[i]); end
     create_sub_texts(sub_font_id(lang_script()));
 end
 
@@ -600,16 +605,7 @@ begin
     if (parent_of(cur_dir) != cur_dir)
         entries[0] = ".."; entry_dir[0] = 1; n_entries = 1;
     end
-    if (cur_dir == home_dir && cur_dir != lists_dir)
-        entries[n_entries] = tr("s_addons"); entry_dir[n_entries] = K_ADDONS; entry_size[n_entries] = 0; entry_logo[n_entries] = ""; n_entries++;
-    end
-    if (store_dir != "" && cur_dir == home_dir && cur_dir != lists_dir)
-        entries[n_entries] = tr("s_store"); entry_dir[n_entries] = K_STORE; entry_size[n_entries] = 0; entry_logo[n_entries] = ""; n_entries++;
-    end
-    if (store_dir != "" && cur_dir == home_dir && cur_dir != lists_dir)
-        entries[n_entries] = tr("m_mylists"); entry_dir[n_entries] = K_MYLISTS; entry_size[n_entries] = 0; entry_logo[n_entries] = ""; n_entries++;
-        entries[n_entries] = tr("s_downloads"); entry_dir[n_entries] = K_DOWNLOADS; entry_size[n_entries] = 0; entry_logo[n_entries] = ""; n_entries++;
-    end
+    // Addons, Tienda, Mis listas y Descargas ya no son filas del inicio: son las secciones de la barra de arriba (ver tab_goto)
     dh = diropen(join_path(cur_dir, "*"));
     if (dh)
         nm = dirread(dh);
@@ -704,6 +700,95 @@ begin
     return p;
 end
 
+// ---- secciones del inicio (menu horizontal, estilo Kodi)
+function int tab_count()
+begin
+    return store_dir != "" ? 5 : 2;
+end
+
+// seccion en la que esta el explorador (-1 = dentro de algo: un addon, una lista, una carpeta...: sin barra de secciones)
+function int cur_section()
+begin
+    if (xt_screen == 1 || cur_list != "" || addon_mode == 2) return -1; end
+    if (store_mode == 1) return 2; end
+    if (addon_mode == 1) return 1; end
+    if (store_dir != "" && cur_dir == lists_dir) return 3; end
+    if (store_dir != "" && cur_dir == downloads_dir) return 4; end
+    if (cur_dir == home_dir) return 0; end
+    return -1;
+end
+
+function string tab_name(int k)
+begin
+    switch (k)
+        case 0: return tr("s_files"); end
+        case 1: return tr("s_addons"); end
+        case 2: return tr("s_store"); end
+        case 3: return tr("m_mylists"); end
+    end
+    return tr("s_downloads");
+end
+
+function tab_goto(int k)
+begin
+    pv_idx = -1;
+    switch (k)
+        case 0: cur_list = ""; cur_dir = home_dir; read_dir(); end
+        case 1: read_addons(); end
+        case 2: store_open(); end
+        case 3: cur_list = ""; mkdir(lists_dir); cur_dir = lists_dir; read_dir(); end
+        case 4: cur_list = ""; mkdir(downloads_dir); cur_dir = downloads_dir; read_dir(); end
+    end
+end
+
+// true si ya se ha atendido la pulsacion (la barra de secciones la ha usado)
+function int update_tabs()
+private int ts, n, i;
+begin
+    ts = cur_section();
+    if (ts < 0) tab_focus = 0; return 0; end
+    n = tab_count();
+    if (act_press[A_SEEKB]) tab_goto((ts + n - 1) % n); return 1; end             // L1 / R1 cambian de seccion desde cualquier fila
+    if (act_press[A_SEEKF]) tab_goto((ts + 1) % n); return 1; end
+    // un toque sobre una seccion
+    if (touch_mode && act_press[A_OK] && touch_age <= 8 && touch_y < 84)
+        for (i = 0; i < n; i++)
+            if (touch_x >= tab_x[i] - 24 && touch_x <= tab_x[i] + tab_w[i] + 24) tab_goto(i); return 1; end
+        end
+    end
+    if (tab_focus)
+        if (act_press[A_LEFT])  tab_goto((ts + n - 1) % n); return 1; end
+        if (act_press[A_RIGHT]) tab_goto((ts + 1) % n); return 1; end
+        if (act_press[A_DOWN] || act_press[A_OK] || act_press[A_BACK]) tab_focus = 0; return 1; end
+        return 1;
+    end
+    // subir desde la primera fila lleva el foco a la barra
+    if (act_press[A_UP] && sel == (grid_mode == 1 ? sel % GRID_COLS : 0) && n_entries > 0)
+        if (grid_mode != 1 || sel < GRID_COLS) tab_focus = 1; return 1; end
+    end
+    return 0;
+end
+
+// la barra: los nombres de las secciones, la actual subrayada (y con la seleccion cuando tiene el foco)
+function draw_tabs(int ts)
+private int i, n, tx, k;
+begin
+    n = tab_count();
+    k = n * 100 + lang_ver * 7;
+    if (k != tab_key)
+        tab_key = k; tx = 60;
+        for (i = 0; i < n; i++)
+            s_tab[i] = tab_name(i); tab_w[i] = tw(s_tab[i]); tab_x[i] = tx;
+            write_move(txt_tab[i], ur(tx), ur(44));
+            tx += tab_w[i] + 60;
+        end
+    end
+    for (i = 0; i < n; i++) txt_want[txt_tab[i]] = 8589934336 + (i == ts ? 255 : (tab_focus ? 210 : 150)); end
+    put(S_TABUL, g_white, tab_x[ts] + tab_w[ts] / 2, 76, 100, tab_focus ? 0 : 255, -10);
+    spr_sizex[S_TABUL] = tab_w[ts] * 100 / 8; spr_sizey[S_TABUL] = 4 * 100 / 8;
+    if (tab_focus) put_sel(S_TABSEL, tab_x[ts] + tab_w[ts] / 2, 44, tab_w[ts] + 48, 52, -9); end
+end
+
 function update_browser()
 private int old, r;
 begin
@@ -712,6 +797,7 @@ begin
     if (dl_job == 1) dl_step(); return 0; end                      // descargando un video: solo se puede cancelar
     if (store_load) store_fetch(); return 0; end                   // la tienda se pide en el fotograma siguiente (primero addons y después listas)
     if (act_press[A_MUTE]) if (store_mode == 1) open_store_menu(); else open_context_menu(); end return 0; end
+    if (update_tabs()) return 0; end
     if (n_entries > 0)
         old = sel;
         if (grid_mode == 1)
@@ -904,7 +990,7 @@ begin
         addon_mode = 0; cur_dir = home_dir; read_dir();
     elseif (cur_list != "")
         cur_list = ""; read_dir();
-    elseif (store_dir != "" && cur_dir == lists_dir)
+    elseif (store_dir != "" && (cur_dir == lists_dir || cur_dir == downloads_dir))
         cur_dir = home_dir; read_dir();
     elseif (parent_of(cur_dir) != cur_dir)
         cur_dir = parent_of(cur_dir); read_dir();
@@ -1934,6 +2020,51 @@ begin
     end
 end
 
+// los textos del menu / teclado solo se rehacen al abrir o cambiar de pantalla
+function modal_labels()
+private int i;
+begin
+    if (mlbl_ver == modal_ver) return 0; end
+    if (modal == M_MENU)
+        s_mtitle = menu_title;
+        for (i = 0; i < 10; i++) s_mopt[i] = i < menu_n ? fit_text(menu_opt[i], 900) : ""; end
+        s_mhint = tr("h_menu");
+    else
+        s_mtitle = kb_title;
+        s_mhint = tr("h_kb");
+    end
+    mlbl_ver = modal_ver; dlg_key = -1;
+end
+
+// Menu de opciones al estilo Kodi: ventana centrada y translucida sobre el explorador atenuado, con titulo, una linea
+// y una barra de seleccion de ancho completo
+function draw_menu_dialog()
+private int i, w, h, x0, y0, k;
+begin
+    modal_labels();
+    w = tw(s_mtitle) + 120; if (w < 560) w = 560; end
+    for (i = 0; i < menu_n; i++) k = tw(s_mopt[i]) + 130; if (k > w) w = k; end end
+    if (w > 1100) w = 1100; end
+    h = 112 + menu_n * 52;
+    x0 = (SW - w) / 2; y0 = (SH - h) / 2;
+    put(S_OVDIM, g_ovdim, SW / 2, SH / 2, 100, 255, -21);
+    spr_sizex[S_OVDIM] = SW / 8 * 100; spr_sizey[S_OVDIM] = SH / 8 * 100;
+    put(S_OVBOX, g_ovbox, SW / 2, SH / 2, 100, 255, -22);
+    spr_sizex[S_OVBOX] = w * 100 / 8; spr_sizey[S_OVBOX] = h * 100 / 8;
+    put(S_OVBG, g_barbg, SW / 2, y0 + 78, 100, 255, -23);
+    spr_sizex[S_OVBG] = (w - 60) * 100 / 8; spr_sizey[S_OVBG] = 2 * 100 / 8;
+    k = (menu_n * 2000 + w) * 4096 + tw(s_mtitle);
+    if (k != dlg_key)                                // los textos se recolocan solo si cambia la forma de la ventana
+        dlg_key = k;
+        write_move(txt_mtitle, ur((SW - tw(s_mtitle)) / 2), ur(y0 + 40));
+        for (i = 0; i < 10; i++) write_move(txt_mopt[i], ur(x0 + 54), ur(y0 + 118 + i * 52)); end
+    end
+    txt_want[txt_mtitle] = 8589934336 + (255);
+    for (i = 0; i < menu_n; i++) txt_want[txt_mopt[i]] = 8589934336 + (i == menu_sel ? 255 : 190); end
+    put_sel(S_MSEL, SW / 2, y0 + 118 + menu_sel * 52, w - 36, 46, -24);
+    if (skin) hint_set(2); else txt_want[txt_mhint] = 8589934336 + (170); end
+end
+
 function draw_modal()
 private int i, bx, by, k; string t;
 begin
@@ -1955,17 +2086,7 @@ begin
         if (skin) hint_set(4); else txt_want[txt_mhint] = 8589934336 + (170); end
         return 0;
     end
-    if (mlbl_ver != modal_ver)                      // los textos solo se rehacen al abrir/cambiar de pantalla
-        if (modal == M_MENU)
-            s_mtitle = menu_title;
-            for (i = 0; i < 10; i++) s_mopt[i] = i < menu_n ? fit_text(menu_opt[i], 1040) : ""; end
-            s_mhint = tr("h_menu");
-        else
-            s_mtitle = kb_title;
-            s_mhint = tr("h_kb");
-        end
-        mlbl_ver = modal_ver;
-    end
+    modal_labels();
     txt_want[txt_mtitle] = 8589934336 + (255);
     if (modal == M_SYSKB)
         txt_want[txt_mhint] = 8589934336 + (0);
@@ -2291,6 +2412,7 @@ begin
     txt_want[txt_time] = 8589934336 + (0); txt_want[txt_title] = 8589934336 + (0); txt_want[txt_toast] = 8589934336 + (0);
     for (i = 0; i < 6; i++) txt_want[txt_sub[i]] = 8589934336 + (0); end
     for (i = 0; i < 7; i++) txt_want[txt_info[i]] = 8589934336 + (0); end
+    for (i = 0; i < 5; i++) txt_want[txt_tab[i]] = 8589934336 + (0); end
     txt_want[txt_amsg] = 8589934336 + (0); txt_want[txt_ovt] = 8589934336 + (0); txt_want[txt_ovp] = 8589934336 + (0); txt_want[txt_ovh] = 8589934336 + (0);
     txt_want[txt_mtitle] = 8589934336 + (0); txt_want[txt_mhint] = 8589934336 + (0); txt_want[txt_kbin] = 8589934336 + (0); for (i = 0; i < 6; i++) txt_want[txt_kbs[i]] = 8589934336 + (0); end
     for (i = 0; i < 10; i++) txt_want[txt_mopt[i]] = 8589934336 + (0); end
@@ -2298,7 +2420,7 @@ begin
     for (i = 0; i < 6; i++) txt_want[txt_h[i]] = 8589934336 + (0); end
     for (i = 0; i < 6; i += 2) txt_want[txt_sub[i]] = 4294967296; end
 
-    if (modal != M_NONE) draw_modal(); return 0; end
+    if (modal != M_NONE && !(modal == M_MENU && state == ST_BROWSE)) draw_modal(); return 0; end
 
     if (state == ST_BROWSE)
         // ---- explorador
@@ -2335,10 +2457,17 @@ begin
 
             lbl_ver = dir_ver; lbl_top = top_row;
         end
-        txt_want[txt_path] = 8589934336 + (255);
-        put(S_HEADER, g_icon[10], 42, 40, 40, 200, -10);
+        k = cur_section();
+        if (k >= 0)
+            draw_tabs(k);
+        else
+            txt_want[txt_path] = 8589934336 + (255);
+            put(S_HEADER, g_icon[10], 42, 40, 40, 200, -10);
+        end
         draw_bg();
-        if (skin) hint_set(store_mode == 1 ? 5 : 1); else txt_want[txt_hint] = 8589934336 + (150); end
+        if (modal == M_MENU)
+            // el menu de opciones se dibuja encima (ver mas abajo) con su propia barra de ayuda
+        elseif (skin) hint_set(store_mode == 1 ? 5 : 1); else txt_want[txt_hint] = 8589934336 + (150); end
 
         if (n_entries == 0 && !addon_busy)
             txt_want[txt_empty] = 8589934336 + (200);
@@ -2348,7 +2477,7 @@ begin
             if (rowi < n_entries)
                 by = ROW_Y0 + i * ROW_H + ROW_H / 2;
                 if (grid_mode == 1) by = grid_cy(i); end
-                txt_want[txt_row[i]] = 8589934336 + (rowi == sel ? 255 : 190);
+                txt_want[txt_row[i]] = 8589934336 + (rowi == sel && !tab_focus ? 255 : 190);
                 switch (entry_dir[rowi])
                     case K_DIR, K_MYLISTS, K_AFOLDER, K_DOWNLOADS: g = g_icon[10]; end
                     case K_ADDONS, K_ADDON: g = g_icon[16]; end
@@ -2369,10 +2498,10 @@ begin
                     else
                         put(S_ROWICON + i, g, grid_cx(i), by - 26, 48, rowi == sel ? 255 : 170, -10);
                     end
-                    if (rowi == sel) put_sel(S_SEL, grid_cx(i), by - 26, 150, 118, 2); end
+                    if (rowi == sel && !tab_focus) put_sel(S_SEL, grid_cx(i), by - 26, 150, 118, 2); end
                 else
                     put(S_ROWICON + i, g, 70, by, 38, rowi == sel ? 255 : 170, -10);
-                    if (rowi == sel) put_sel(S_SEL, 382, by, 700, ROW_H, 2); end
+                    if (rowi == sel && !tab_focus) put_sel(S_SEL, 382, by, 700, ROW_H, 2); end
                 end
             end
         end
@@ -2395,6 +2524,7 @@ begin
         if (pv_phase == 3) s_info[2] = tr("s_nopreview"); end
         if (addon_busy && !ov_on) txt_want[txt_amsg] = 8589934336 + (255); end
         if (ov_on) draw_overlay(); end
+        if (modal == M_MENU) draw_menu_dialog(); end
         if (toast_t > 0) toast_t--; end
         if (toast_t > 0) txt_want[txt_toast] = 8589934336 + (255); end
         return 0;

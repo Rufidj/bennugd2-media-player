@@ -184,3 +184,4 @@ m_dl_video=映像と音声 (.mp4)
 m_dl_audio=音声のみ（変換なし）
 mt_dl_format=ダウンロード形式
 m_dl_conv=変換:
+s_files=ファイル

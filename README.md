@@ -50,8 +50,10 @@ On the PS5 the player uses the console's own system dialogs: the on-screen keybo
 | □ | M | options (browser) / mute (player) |
 | △ | S | subtitles |
 | Start | Space | pause |
-| L1 / R1 | N / P | -10 s / +10 s |
+| L1 / R1 | N / P | -10 s / +10 s (player); previous / next section (home) |
 | Touchpad | A | next audio track |
+
+The home screen has a menu bar on top, like Kodi's: **Files, Addons, Store, My lists, Downloads**. Press up on the first row to put the focus on the bar, then left / right changes the section and down (or ✕) goes back to the list; L1 / R1 change the section from any row, and a tap on the phone or TV works too. The options menu and the other menus are centred windows over the dimmed screen. The backgrounds (skins) are not affected.
 
 On Android the app turns the finger gestures into the keys the player already knows:
 
