@@ -182,5 +182,6 @@ t_dl_cancel=Download cancelled
 t_dl_fail=The download failed
 t_dl_deleted=Download deleted
 m_dl_video=Video with audio (.mp4)
-m_dl_audio=Audio only (.m4a, .mp3...)
+m_dl_audio=Audio only, as it is
 mt_dl_format=Download format
+m_dl_conv=Convert to

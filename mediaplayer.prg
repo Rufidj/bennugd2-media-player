@@ -60,7 +60,7 @@ const
     MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
     MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_TMDB = 28; MA_ASET = 300; MA_PICK = 100;
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
-    MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27; MA_DOWNLOAD = 29; MA_DELETE_DL = 30; MA_DELETE_DL_YES = 31; MA_DL_VIDEO = 32; MA_DL_AUDIO = 33;
+    MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27; MA_DOWNLOAD = 29; MA_DELETE_DL = 30; MA_DELETE_DL_YES = 31; MA_DL_VIDEO = 32; MA_DL_AUDIO = 33; MA_DL_FMT = 400;
 end
 
 global
@@ -1567,6 +1567,7 @@ begin
 end
 
 function menu_run(int act)
+private int k;
 begin
     modal = M_NONE;
     switch (act)
@@ -1581,14 +1582,14 @@ begin
         case MA_ABOUT: credits_open(); end
         case MA_TMDB:  kb_open(tr("k_tmdb"), tmdb_key, KB_TMDB); end
         case MA_DOWNLOAD:
-            if (dl_possible(sel) == 1)
-                // un video: se elige el formato (la musica solo tiene audio y se baja directamente)
-                dl_pick = sel;
-                menu_clear(); menu_add(tr("m_dl_video"), MA_DL_VIDEO); menu_add(tr("m_dl_audio"), MA_DL_AUDIO); menu_add(tr("m_cancel"), MA_CANCEL);
-                menu_show(tr("mt_dl_format"));
-            else
-                dl_start(sel, 0);
-            end
+            // se elige el formato: el video tal cual, el audio original o el audio convertido a otro formato
+            dl_pick = sel;
+            menu_clear();
+            if (dl_possible(sel) == 1) menu_add(tr("m_dl_video"), MA_DL_VIDEO); end
+            menu_add(tr("m_dl_audio"), MA_DL_AUDIO);
+            for (k = 0; k < 5; k++) menu_add(tr("m_dl_conv") + " " + dl_fmt_name(k), MA_DL_FMT + k); end
+            menu_add(tr("m_cancel"), MA_CANCEL);
+            menu_show(tr("mt_dl_format"));
         end
         case MA_DL_VIDEO: dl_start(dl_pick, 0); end
         case MA_DL_AUDIO: dl_start(dl_pick, 1); end
@@ -1652,6 +1653,7 @@ begin
         end
         default:
             if (act >= MA_ASET && act < MA_ASET + 24) addon_edit_setting(act - MA_ASET); end
+            if (act >= MA_DL_FMT && act < MA_DL_FMT + 5) dl_start(dl_pick, 10 + act - MA_DL_FMT); end
             if (act >= MA_PICK && act < MA_PICK + 9)
                 if (add_to_list(join_path(lists_dir, pick_name[act - MA_PICK]), op_title, op_url, op_logo)) toast(tr("t_added")); end
             end

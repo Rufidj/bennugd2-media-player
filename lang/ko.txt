@@ -181,5 +181,6 @@ t_dl_cancel=다운로드가 취소되었습니다
 t_dl_fail=다운로드에 실패했습니다
 t_dl_deleted=다운로드를 삭제했습니다
 m_dl_video=영상과 오디오 (.mp4)
-m_dl_audio=오디오만 (.m4a, .mp3...)
+m_dl_audio=오디오만 (변환 없음)
 mt_dl_format=다운로드 형식
+m_dl_conv=변환:

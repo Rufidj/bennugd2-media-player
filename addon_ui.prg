@@ -954,14 +954,29 @@ begin
     return 0;
 end
 
-// audio = 1: solo el sonido (.m4a, .mp3, .opus...: el motor elige segun el codec); si no, el video con su audio en un .mp4
-function dl_start(int i, int audio)
-private string dname, dpath, durl, dhdr, dext; int r, dn, c, k;
+// formatos a los que se puede convertir el audio: nombre en el motor, extension y texto del menu
+function string dl_fmt_id(int k)
+begin
+    switch (k) case 0: return "mp3"; end case 1: return "opus"; end case 2: return "flac"; end case 3: return "wav"; end default: return "aac"; end end
+end
+function string dl_fmt_ext(int k)
+begin
+    switch (k) case 0: return ".mp3"; end case 1: return ".opus"; end case 2: return ".flac"; end case 3: return ".wav"; end default: return ".m4a"; end end
+end
+function string dl_fmt_name(int k)
+begin
+    switch (k) case 0: return "MP3"; end case 1: return "Opus"; end case 2: return "FLAC"; end case 3: return "WAV"; end default: return "AAC (.m4a)"; end end
+end
+
+// mode: 0 = el video con su audio en un .mp4; 1 = solo el audio tal cual (.m4a, .mp3, .opus...: el motor elige segun el codec);
+// 10..14 = el audio convertido a mp3 / opus / flac / wav / aac
+function dl_start(int i, int mode)
+private string dname, dpath, durl, dhdr, dext; int r, dn, c, k, audio;
 begin
     if (store_dir == "") toast(tr("t_no_store")); return 0; end
     if (dl_job || !dl_possible(i)) return 0; end
     durl = entry_url[i]; dhdr = entry_aargs[i];
-    if (dl_possible(i) == 2) audio = 1; end
+    audio = mode >= 1; if (dl_possible(i) == 2) audio = 1; end
     if (entry_dir[i] == K_AFOLDER)
         // se ejecuta la pagina del elemento (la lista de la pantalla sigue como esta: no se toca) y se coge su primer video (o audio)
         if (addon_run(entry_url[i], entry_aargs[i]) != 0) return 0; end
@@ -971,7 +986,7 @@ begin
         if (ad_it_kind[k] == 2) audio = 1; end
         durl = ad_it_url[k]; dhdr = ad_it_hdr[k];
     end
-    dext = audio ? ".m4a" : ".mp4";
+    dext = mode >= 10 ? dl_fmt_ext(mode - 10) : (audio ? ".m4a" : ".mp4");
     mkdir(downloads_dir);
     dname = "";
     for (r = 0; r < len(entries[i]); r++)                                     // sin los caracteres que un nombre de fichero no admite
@@ -982,7 +997,9 @@ begin
     if (dname == "") dname = "video"; end
     dpath = join_path(downloads_dir, dname + dext); dn = 1;
     while (fexists(dpath)) dn++; dpath = join_path(downloads_dir, dname + " (" + dn + ")" + dext); end
-    if (audio) r = video_download_audio_begin(durl, dhdr, dpath); else r = video_download_begin(durl, dhdr, dpath); end
+    if (mode >= 10) r = video_download_convert_begin(durl, dhdr, dpath, dl_fmt_id(mode - 10));
+    elseif (audio) r = video_download_audio_begin(durl, dhdr, dpath);
+    else r = video_download_begin(durl, dhdr, dpath); end
     if (r != 0) toast(tr("t_dl_fail")); return 0; end
     dl_job = 1; dl_path = dpath; dl_title = entries[i];
     s_amsg = tr("s_downloading") + " " + dl_title; addon_busy = 1;
