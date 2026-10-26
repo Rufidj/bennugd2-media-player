@@ -7,7 +7,7 @@
 
 addon "Jellyfin"
 id jellyfin
-version 0.2
+version 0.3
 author "BennuGD2 Media Player"
 description "Movies, shows and music from your own Jellyfin server (or the public demo server)."
 
@@ -55,7 +55,7 @@ page home:
     show folder "Sign out" opening signout
 
 page resume:
-    fetch json from "{base()}/Items/Resume?userId={userid}&MediaTypes=Video&Fields=Overview,ProductionYear,RunTimeTicks&Limit=100" with header "Authorization" is auth()
+    fetch json from "{base()}/Users/{userid}/Items/Resume?MediaTypes=Video&Fields=Overview,ProductionYear,RunTimeTicks&Limit=100" with header "Authorization" is auth()
     for each item in result.Items:
         show_entry(item)
 

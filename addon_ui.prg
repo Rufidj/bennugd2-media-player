@@ -242,6 +242,7 @@ begin
         end
         entries[j + 1] = t_s; entry_dir[j + 1] = t_d; entry_url[j + 1] = t_u; entry_info[j + 1] = t_i; entry_logo[j + 1] = t_l;
     end
+    auto_grid();
     lbl_ver = -1;
 end
 
@@ -266,6 +267,7 @@ begin
         end
         n_entries++;
     end
+    auto_grid();
     lbl_ver = -1;
 end
 
@@ -693,7 +695,7 @@ begin
             aid = field_of(line, "|", 1); nm = field_of(line, "|", 2); ver = field_of(line, "|", 3); files = field_of(line, "|", 4); desc = field_of(line, "|", 5);
             if (aid != "" && nm != "")
                 entries[n_entries] = nm; entry_dir[n_entries] = K_SITEM; entry_url[n_entries] = aid;
-                entry_size[n_entries] = 0; entry_logo[n_entries] = ""; entry_info[n_entries] = desc;
+                entry_size[n_entries] = 0; entry_logo[n_entries] = (find(files, "logo.png") >= 0) ? store_root() + "/" + aid + "/logo.png" : ""; entry_info[n_entries] = desc;
                 entry_sver[n_entries] = ver; entry_sfiles[n_entries] = files; entry_siver[n_entries] = installed_ver(aid);
                 entry_skind[n_entries] = 0; entry_surl[n_entries] = "";
                 n_entries++;
@@ -770,6 +772,7 @@ begin
         txt = store_get_text(store_root() + "/lists.txt", join_path(d, "lists.txt"));
         store_load = 0; addon_busy = 0; s_amsg = "";
         if (txt != "") store_lists_parse(txt); end               // si el repositorio no trae lists.txt, no pasa nada
+        auto_grid();
         if (store_cached) toast(tr("t_store_off")); end
         return 1;
     end

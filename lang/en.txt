@@ -226,3 +226,7 @@ m_yes_clear=Yes, clear
 t_cache_cleared=Cache cleared
 t_addon_installed=Addon installed:
 t_addon_fail=The addon could not be installed
+st_view=List view
+st_view_list=List
+st_view_grid=Posters
+st_view_auto=Automatic

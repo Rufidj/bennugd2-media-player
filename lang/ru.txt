@@ -225,3 +225,7 @@ m_yes_clear=Да, очистить
 t_cache_cleared=Кэш очищен
 t_addon_installed=Дополнение установлено:
 t_addon_fail=Не удалось установить дополнение
+st_view=Вид списков
+st_view_list=Список
+st_view_grid=Постеры
+st_view_auto=Автоматически

@@ -225,3 +225,7 @@ m_yes_clear=是，清除
 t_cache_cleared=缓存已清除
 t_addon_installed=已安装附加组件：
 t_addon_fail=无法安装附加组件
+st_view=列表视图
+st_view_list=列表
+st_view_grid=海报
+st_view_auto=自动

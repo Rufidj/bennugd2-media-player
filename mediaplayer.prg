@@ -64,7 +64,7 @@ const
     // ajustes: tipo de fila y su identificador
     STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
     ST_LANG = 1; ST_SKIN = 2; ST_PREVIEW = 3; ST_SEEK = 4; ST_VIZ = 5; ST_UNKNOWN = 6; ST_INSTALL = 7; ST_STOREURL = 8; ST_ACCOUNTS = 9; ST_TMDB = 10;
-    ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17;
+    ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18;
     APP_VERSION = "1.2";
 end
 
@@ -169,6 +169,7 @@ global
     int tab_focus, tab_cur;                     // 1 = el foco esta en la barra de secciones; tab_cur = la casilla con el foco
     // ajustes (guardados en config.cfg)
     int set_preview = 1, set_seek = 1, set_unknown, set_dlfmt;
+    int set_view = 2;                           // listados con imagenes: 0 lista, 1 caratulas, 2 automatico
     string set_store_url = "";
     // pantalla de ajustes (estilo Kodi): categorias a la izquierda, opciones a la derecha
     int st_cat, st_col, st_sel, st_n;           // categoria, columna con el foco (0 categorias, 1 opciones), fila, filas
@@ -1188,6 +1189,18 @@ begin
     frame;
 end
 
+// Decide si un listado se dibuja como cuadricula de caratulas: cuando la mayoria de sus elementos traen imagen (segun el ajuste)
+function auto_grid()
+private int i, nlogo;
+begin
+    nlogo = 0;
+    for (i = 1; i < n_entries; i++) if (entry_logo[i] != "") nlogo++; end end
+    grid_mode = 0;
+    if (set_view == 1 && nlogo > 0) grid_mode = 1; end
+    if (set_view == 2 && nlogo >= 2 && nlogo * 2 >= n_entries - 1) grid_mode = 1; end
+    top_row = 0;
+end
+
 // Pide los logos de las casillas visibles y los va abriendo (uno por fotograma)
 function update_cell_logos()
 private int i, rowi;
@@ -1200,6 +1213,7 @@ begin
                 cell_logo[i] = entry_logo[rowi];
                 cell_file[i] = join_path(logo_dir(), "l" + url_hash(entry_logo[rowi]) + ".img");
                 cell_state[i] = fexists(cell_file[i]) ? 2 : 0;
+                if (substr(entry_logo[rowi], 0, 4) != "http" && fexists(entry_logo[rowi])) cell_file[i] = entry_logo[rowi]; cell_state[i] = 2; end      // imagen local (el logo de un addon)
                 cell_tmdb[i] = 0;
                 if (cell_map[i] > 0) map_del(0, cell_map[i]); end
                 cell_map[i] = 0;
@@ -1466,6 +1480,7 @@ begin
             if (k == "unk") set_unknown = atoi(v) ? 1 : 0; end
             if (k == "dlfmt") set_dlfmt = atoi(v); if (set_dlfmt < 0 || set_dlfmt > 3) set_dlfmt = 0; end end
             if (k == "storeurl") set_store_url = v; end
+            if (k == "view") set_view = atoi(v); if (set_view < 0 || set_view > 2) set_view = 2; end end
         end
     end
     fclose(fh);
@@ -1485,6 +1500,7 @@ begin
     fputs(fh, "unk=" + set_unknown);
     fputs(fh, "dlfmt=" + set_dlfmt);
     fputs(fh, "storeurl=" + set_store_url);
+    fputs(fh, "view=" + set_view);
     fclose(fh);
 end
 
@@ -1523,6 +1539,7 @@ begin
         case 0:                                                  // interfaz
             st_row(n, ST_LANG, STT_CHOICE, tr("st_lang"), tr("lang_name")); n++;
             st_row(n, ST_SKIN, STT_CHOICE, tr("st_skin"), skin ? tr("skin_ps") : tr("skin_classic")); n++;
+            st_row(n, ST_VIEW, STT_CHOICE, tr("st_view"), set_view == 0 ? tr("st_view_list") : (set_view == 1 ? tr("st_view_grid") : tr("st_view_auto"))); n++;
             st_row(n, ST_PREVIEW, STT_TOGGLE, tr("st_preview"), st_onoff(set_preview)); n++;
         end
         case 1:                                                  // reproduccion
@@ -1570,6 +1587,7 @@ begin
             cfg_save();
         end
         case ST_SKIN: skin = !skin; cfg_save(); end
+        case ST_VIEW: set_view = (set_view + 3 + d) % 3; cfg_save(); if (xt_screen == 0 && (addon_mode > 0 || store_mode == 1)) auto_grid(); end end
         case ST_PREVIEW: set_preview = !set_preview; if (!set_preview) close_preview(); pv_idx = -1; end cfg_save(); end
         case ST_SEEK: set_seek = (set_seek + 4 + d) % 4; cfg_save(); end
         case ST_VIZ: viz_mode = !viz_mode; end
@@ -2768,8 +2786,14 @@ begin
                     if (cell_map[i] > 0)
                         // el logo del canal, centrado en la casilla
                         k = 0; w = graphic_info(0, cell_map[i], G_WIDTH); h = graphic_info(0, cell_map[i], G_HEIGHT);
-                        if (w > 0) k = 10000 / w; end
-                        if (h > 0 && 6000 / h < k) k = 6000 / h; end   // que el logo no llegue al nombre
+                        if (addon_mode > 0 || store_mode == 1)
+                            // caratulas de addons: mas grandes que los logos de canal (150 x 110 como maximo)
+                            if (w > 0) k = 15000 / w; end
+                            if (h > 0 && 11000 / h < k) k = 11000 / h; end
+                        else
+                            if (w > 0) k = 10000 / w; end
+                            if (h > 0 && 6000 / h < k) k = 6000 / h; end   // que el logo no llegue al nombre
+                        end
                         put(S_ROWICON + i, cell_map[i], grid_cx(i), by - 26, k, rowi == sel ? 255 : 210, -10);
                     else
                         put(S_ROWICON + i, g, grid_cx(i), by - 26, 48, rowi == sel ? 255 : 170, -10);

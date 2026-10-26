@@ -225,3 +225,7 @@ m_yes_clear=예, 지우기
 t_cache_cleared=캐시를 지웠습니다
 t_addon_installed=애드온을 설치했습니다:
 t_addon_fail=애드온을 설치하지 못했습니다
+st_view=목록 보기
+st_view_list=목록
+st_view_grid=포스터
+st_view_auto=자동

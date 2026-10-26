@@ -225,3 +225,7 @@ m_yes_clear=はい、消去する
 t_cache_cleared=キャッシュを消去しました
 t_addon_installed=アドオンをインストールしました:
 t_addon_fail=アドオンをインストールできませんでした
+st_view=一覧の表示
+st_view_list=リスト
+st_view_grid=ポスター
+st_view_auto=自動
