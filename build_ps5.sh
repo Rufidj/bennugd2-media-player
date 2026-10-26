@@ -40,12 +40,19 @@ elif [ "$(stat -c%s "$STAGE/sce_sys/pic0.dds" 2>/dev/null)" != "$PIC_BYTES" ] ||
     echo "aviso: se genera el titulo sin fondos de presentacion (hacen falta pic0.dds y pic1.dds en 3840x2160 BC7 DX10)"
 fi
 
+# TITLE_ID=PPSA000NN (y opcionalmente TITLE_NAME) construye una variante con otro id, para probar sin tocar el titulo instalado
+TITLE_ID="${TITLE_ID:-PPSA00090}"; TITLE_NAME="${TITLE_NAME:-BennuGD2 Media Player}"
+if [ "$TITLE_ID" != "PPSA00090" ] || [ "$TITLE_NAME" != "BennuGD2 Media Player" ]; then
+    NUM="${TITLE_ID#PPSA}"
+    sed -i "s/PPSA00090/$TITLE_ID/g; s/\"conceptId\": \"00090\"/\"conceptId\": \"$NUM\"/; s/\"titleName\": \"BennuGD2 Media Player\"/\"titleName\": \"$TITLE_NAME\"/" "$STAGE/sce_sys/param.json"
+fi
+
 # 3. motor + eboot + carpeta del titulo
 cd "$ENGINE"
-PS5_TITLE_ID=PPSA00090 \
-PS5_TITLE_NAME="BennuGD2 Media Player" \
+PS5_TITLE_ID="$TITLE_ID" \
+PS5_TITLE_NAME="$TITLE_NAME" \
 PS5_SCE_SYS="$STAGE/sce_sys" \
 PS5_DCB="$HERE/mediaplayer.dcb" \
 PS5_ASSETS="$STAGE" \
-PS5_OUT="${OUT:-$HOME/BennuGD2 Media Player/PPSA00090}" \
+PS5_OUT="${OUT:-$HOME/BennuGD2 Media Player/$TITLE_ID}" \
 ./build.sh ps5
