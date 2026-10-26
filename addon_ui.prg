@@ -34,6 +34,9 @@ global
     int    store_jkind;                 // 0 = addon, 1 = lista de TV/radio
     string store_jurl, store_jfile;     // lista: de dónde se baja y con qué nombre se guarda
     int    store_jreq, store_jcur;      // una descarga en segundo plano en curso, y el numero de fichero que baja
+    int    dl_job;                      // 1 = descargando un video a "Descargas"
+    string dl_path, dl_title;
+    int    prog_status;                 // lo que contesto la barra del sistema en este fotograma (3 = el usuario pulso cancelar)
     int    prog_on, prog_off, prog_last;  // barra de progreso del sistema (PS5): abierta / no disponible / ultimo valor puesto
     string store_seen[64]; int store_seen_n;   // carpetas ya listadas (el addon del usuario manda sobre el que trae el reproductor)
 end
@@ -770,12 +773,12 @@ begin
 end
 
 // ---- barra de progreso del sistema (PS5). Si no hay (PC) o falla, no pasa nada: queda el texto propio de la pantalla
-function prog_start(string caption)
+function prog_start(string caption, int cancel)
 private int r;
 begin
     if (prog_on || prog_off) return 0; end
-    r = system_progress_open(caption);
-    if (r == 0) prog_on = 1; prog_last = -1; else prog_off = 1; end
+    r = system_progress_open(caption, cancel);
+    if (r == 0) prog_on = 1; prog_last = -1; prog_status = 0; else if (r != -2) prog_off = 1; end end
 end
 
 function prog_stop()
@@ -833,7 +836,7 @@ begin
     end
     store_jreq = 0; store_jcur = 0;
     s_amsg = tr("s_installing") + " " + store_jname; addon_busy = 1;
-    prog_start(tr("s_installing") + " " + store_jname);
+    prog_start(tr("s_installing") + " " + store_jname, 0);
 end
 
 // una descarga por vez, en segundo plano: cada fotograma se mira como va (la pantalla y la barra del sistema siguen vivas)
@@ -902,6 +905,53 @@ begin
         end
     else
         s_amsg = tr("s_installing") + " " + store_jname + "  " + store_ji + "/" + store_jn;
+    end
+end
+
+// ---- guardar un video de un addon en "Descargas": el motor copia video y audio a un .mp4 en segundo plano
+function dl_start(int i)
+private string dname, dpath; int r, dn, c;
+begin
+    if (store_dir == "") toast(tr("t_no_store")); return 0; end
+    if (dl_job || i <= 0 || i >= n_entries || entry_dir[i] != K_URL) return 0; end
+    mkdir(downloads_dir);
+    dname = "";
+    for (r = 0; r < len(entries[i]); r++)                                     // sin los caracteres que un nombre de fichero no admite
+        c = asc(substr(entries[i], r, 1));
+        if (c == 47 || c == 92 || c == 58 || c == 42 || c == 63 || c == 34 || c == 60 || c == 62 || c == 124 || c < 32) dname = dname + "_"; else dname = dname + substr(entries[i], r, 1); end
+    end
+    while (len(dname) > 80) dname = utf8_chop(dname); end
+    if (dname == "") dname = "video"; end
+    dpath = join_path(downloads_dir, dname + ".mp4"); dn = 1;
+    while (fexists(dpath)) dn++; dpath = join_path(downloads_dir, dname + " (" + dn + ").mp4"); end
+    r = video_download_begin(entry_url[i], entry_aargs[i], dpath);            // en un video de addon, aargs lleva las cabeceras
+    if (r != 0) toast(tr("t_dl_fail")); return 0; end
+    dl_job = 1; dl_path = dpath; dl_title = entries[i];
+    s_amsg = tr("s_downloading") + " " + dl_title; addon_busy = 1;
+    prog_start(tr("s_downloading") + " " + dl_title, 1);                     // con boton de cancelar
+end
+
+// un paso por fotograma: se cancela con el boton de la ventana del sistema (PS5) o con atras (PC)
+function dl_step()
+private int st, p; string why;
+begin
+    if ((prog_on && prog_status == 3) || (!prog_on && act_press[A_BACK])) video_download_cancel(); end
+    st = video_download_poll();
+    if (st == -1)
+        p = video_download_percent();
+        if (prog_on && p != prog_last) system_progress_set(p); prog_last = p; end
+        s_amsg = tr("s_downloading") + " " + dl_title + "  " + p + "%";
+        return 0;
+    end
+    dl_job = 0; addon_busy = 0; s_amsg = ""; prog_stop();
+    if (st == 0)
+        toast(tr("t_dl_ok") + " " + dl_title);
+    elseif (st == -2)
+        fremove(dl_path); toast(tr("t_dl_cancel"));
+    else
+        why = video_download_error();
+        fremove(dl_path);
+        show_error(tr("s_downloads"), tr("t_dl_fail") + ": " + why);
     end
 end
 

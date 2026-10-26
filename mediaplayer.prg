@@ -49,7 +49,7 @@ const
     MAX_ENTRIES = 2047;
 
     ST_BROWSE = 0; ST_PLAY = 1;
-    K_FILE = 0; K_DIR = 1; K_LIST = 2; K_URL = 3; K_MYLISTS = 4; K_ADDONS = 5; K_ADDON = 6; K_AFOLDER = 7; K_STORE = 8; K_SITEM = 9;
+    K_FILE = 0; K_DIR = 1; K_LIST = 2; K_URL = 3; K_MYLISTS = 4; K_ADDONS = 5; K_ADDON = 6; K_AFOLDER = 7; K_STORE = 8; K_SITEM = 9; K_DOWNLOADS = 10;
     K_XCAT = 12; K_XSTR = 13; K_XSER = 14;   // entradas de una pantalla de Xtream (categoría, canal, serie)
     // tienda de addons: repositorio oficial del reproductor (se puede apuntar a otro con MP_STORE_URL)
     STORE_URL = "https://raw.githubusercontent.com/Rufidj/bennugd2-media-player/main/addons";
@@ -57,9 +57,9 @@ const
     KB_NEWLIST = 1; KB_RENAME_LIST = 2; KB_URL = 3; KB_NEW_TITLE = 4; KB_ENTRY_TITLE = 5; KB_LOGO = 6; KB_ADDON = 7; KB_ASET = 8;
     KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11; KB_AUTH_SERVER = 12; KB_TMDB = 13;
     MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
-    MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_TMDB = 20; MA_ASET = 300; MA_PICK = 100;
+    MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_TMDB = 28; MA_ASET = 300; MA_PICK = 100;
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
-    MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27;
+    MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27; MA_DOWNLOAD = 29; MA_DELETE_DL = 30; MA_DELETE_DL_YES = 31;
 end
 
 global
@@ -156,7 +156,7 @@ global
     int txt_cache[128];
     int txt_want[128];
     // almacen y editor de listas
-    string store_dir = "", lists_dir = "", home_dir = "";
+    string store_dir = "", lists_dir = "", home_dir = "", downloads_dir = "";
     string wl_t[2048]; string wl_u[2048]; string wl_l[2048]; int wl_n;     // lista de trabajo
     int modal, modal_ver, mlbl_ver = -1;
     string menu_title = "", menu_opt[10]; int menu_act[10], menu_n, menu_sel; string pick_name[10];
@@ -328,7 +328,7 @@ begin
             load_wait--;
             if (load_wait == 0) s_toast = ""; toast_t = 0; start_video(load_path); load_path = ""; end
         end
-        if (prog_on) system_progress_update(); end                                                    // la barra de progreso del sistema (PS5) avanza con cada fotograma
+        if (prog_on) prog_status = system_progress_update(); end                                                    // la barra de progreso del sistema (PS5) avanza con cada fotograma
         if (modal != M_NONE) update_modal(); elseif (state == ST_BROWSE) update_browser(); else update_player(); end
         layout_all();
         apply_texts();
@@ -602,6 +602,7 @@ begin
     end
     if (store_dir != "" && cur_dir == home_dir && cur_dir != lists_dir)
         entries[n_entries] = tr("m_mylists"); entry_dir[n_entries] = K_MYLISTS; entry_size[n_entries] = 0; entry_logo[n_entries] = ""; n_entries++;
+        entries[n_entries] = tr("s_downloads"); entry_dir[n_entries] = K_DOWNLOADS; entry_size[n_entries] = 0; entry_logo[n_entries] = ""; n_entries++;
     end
     dh = diropen(join_path(cur_dir, "*"));
     if (dh)
@@ -702,6 +703,7 @@ private int old, r;
 begin
     if (xt_job) xt_step(); return 0; end                          // Xtream: cargando categorías o canales
     if (store_job == 1) store_step(); return 0; end                // instalando: no se atiende al mando
+    if (dl_job == 1) dl_step(); return 0; end                      // descargando un video: solo se puede cancelar
     if (store_load) store_fetch(); return 0; end                   // la tienda se pide en el fotograma siguiente (primero addons y después listas)
     if (act_press[A_MUTE]) if (store_mode == 1) open_store_menu(); else open_context_menu(); end return 0; end
     if (n_entries > 0)
@@ -785,6 +787,10 @@ begin
             switch (entry_dir[sel])
                 case K_DIR:  s_info[1] = tr("s_folder"); end
                 case K_LIST: s_info[1] = tr("s_linklist"); end
+                case K_DOWNLOADS:
+                    wrap_text(tr("s_downloads_info"), 420, 4);
+                    for (k = 0; k < wrap_n; k++) s_info[1 + k] = wrap_l[k]; end
+                end
                 case K_MYLISTS:
                     wrap_text(tr("s_mylists_info"), 420, 2);
                     for (k = 0; k < wrap_n; k++) s_info[1 + k] = wrap_l[k]; end
@@ -929,6 +935,8 @@ begin
         cur_dir = join_path(cur_dir, entries[i]); read_dir();
     elseif (entry_dir[i] == K_MYLISTS)
         cur_dir = lists_dir; read_dir();
+    elseif (entry_dir[i] == K_DOWNLOADS)
+        mkdir(downloads_dir); cur_dir = downloads_dir; read_dir();
     elseif (entry_dir[i] == K_ADDONS)
         read_addons();
     elseif (entry_dir[i] == K_STORE)
@@ -1368,7 +1376,7 @@ begin
         // el motor guarda en memoria y asi los ajustes y las listas funcionan al menos en esta sesion
         if (getenv("MP_STORE") != "") store_dir = getenv("MP_STORE"); else store_dir = c[4]; end
     end
-    lists_dir = join_path(store_dir, "listas");
+    lists_dir = join_path(store_dir, "listas"); downloads_dir = join_path(store_dir, "descargas");
     mkdir(store_dir); mkdir(lists_dir); mkdir(join_path(store_dir, "addons")); mkdir(join_path(store_dir, "addons_data"));
     say("MediaPlayer: almacen = [" + store_dir + "]");
 end
@@ -1496,6 +1504,8 @@ private string nm;
 begin
     menu_clear();
     if (addon_mode > 0)
+        // un video de un addon se puede guardar en la consola (los avisos de radio y audio no)
+        if (addon_mode == 2 && sel > 0 && sel < n_entries && entry_dir[sel] == K_URL && entry_akind[sel] == 1) menu_add(tr("m_download"), MA_DOWNLOAD); end
         if (addon_mode == 2 || (sel > 0 && sel < n_entries && entry_dir[sel] == K_ADDON)) menu_add(tr("m_addon_settings"), MA_ASETTINGS); end
         menu_add(tr("m_settings"), MA_SETTINGS);
         menu_add(tr("m_cancel"), MA_CANCEL);
@@ -1520,6 +1530,7 @@ begin
             menu_add(tr("m_list_account"), MA_LIST_ACCOUNT);
         elseif (sel >= 0 && sel < n_entries && entry_dir[sel] == K_FILE)
             menu_add(tr("m_add_to"), MA_ADD_TO);
+            if (cur_dir == downloads_dir) menu_add(tr("m_delete_dl"), MA_DELETE_DL); end
         end
         menu_add(tr("m_new_list"), MA_NEW_LIST);
         menu_add(tr("m_open_list"), MA_OPEN_LIST);
@@ -1563,6 +1574,13 @@ begin
         end
         case MA_ABOUT: credits_open(); end
         case MA_TMDB:  kb_open(tr("k_tmdb"), tmdb_key, KB_TMDB); end
+        case MA_DOWNLOAD: dl_start(sel); end
+        case MA_DELETE_DL:
+            op_path = join_path(cur_dir, entries[sel]);
+            menu_clear(); menu_add(tr("m_yes_delete") + " \"" + cut_text(utf8_to_latin1(entries[sel]), 24) + "\"", MA_DELETE_DL_YES); menu_add(tr("m_no"), MA_CANCEL);
+            menu_show(tr("mt_sure"));
+        end
+        case MA_DELETE_DL_YES: fremove(op_path); toast(tr("t_dl_deleted")); read_dir(); end
         case MA_STORE_REFRESH: store_open(); end
         case MA_SKIN:
             skin = !skin; cfg_save(); open_settings_menu(1);
@@ -2313,7 +2331,7 @@ begin
                 if (grid_mode == 1) by = grid_cy(i); end
                 txt_want[txt_row[i]] = 8589934336 + (rowi == sel ? 255 : 190);
                 switch (entry_dir[rowi])
-                    case K_DIR, K_MYLISTS, K_AFOLDER: g = g_icon[10]; end
+                    case K_DIR, K_MYLISTS, K_AFOLDER, K_DOWNLOADS: g = g_icon[10]; end
                     case K_ADDONS, K_ADDON: g = g_icon[16]; end
                     case K_STORE: g = g_icon[14]; end
                     case K_SITEM: if (entry_skind[rowi] == 1) g = entry_siver[rowi] != "" ? g_icon[11] : g_icon[14]; else g = entry_siver[rowi] != "" ? g_icon[16] : g_icon[14]; end end

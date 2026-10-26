@@ -12,7 +12,7 @@ index 545cb984..66a03942 100644
  #include "m_rand.h"
  #include "m_regex.h"
 diff --git a/modules/libmod_misc/libmod_misc_exports.h b/modules/libmod_misc/libmod_misc_exports.h
-index cf5699d0..fcdc6887 100644
+index cf5699d0..46d53154 100644
 --- a/modules/libmod_misc/libmod_misc_exports.h
 +++ b/modules/libmod_misc/libmod_misc_exports.h
 @@ -360,6 +360,16 @@ DLSYSFUNCS  __bgdexport( libmod_misc, functions_exports)[] =
@@ -24,7 +24,7 @@ index cf5699d0..fcdc6887 100644
 +    FUNC( "SYSTEM_KEYBOARD_OK"      , ""            , TYPE_INT          , libmod_misc_syskb_ok                      ),
 +    FUNC( "SYSTEM_KEYBOARD_TEXT"    , ""            , TYPE_STRING       , libmod_misc_syskb_text                    ),
 +    FUNC( "SYSTEM_KEYBOARD_CLOSE"   , ""            , TYPE_INT          , libmod_misc_syskb_close                   ),
-+    FUNC( "SYSTEM_PROGRESS_OPEN"    , "S"           , TYPE_INT          , libmod_misc_progress_open                 ),
++    FUNC( "SYSTEM_PROGRESS_OPEN"    , "SI"          , TYPE_INT          , libmod_misc_progress_open                 ),
 +    FUNC( "SYSTEM_PROGRESS_SET"     , "I"           , TYPE_INT          , libmod_misc_progress_set                  ),
 +    FUNC( "SYSTEM_PROGRESS_MESSAGE" , "S"           , TYPE_INT          , libmod_misc_progress_message              ),
 +    FUNC( "SYSTEM_PROGRESS_UPDATE"  , ""            , TYPE_INT          , libmod_misc_progress_update               ),
@@ -296,10 +296,10 @@ index 00000000..4003adfe
 +#endif
 diff --git a/modules/libmod_misc/m_progress.c b/modules/libmod_misc/m_progress.c
 new file mode 100644
-index 00000000..dc087f60
+index 00000000..9f269bb4
 --- /dev/null
 +++ b/modules/libmod_misc/m_progress.c
-@@ -0,0 +1,149 @@
+@@ -0,0 +1,150 @@
 +/*
 + *  m_progress.c - system progress bar (PS5 message dialog, progress mode), see m_progress.h
 + *
@@ -357,6 +357,7 @@ index 00000000..dc087f60
 +
 +int64_t libmod_misc_progress_open( INSTANCE * my, int64_t * params ) {
 +    const char * caption = ( const char * ) string_get( params[0] );
++    int64_t flags = params[1];
 +    int rc;
 +    int64_t ret = 0;
 +
@@ -369,7 +370,7 @@ index 00000000..dc087f60
 +
 +    snprintf( g_msg, sizeof g_msg, "%s", caption ? caption : "" );
 +    memset( &g_bar, 0, sizeof g_bar );
-+    g_bar.barType = 0;                              /* percentage, no cancel button */
++    g_bar.barType = ( flags & 1 ) ? 1 : 0;          /* percentage; with a cancel button when asked (pressing it makes UPDATE answer 3) */
 +    g_bar.msg = g_msg;
 +    memset( &g_param, 0, sizeof g_param );
 +    g_param.base.size = sizeof( DlgBase );
@@ -427,7 +428,7 @@ index 00000000..dc087f60
 +int64_t libmod_misc_progress_open( INSTANCE * my, int64_t * params ) {
 +    const char * caption = ( const char * ) string_get( params[0] );
 +    int64_t ret = -100;
-+    if ( getenv( "MP_FAKE_PROGRESS" ) ) { g_fake = 1; fprintf( stderr, "PROGRESS open \"%s\"\n", caption ? caption : "" ); ret = 0; }
++    if ( getenv( "MP_FAKE_PROGRESS" ) ) { g_fake = 1; fprintf( stderr, "PROGRESS open \"%s\"%s\n", caption ? caption : "", ( params[1] & 1 ) ? " (with cancel)" : "" ); ret = 0; }
 +    string_discard( params[0] );
 +    return ret;
 +}
@@ -451,17 +452,18 @@ index 00000000..dc087f60
 +#endif
 diff --git a/modules/libmod_misc/m_progress.h b/modules/libmod_misc/m_progress.h
 new file mode 100644
-index 00000000..474dab7d
+index 00000000..675ea186
 --- /dev/null
 +++ b/modules/libmod_misc/m_progress.h
-@@ -0,0 +1,23 @@
+@@ -0,0 +1,24 @@
 +/*
 + *  m_progress.h - system progress bar (PS5 message dialog in progress mode)
 + *
-+ *  SYSTEM_PROGRESS_OPEN( caption ) -> 0 if it opened, < 0 if not available / failed
++ *  SYSTEM_PROGRESS_OPEN( caption, flags ) -> 0 if it opened, < 0 if not available / failed (flags: 1 = with a cancel button)
 + *  SYSTEM_PROGRESS_SET( percent )  -> moves the bar (0..100)
 + *  SYSTEM_PROGRESS_MESSAGE( text ) -> changes the caption
-+ *  SYSTEM_PROGRESS_UPDATE()        -> advances the dialog; call once per frame while it is open (0 = not open)
++ *  SYSTEM_PROGRESS_UPDATE()        -> advances the dialog; call once per frame while it is open (0 = not open, 3 = it was closed: the user
++ *                                     pressed cancel)
 + *  SYSTEM_PROGRESS_CLOSE()         -> closes it
 + *
 + *  Only the PS5 build has one; elsewhere OPEN returns < 0 (or, with MP_FAKE_PROGRESS set, writes what it would do to stderr).
