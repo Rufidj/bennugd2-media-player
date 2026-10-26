@@ -1,196 +1,77 @@
-diff --git a/modules/libmod_misc/libmod_misc.h b/modules/libmod_misc/libmod_misc.h
-index 545cb984..66a03942 100644
---- a/modules/libmod_misc/libmod_misc.h
-+++ b/modules/libmod_misc/libmod_misc.h
-@@ -38,6 +38,8 @@
- #include "m_file.h"
- #include "m_math.h"
- #include "m_mem.h"
-+#include "m_ime.h"
-+#include "m_progress.h"
- #include "m_proc.h"
- #include "m_rand.h"
- #include "m_regex.h"
-diff --git a/modules/libmod_misc/libmod_misc_exports.h b/modules/libmod_misc/libmod_misc_exports.h
-index cf5699d0..46d53154 100644
---- a/modules/libmod_misc/libmod_misc_exports.h
-+++ b/modules/libmod_misc/libmod_misc_exports.h
-@@ -360,6 +360,16 @@ DLSYSFUNCS  __bgdexport( libmod_misc, functions_exports)[] =
- 
-     FUNC( "GETENV"                  , "S"           , TYPE_STRING       , libmod_misc_sys_getenv                    ),
-     FUNC( "EXEC"                    , "ISIP"        , TYPE_INT          , libmod_misc_sys_exec                      ),
-+    FUNC( "SYSTEM_KEYBOARD_OPEN"    , "SSII"        , TYPE_INT          , libmod_misc_syskb_open                    ),
-+    FUNC( "SYSTEM_KEYBOARD_STATUS"  , ""            , TYPE_INT          , libmod_misc_syskb_status                  ),
-+    FUNC( "SYSTEM_KEYBOARD_OK"      , ""            , TYPE_INT          , libmod_misc_syskb_ok                      ),
-+    FUNC( "SYSTEM_KEYBOARD_TEXT"    , ""            , TYPE_STRING       , libmod_misc_syskb_text                    ),
-+    FUNC( "SYSTEM_KEYBOARD_CLOSE"   , ""            , TYPE_INT          , libmod_misc_syskb_close                   ),
-+    FUNC( "SYSTEM_PROGRESS_OPEN"    , "SI"          , TYPE_INT          , libmod_misc_progress_open                 ),
-+    FUNC( "SYSTEM_PROGRESS_SET"     , "I"           , TYPE_INT          , libmod_misc_progress_set                  ),
-+    FUNC( "SYSTEM_PROGRESS_MESSAGE" , "S"           , TYPE_INT          , libmod_misc_progress_message              ),
-+    FUNC( "SYSTEM_PROGRESS_UPDATE"  , ""            , TYPE_INT          , libmod_misc_progress_update               ),
-+    FUNC( "SYSTEM_PROGRESS_CLOSE"   , ""            , TYPE_INT          , libmod_misc_progress_close                ),
- 	FUNC( "GET_PREF_LANGUAGE"       , ""            , TYPE_STRING       , libmod_misc_sys_get_pref_language         ),
- 
-     /* Date/Time & Timers */
 diff --git a/modules/libmod_misc/m_ime.c b/modules/libmod_misc/m_ime.c
-new file mode 100644
-index 00000000..17f350d1
---- /dev/null
+index 17f350d1..3db39950 100644
+--- a/modules/libmod_misc/m_ime.c
 +++ b/modules/libmod_misc/m_ime.c
-@@ -0,0 +1,221 @@
-+/*
-+ *  m_ime.c - system on-screen keyboard (PS5 IME dialog), see m_ime.h
-+ *
-+ *  The console's libSceImeDialog / libSceCommonDialog are imported statically against link stubs (like libSceVideodec2 in
-+ *  libmod_video): the stubs are built by ps5/tools/build-commondialog-stub.sh and the SDK's own libSceImeDialog.so.
-+ */
-+#include <stdint.h>
-+#include <stdio.h>
-+#include <string.h>
-+#include <stdlib.h>
+@@ -141,6 +141,7 @@ int64_t libmod_misc_syskb_open( INSTANCE * my, int64_t * params ) {
+     p.userId = user;
+     p.type = ( flags & 2 ) ? 2 : 0;
+     p.option = ( flags & 1 ) ? 4u : 0u;
++    if ( flags & 1 ) p.type = 1;                       /* password: the console refused it with the default type (0x80bc0030), it wants basic latin */
+     p.maxTextLength = ( uint32_t ) maxlen;
+     p.inputTextBuffer = g_buf;
+     p.title = g_title;
+@@ -189,6 +190,101 @@ int64_t libmod_misc_syskb_close( INSTANCE * my, int64_t * params ) {
+     return 0;
+ }
+ 
++#elif defined( __ANDROID__ )
 +
-+#include "bgddl.h"
-+#include "dlvaracc.h"
-+#include "xstrings.h"
-+#include "m_ime.h"
++/* Android: a native text dialog (with the phone's own keyboard) opened through JNI, see SDLActivity.showTextInput.
++   SDL's JNI helpers are looked up at run time so libmod_misc needs no new link dependency. */
++#include <jni.h>
++#include <dlfcn.h>
 +
-+#ifdef __PROSPERO__
++int ps5_dialogs_init( int sysmodule ) { ( void ) sysmodule; return -100; }
++void ps5_dialog_log( const char * fmt, ... ) { ( void ) fmt; }
 +
-+/* ---- the console's API (UTF-16 text, see SharpProspero's ImeDialog.cs) ---------------------------------------- */
-+typedef struct {
-+    int32_t         userId;
-+    int32_t         type;                   /* 0 default, 1 basic latin, 2 url, 3 mail, 4 number */
-+    uint64_t        supportedLanguages;
-+    int32_t         enterLabel;
-+    int32_t         inputMethod;
-+    void *          filter;
-+    uint32_t        option;                 /* 4 = password */
-+    uint32_t        maxTextLength;
-+    uint16_t *      inputTextBuffer;
-+    float           posx, posy;
-+    int32_t         halign, valign;
-+    const uint16_t * placeholder;
-+    const uint16_t * title;
-+    int8_t          reserved[16];
-+} ImeParam;
++typedef void * ( * sdl_ptr_fn )( void );
++static JNIEnv * g_env = NULL;
++static jclass g_cls = NULL;
++static jmethodID g_m_show, g_m_state, g_m_ok, g_m_text, g_m_close;
++static int g_open = 0, g_read = 0, g_ok = 0;
++static char g_text[ 4096 ];
 +
-+typedef struct { int32_t outcome; int8_t reserved[12]; } ImeResult;   /* 0 ok, 1 user canceled, 2 aborted */
-+
-+_Static_assert( sizeof( ImeParam ) == 96, "SceImeDialogParam" );
-+_Static_assert( sizeof( ImeResult ) == 16, "SceImeDialogResult" );
-+
-+int sceSysmoduleLoadModule( uint16_t id );
-+int sceCommonDialogInitialize( void );
-+int sceUserServiceInitialize( void * params );
-+int sceUserServiceGetForegroundUser( int * user );
-+int sceUserServiceGetInitialUser( int * user );
-+int sceImeDialogInit( ImeParam * param, void * extended );
-+int sceImeDialogGetStatus( void );
-+int sceImeDialogGetResult( ImeResult * result );
-+int sceImeDialogAbort( void );
-+int sceImeDialogTerm( void );
-+int sceImeDialogGetPanelSizeExtended( ImeParam * param, void * extended, uint32_t * width, uint32_t * height );
-+
-+#define SYSMODULE_IME_DIALOG    0x0096
-+#define IME_MAX                 2048
-+
-+static int       g_inited = 0, g_open = 0, g_read = 0, g_ok = 0;
-+static uint16_t  g_buf[ IME_MAX + 2 ];
-+static uint16_t  g_title[ 128 ];
-+static char      g_text[ IME_MAX * 4 + 8 ];
-+
-+/* a line per step in /data/ime.log (opened and closed each time, so it survives a crash): says where it stopped */
-+void ps5_dialog_log( const char * fmt, ... ) {
-+    __builtin_va_list ap;
-+    FILE * f = fopen( "/data/ime.log", "ab" );
-+    if ( !f ) return;
-+    __builtin_va_start( ap, fmt );
-+    vfprintf( f, fmt, ap );
-+    __builtin_va_end( ap );
-+    fputc( '\n', f );
-+    fclose( f );
-+}
-+
-+static size_t utf8_to_utf16( const char * s, uint16_t * out, size_t cap ) {
-+    size_t n = 0;
-+    const unsigned char * p = ( const unsigned char * ) s;
-+    while ( *p && n + 2 < cap ) {
-+        uint32_t c = *p++, extra = 0;
-+        if ( c >= 0xF0 ) { c &= 0x07; extra = 3; } else if ( c >= 0xE0 ) { c &= 0x0F; extra = 2; } else if ( c >= 0xC0 ) { c &= 0x1F; extra = 1; }
-+        while ( extra-- && ( *p & 0xC0 ) == 0x80 ) c = ( c << 6 ) | ( *p++ & 0x3F );
-+        if ( c >= 0x10000 ) { c -= 0x10000; out[ n++ ] = ( uint16_t ) ( 0xD800 + ( c >> 10 ) ); out[ n++ ] = ( uint16_t ) ( 0xDC00 + ( c & 0x3FF ) ); }
-+        else out[ n++ ] = ( uint16_t ) c;
++static int jni_ready( void ) {
++    sdl_ptr_fn get_env, get_act;
++    jobject act;
++    jclass local;
++    if ( g_cls ) return 1;
++    get_env = ( sdl_ptr_fn ) dlsym( RTLD_DEFAULT, "SDL_AndroidGetJNIEnv" );
++    get_act = ( sdl_ptr_fn ) dlsym( RTLD_DEFAULT, "SDL_AndroidGetActivity" );
++    if ( !get_env || !get_act ) return 0;
++    g_env = ( JNIEnv * ) get_env();
++    act = ( jobject ) get_act();
++    if ( !g_env || !act ) return 0;
++    local = ( *g_env )->GetObjectClass( g_env, act );                    /* the class of the activity (found with the app's own class loader) */
++    if ( !local ) return 0;
++    g_cls = ( jclass ) ( *g_env )->NewGlobalRef( g_env, local );
++    ( *g_env )->DeleteLocalRef( g_env, local );
++    ( *g_env )->DeleteLocalRef( g_env, act );
++    g_m_show  = ( *g_env )->GetStaticMethodID( g_env, g_cls, "showTextInput", "(Ljava/lang/String;Ljava/lang/String;I)V" );
++    g_m_state = ( *g_env )->GetStaticMethodID( g_env, g_cls, "textInputState", "()I" );
++    g_m_ok    = ( *g_env )->GetStaticMethodID( g_env, g_cls, "textInputOk", "()Z" );
++    g_m_text  = ( *g_env )->GetStaticMethodID( g_env, g_cls, "textInputText", "()Ljava/lang/String;" );
++    g_m_close = ( *g_env )->GetStaticMethodID( g_env, g_cls, "textInputClose", "()V" );
++    if ( !g_m_show || !g_m_state || !g_m_ok || !g_m_text || !g_m_close ) {
++        ( *g_env )->ExceptionClear( g_env );
++        ( *g_env )->DeleteGlobalRef( g_env, g_cls ); g_cls = NULL;
++        return 0;
 +    }
-+    out[ n ] = 0;
-+    return n;
-+}
-+
-+static void utf16_to_utf8( const uint16_t * s, char * out, size_t cap ) {
-+    size_t n = 0;
-+    while ( *s && n + 5 < cap ) {
-+        uint32_t c = *s++;
-+        if ( c >= 0xD800 && c < 0xDC00 && *s >= 0xDC00 && *s < 0xE000 ) c = 0x10000 + ( ( c - 0xD800 ) << 10 ) + ( *s++ - 0xDC00 );
-+        if ( c < 0x80 ) out[ n++ ] = ( char ) c;
-+        else if ( c < 0x800 ) { out[ n++ ] = ( char ) ( 0xC0 | ( c >> 6 ) ); out[ n++ ] = ( char ) ( 0x80 | ( c & 0x3F ) ); }
-+        else if ( c < 0x10000 ) { out[ n++ ] = ( char ) ( 0xE0 | ( c >> 12 ) ); out[ n++ ] = ( char ) ( 0x80 | ( ( c >> 6 ) & 0x3F ) ); out[ n++ ] = ( char ) ( 0x80 | ( c & 0x3F ) ); }
-+        else { out[ n++ ] = ( char ) ( 0xF0 | ( c >> 18 ) ); out[ n++ ] = ( char ) ( 0x80 | ( ( c >> 12 ) & 0x3F ) ); out[ n++ ] = ( char ) ( 0x80 | ( ( c >> 6 ) & 0x3F ) ); out[ n++ ] = ( char ) ( 0x80 | ( c & 0x3F ) ); }
-+    }
-+    out[ n ] = 0;
-+}
-+
-+/* Loads the dialog's own system module (always first: its functions are static imports that only answer once the module is
-+   loaded), then brings up the shared dialog subsystem (libSceCommonDialog) and the user service once. */
-+int ps5_dialogs_init( int sysmodule ) {
-+    int rc;
-+    rc = sceSysmoduleLoadModule( ( uint16_t ) sysmodule );
-+    ps5_dialog_log( "sceSysmoduleLoadModule(%#x) -> %#x", sysmodule, ( unsigned ) rc );       /* an already loaded module answers an error too: go on */
-+    if ( g_inited ) return 0;
-+    rc = sceCommonDialogInitialize();
-+    ps5_dialog_log( "sceCommonDialogInitialize -> %#x", ( unsigned ) rc );
-+    if ( rc < 0 && ( unsigned ) rc != 0x80B80002u ) return -3;
-+    rc = sceUserServiceInitialize( 0 );
-+    ps5_dialog_log( "sceUserServiceInitialize -> %#x", ( unsigned ) rc );          /* already initialised is fine */
-+    g_inited = 1;
-+    return 0;
++    return 1;
 +}
 +
 +int64_t libmod_misc_syskb_open( INSTANCE * my, int64_t * params ) {
 +    const char * title = ( const char * ) string_get( params[0] );
 +    const char * initial = ( const char * ) string_get( params[1] );
-+    int64_t maxlen = params[2], flags = params[3];
-+    ImeParam p;
-+    uint32_t w = 0, h = 0;
-+    int rc, user = 0;
-+    int64_t ret = 0;
-+
++    int64_t flags = params[3], ret = 0;
++    jstring jt, ji;
 +    if ( g_open ) { ret = -2; goto done; }
-+    if ( maxlen < 1 ) maxlen = 1;
-+    if ( maxlen > IME_MAX ) maxlen = IME_MAX;
-+
-+    if ( ps5_dialogs_init( SYSMODULE_IME_DIALOG ) != 0 ) { ret = -3; goto done; }
-+
-+    rc = sceUserServiceGetForegroundUser( &user );
-+    if ( rc != 0 ) rc = sceUserServiceGetInitialUser( &user );
-+    ps5_dialog_log( "user -> %#x (%d)", ( unsigned ) rc, user );
-+    if ( rc != 0 ) { ret = -4; goto done; }
-+
-+    memset( &p, 0, sizeof p );
-+    memset( g_buf, 0, sizeof g_buf );
-+    utf8_to_utf16( initial ? initial : "", g_buf, ( size_t ) maxlen + 1 );
-+    utf8_to_utf16( title ? title : "", g_title, sizeof g_title / sizeof g_title[0] );
-+    p.userId = user;
-+    p.type = ( flags & 2 ) ? 2 : 0;
-+    p.option = ( flags & 1 ) ? 4u : 0u;
-+    p.maxTextLength = ( uint32_t ) maxlen;
-+    p.inputTextBuffer = g_buf;
-+    p.title = g_title;
-+    if ( sceImeDialogGetPanelSizeExtended( &p, 0, &w, &h ) == 0 && w && h ) {      /* centred on a 1080p screen */
-+        p.posx = ( 1920.0f - ( float ) w ) / 2.0f; p.posy = ( 1080.0f - ( float ) h ) / 2.0f;
-+        p.halign = 0; p.valign = 0;
-+    }
-+    rc = sceImeDialogInit( &p, 0 );
-+    ps5_dialog_log( "sceImeDialogInit -> %#x (panel %ux%u, flags %d)", ( unsigned ) rc, w, h, ( int ) flags );
-+    if ( rc != 0 ) { ret = -5; goto done; }
++    if ( !jni_ready() ) { ret = -100; goto done; }
++    jt = ( *g_env )->NewStringUTF( g_env, title ? title : "" );
++    ji = ( *g_env )->NewStringUTF( g_env, initial ? initial : "" );
++    ( *g_env )->CallStaticVoidMethod( g_env, g_cls, g_m_show, jt, ji, ( jint ) flags );
++    ( *g_env )->DeleteLocalRef( g_env, jt ); ( *g_env )->DeleteLocalRef( g_env, ji );
++    if ( ( *g_env )->ExceptionCheck( g_env ) ) { ( *g_env )->ExceptionClear( g_env ); ret = -5; goto done; }
 +    g_open = 1; g_read = 0; g_ok = 0; g_text[0] = 0;
 +done:
 +    string_discard( params[0] ); string_discard( params[1] );
@@ -200,336 +81,34 @@ index 00000000..17f350d1
 +int64_t libmod_misc_syskb_status( INSTANCE * my, int64_t * params ) {
 +    int st;
 +    if ( !g_open ) return 0;
-+    st = sceImeDialogGetStatus();
++    st = ( int ) ( *g_env )->CallStaticIntMethod( g_env, g_cls, g_m_state );
 +    if ( st == 2 && !g_read ) {
-+        ImeResult r;
-+        memset( &r, 0, sizeof r );
-+        if ( sceImeDialogGetResult( &r ) == 0 ) g_ok = ( r.outcome == 0 );
-+        if ( g_ok ) utf16_to_utf8( g_buf, g_text, sizeof g_text ); else g_text[0] = 0;
++        jstring js;
++        g_ok = ( *g_env )->CallStaticBooleanMethod( g_env, g_cls, g_m_ok ) ? 1 : 0;
++        js = ( jstring ) ( *g_env )->CallStaticObjectMethod( g_env, g_cls, g_m_text );
++        g_text[0] = 0;
++        if ( g_ok && js ) {
++            const char * u = ( *g_env )->GetStringUTFChars( g_env, js, NULL );
++            if ( u ) { snprintf( g_text, sizeof g_text, "%s", u ); ( *g_env )->ReleaseStringUTFChars( g_env, js, u ); }
++        }
++        if ( js ) ( *g_env )->DeleteLocalRef( g_env, js );
 +        g_read = 1;
-+        ps5_dialog_log( "result: outcome %d, text %d bytes", ( int ) r.outcome, ( int ) strlen( g_text ) );
 +    }
 +    return st;
 +}
 +
 +int64_t libmod_misc_syskb_ok( INSTANCE * my, int64_t * params ) { return g_read ? g_ok : 0; }
-+
 +int64_t libmod_misc_syskb_text( INSTANCE * my, int64_t * params ) {
 +    int64_t str = string_new( g_read ? g_text : "" );
 +    string_use( str );
 +    return str;
 +}
-+
 +int64_t libmod_misc_syskb_close( INSTANCE * my, int64_t * params ) {
-+    if ( !g_open ) return 0;
-+    if ( sceImeDialogGetStatus() != 2 ) sceImeDialogAbort();
-+    sceImeDialogTerm();
-+    g_open = 0;
-+    ps5_dialog_log( "closed" );
++    if ( g_open && g_cls ) ( *g_env )->CallStaticVoidMethod( g_env, g_cls, g_m_close );
++    g_open = 0; g_read = 0;
 +    return 0;
 +}
 +
-+#else   /* no system keyboard on this platform: the script keeps its own */
-+
-+int ps5_dialogs_init( int sysmodule ) { ( void ) sysmodule; return -100; }
-+void ps5_dialog_log( const char * fmt, ... ) { ( void ) fmt; }
-+
-+/* for testing a script on a PC: MP_FAKE_SYSKB="text" makes the keyboard "open", stay up for a while and answer that text */
-+static int g_fake = 0, g_fake_polls = 0;
-+static char g_fake_text[ 256 ];
-+
-+int64_t libmod_misc_syskb_open( INSTANCE * my, int64_t * params ) {
-+    const char * e = getenv( "MP_FAKE_SYSKB" );
-+    string_discard( params[0] ); string_discard( params[1] );
-+    if ( !e ) return -100;
-+    snprintf( g_fake_text, sizeof g_fake_text, "%s", e );
-+    g_fake = 1; g_fake_polls = 0;
-+    return 0;
-+}
-+int64_t libmod_misc_syskb_status( INSTANCE * my, int64_t * params ) {
-+    if ( !g_fake ) return 0;
-+    return ++g_fake_polls < 30 ? 1 : 2;
-+}
-+int64_t libmod_misc_syskb_ok( INSTANCE * my, int64_t * params ) { return g_fake && g_fake_polls >= 30 && strcmp( g_fake_text, "<cancel>" ) != 0; }
-+int64_t libmod_misc_syskb_text( INSTANCE * my, int64_t * params ) {
-+    int64_t str = string_new( g_fake ? g_fake_text : "" );
-+    string_use( str );
-+    return str;
-+}
-+int64_t libmod_misc_syskb_close( INSTANCE * my, int64_t * params ) { g_fake = 0; return 0; }
-+
-+#endif
-diff --git a/modules/libmod_misc/m_ime.h b/modules/libmod_misc/m_ime.h
-new file mode 100644
-index 00000000..4003adfe
---- /dev/null
-+++ b/modules/libmod_misc/m_ime.h
-@@ -0,0 +1,29 @@
-+/*
-+ *  m_ime.h - system on-screen keyboard (PS5 IME dialog)
-+ *
-+ *  SYSTEM_KEYBOARD_OPEN( title, initial_text, max_length, flags ) -> 0 if it opened, < 0 if not available / failed
-+ *        flags: 1 = mask the text (password), 2 = keyboard laid out for web addresses
-+ *  SYSTEM_KEYBOARD_STATUS()  -> 0 not open, 1 on screen, 2 closed (read the result)
-+ *  SYSTEM_KEYBOARD_OK()      -> 1 if the user accepted the text (valid once the status is 2)
-+ *  SYSTEM_KEYBOARD_TEXT()    -> the text (UTF-8)
-+ *  SYSTEM_KEYBOARD_CLOSE()   -> shuts the dialog down (call after reading the result, or to cancel)
-+ *
-+ *  Only the PS5 build has a keyboard; everywhere else OPEN returns < 0 and a script keeps using its own.
-+ *  The dialog is non-blocking: the script must keep running its frames (and presenting) while it is open.
-+ */
-+#ifndef __M_IME_H
-+#define __M_IME_H
-+
-+#include "bgddl.h"
-+
-+extern int64_t libmod_misc_syskb_open( INSTANCE * my, int64_t * params );
-+extern int64_t libmod_misc_syskb_status( INSTANCE * my, int64_t * params );
-+extern int64_t libmod_misc_syskb_ok( INSTANCE * my, int64_t * params );
-+extern int64_t libmod_misc_syskb_text( INSTANCE * my, int64_t * params );
-+extern int64_t libmod_misc_syskb_close( INSTANCE * my, int64_t * params );
-+
-+/* shared with m_progress.c: brings up libSceCommonDialog + the user service once; a line in /data/ime.log per step */
-+extern int ps5_dialogs_init( int sysmodule );
-+extern void ps5_dialog_log( const char * fmt, ... );
-+
-+#endif
-diff --git a/modules/libmod_misc/m_progress.c b/modules/libmod_misc/m_progress.c
-new file mode 100644
-index 00000000..d4052242
---- /dev/null
-+++ b/modules/libmod_misc/m_progress.c
-@@ -0,0 +1,161 @@
-+/*
-+ *  m_progress.c - system progress bar (PS5 message dialog, progress mode), see m_progress.h
-+ *
-+ *  libSceMsgDialog is not reachable from a title (see the comment on resolve_msgdialog).
-+ *  Struct layouts as in SharpProspero's MessageDialog.cs.
-+ */
-+#include <stdint.h>
-+#include <stdio.h>
-+#include <string.h>
-+#include <stdlib.h>
-+
-+#include "bgddl.h"
-+#include "dlvaracc.h"
-+#include "xstrings.h"
-+#include "m_ime.h"
-+#include "m_progress.h"
-+
-+#ifdef __PROSPERO__
-+
-+typedef struct { uint64_t size; uint8_t reserved[36]; uint32_t magic; } DlgBase;                       /* SceCommonDialogBaseParam, 48 bytes */
-+typedef struct { int32_t barType; int32_t pad; const char * msg; uint8_t reserved[64]; } DlgProgBar;  /* 80 bytes */
-+typedef struct {
-+    DlgBase     base;
-+    uint64_t    size;
-+    int32_t     mode;               /* 2 = progress bar */
-+    int32_t     pad0;
-+    void *      userMsg;
-+    DlgProgBar * progBar;
-+    void *      sysMsg;
-+    int32_t     userId;
-+    uint8_t     reserved[40];
-+    int32_t     pad1;
-+} DlgParam;                         /* 136 bytes */
-+
-+_Static_assert( sizeof( DlgBase ) == 48, "base" );
-+_Static_assert( sizeof( DlgProgBar ) == 80, "bar" );
-+_Static_assert( sizeof( DlgParam ) == 136, "param" );
-+
-+/* The system progress bar (libSceMsgDialog) cannot be reached from a title on the consoles tested so far:
-+ *  - a static import against a link stub is never bound by the console's loader (the first call jumps to address 0),
-+ *    whatever the stub's soname ("libSceMsgDialog.sprx" or "libSceMsgDialog.native.sprx");
-+ *  - sysmodule 0xA4 only loads libSceMsgDialog.native.sprx, a 64 KB helper that holds no public functions (its only
-+ *    strings are "SceMsgDialog" and "SceCdlgMsgUti"; no NID or suffix variant is found by sceKernelDlsym);
-+ *  - loading libSceMsgDialog.sprx itself by path answers "not found" / "not executable".
-+ * So OPEN answers -6 here and the player keeps its own on-screen progress text. The calls below stay as the shape of the API. */
-+static int ( * sceMsgDialogInitialize )( void );
-+static int ( * sceMsgDialogTerminate )( void );
-+static int ( * sceMsgDialogOpen )( DlgParam * param );
-+static int ( * sceMsgDialogUpdateStatus )( void );
-+static int ( * sceMsgDialogClose )( void );
-+static int ( * sceMsgDialogProgressBarSetValue )( int target, uint32_t rate );
-+static int ( * sceMsgDialogProgressBarSetMsg )( int target, const char * msg );
-+
-+static int resolve_msgdialog( void ) {
-+    ps5_dialog_log( "the system progress bar is not available on this console" );
-+    return 0;
-+}
-+
-+#define USER_SYSTEM             0xFF
-+#define MAGIC_NUMBER            0xC0D1A109ull
-+
-+static int          g_open = 0;
-+static char         g_msg[ 512 ];
-+static DlgProgBar   g_bar;          /* kept alive for as long as the dialog is open */
-+static DlgParam     g_param;
-+
-+int64_t libmod_misc_progress_open( INSTANCE * my, int64_t * params ) {
-+    const char * caption = ( const char * ) string_get( params[0] );
-+    int64_t flags = params[1];
-+    int rc;
-+    int64_t ret = 0;
-+
-+    if ( g_open ) { ret = -2; goto done; }
-+    if ( !resolve_msgdialog() ) { ret = -6; goto done; }
-+
-+    rc = sceMsgDialogInitialize();
-+    ps5_dialog_log( "sceMsgDialogInitialize -> %#x", ( unsigned ) rc );
-+    if ( rc != 0 ) { ret = -4; goto done; }
-+
-+    snprintf( g_msg, sizeof g_msg, "%s", caption ? caption : "" );
-+    memset( &g_bar, 0, sizeof g_bar );
-+    g_bar.barType = ( flags & 1 ) ? 1 : 0;          /* percentage; with a cancel button when asked (pressing it makes UPDATE answer 3) */
-+    g_bar.msg = g_msg;
-+    memset( &g_param, 0, sizeof g_param );
-+    g_param.base.size = sizeof( DlgBase );
-+    g_param.base.magic = ( uint32_t ) ( MAGIC_NUMBER + ( uint64_t ) ( uintptr_t ) &g_param.base );
-+    g_param.size = sizeof( DlgParam );
-+    g_param.mode = 2;
-+    g_param.userId = USER_SYSTEM;
-+    g_param.progBar = &g_bar;
-+    rc = sceMsgDialogOpen( &g_param );
-+    ps5_dialog_log( "sceMsgDialogOpen(progress) -> %#x", ( unsigned ) rc );
-+    if ( rc != 0 ) { sceMsgDialogTerminate(); ret = -5; goto done; }
-+    g_open = 1;
-+done:
-+    string_discard( params[0] );
-+    return ret;
-+}
-+
-+int64_t libmod_misc_progress_set( INSTANCE * my, int64_t * params ) {
-+    int64_t p = params[0];
-+    if ( !g_open ) return -1;
-+    if ( p < 0 ) p = 0;
-+    if ( p > 100 ) p = 100;
-+    return sceMsgDialogProgressBarSetValue( 0, ( uint32_t ) p );
-+}
-+
-+int64_t libmod_misc_progress_message( INSTANCE * my, int64_t * params ) {
-+    const char * text = ( const char * ) string_get( params[0] );
-+    int64_t rc = -1;
-+    if ( g_open ) {
-+        snprintf( g_msg, sizeof g_msg, "%s", text ? text : "" );
-+        rc = sceMsgDialogProgressBarSetMsg( 0, g_msg );
-+    }
-+    string_discard( params[0] );
-+    return rc;
-+}
-+
-+int64_t libmod_misc_progress_update( INSTANCE * my, int64_t * params ) {
-+    if ( !g_open ) return 0;
-+    return sceMsgDialogUpdateStatus();
-+}
-+
-+int64_t libmod_misc_progress_close( INSTANCE * my, int64_t * params ) {
-+    if ( !g_open ) return 0;
-+    if ( sceMsgDialogUpdateStatus() != 3 ) sceMsgDialogClose();
-+    sceMsgDialogTerminate();
-+    g_open = 0;
-+    ps5_dialog_log( "progress closed" );
-+    return 0;
-+}
-+
-+#else   /* no system progress bar on this platform */
-+
-+static int g_fake = 0;
-+
-+int64_t libmod_misc_progress_open( INSTANCE * my, int64_t * params ) {
-+    const char * caption = ( const char * ) string_get( params[0] );
-+    int64_t ret = -100;
-+    if ( getenv( "MP_FAKE_PROGRESS" ) ) { g_fake = 1; fprintf( stderr, "PROGRESS open \"%s\"%s\n", caption ? caption : "", ( params[1] & 1 ) ? " (with cancel)" : "" ); ret = 0; }
-+    string_discard( params[0] );
-+    return ret;
-+}
-+int64_t libmod_misc_progress_set( INSTANCE * my, int64_t * params ) {
-+    if ( g_fake ) fprintf( stderr, "PROGRESS set %d\n", ( int ) params[0] );
-+    return g_fake ? 0 : -1;
-+}
-+int64_t libmod_misc_progress_message( INSTANCE * my, int64_t * params ) {
-+    const char * text = ( const char * ) string_get( params[0] );
-+    if ( g_fake ) fprintf( stderr, "PROGRESS message \"%s\"\n", text ? text : "" );
-+    string_discard( params[0] );
-+    return g_fake ? 0 : -1;
-+}
-+int64_t libmod_misc_progress_update( INSTANCE * my, int64_t * params ) { return g_fake ? 2 : 0; }
-+int64_t libmod_misc_progress_close( INSTANCE * my, int64_t * params ) {
-+    if ( g_fake ) fprintf( stderr, "PROGRESS close\n" );
-+    g_fake = 0;
-+    return 0;
-+}
-+
-+#endif
-diff --git a/modules/libmod_misc/m_progress.h b/modules/libmod_misc/m_progress.h
-new file mode 100644
-index 00000000..675ea186
---- /dev/null
-+++ b/modules/libmod_misc/m_progress.h
-@@ -0,0 +1,24 @@
-+/*
-+ *  m_progress.h - system progress bar (PS5 message dialog in progress mode)
-+ *
-+ *  SYSTEM_PROGRESS_OPEN( caption, flags ) -> 0 if it opened, < 0 if not available / failed (flags: 1 = with a cancel button)
-+ *  SYSTEM_PROGRESS_SET( percent )  -> moves the bar (0..100)
-+ *  SYSTEM_PROGRESS_MESSAGE( text ) -> changes the caption
-+ *  SYSTEM_PROGRESS_UPDATE()        -> advances the dialog; call once per frame while it is open (0 = not open, 3 = it was closed: the user
-+ *                                     pressed cancel)
-+ *  SYSTEM_PROGRESS_CLOSE()         -> closes it
-+ *
-+ *  Only the PS5 build has one; elsewhere OPEN returns < 0 (or, with MP_FAKE_PROGRESS set, writes what it would do to stderr).
-+ */
-+#ifndef __M_PROGRESS_H
-+#define __M_PROGRESS_H
-+
-+#include "bgddl.h"
-+
-+extern int64_t libmod_misc_progress_open( INSTANCE * my, int64_t * params );
-+extern int64_t libmod_misc_progress_set( INSTANCE * my, int64_t * params );
-+extern int64_t libmod_misc_progress_message( INSTANCE * my, int64_t * params );
-+extern int64_t libmod_misc_progress_update( INSTANCE * my, int64_t * params );
-+extern int64_t libmod_misc_progress_close( INSTANCE * my, int64_t * params );
-+
-+#endif
-diff --git a/ps5/tools/build-commondialog-stub.sh b/ps5/tools/build-commondialog-stub.sh
-new file mode 100755
-index 00000000..de248f78
---- /dev/null
-+++ b/ps5/tools/build-commondialog-stub.sh
-@@ -0,0 +1,12 @@
-+#!/bin/sh
-+# Builds libSceCommonDialog.so (a link stub, soname libSceCommonDialog.sprx) and installs it in the payload SDK's
-+# target/lib, where native-app-boilerplate's `make app` picks every *.so up as an import library.
-+# (libSceImeDialog / libSceUserService / libSceSysmodule stubs already ship with the SDK.)
-+#   ps5/tools/build-commondialog-stub.sh /path/to/native-app-boilerplate
-+set -e
-+BP="${1:?path to native-app-boilerplate}"; SDK="$BP/.deps/native/ps5-payload-sdk"
-+HERE="$(cd "$(dirname "$0")" && pwd)"; OUT="$(mktemp -d)"
-+PS5_PAYLOAD_SDK="$SDK" PS5_CLANG="${PS5_CLANG:-/usr/bin/clang-18}" USE_CCACHE=0 \
-+  sh "$BP/tooling/prospero-clang18" -std=c11 -O2 -fPIC -c "$HERE/commondialog_link_stub.c" -o "$OUT/stub.o"
-+"$SDK/bin/prospero-lld" --shared -soname libSceCommonDialog.sprx -o "$SDK/target/lib/libSceCommonDialog.so" "$OUT/stub.o"
-+rm -rf "$OUT"; echo "installed $SDK/target/lib/libSceCommonDialog.so"
-diff --git a/ps5/tools/build-title.sh b/ps5/tools/build-title.sh
-index 18098b02..ab4fb170 100755
---- a/ps5/tools/build-title.sh
-+++ b/ps5/tools/build-title.sh
-@@ -12,7 +12,7 @@ B=apps/bennugd2; G=$B/libs/bgdclean; F=$B/libs/ffmpeg
- INCLUDES="vendor/zlib-shim vendor/bennugd2-core-include vendor/bennugd2-bgdrtm vendor/bennugd2-bgdi vendor/bgd2-realgl-shims vendor/realgl-shims vendor/ps5-opengl-sdk/include vendor/sdl2-real/include/SDL2"
- DEFS="__PROSPERO__ __STATIC__ USE_REAL_PS5_OPENGL USE_SDL2_GPU"
- # order matters: engine -> ffmpeg and its deps -> libz/samplerate -> GL driver/C++ runtime -> libc gaps LAST
--ARCH="$G/libbgdrtm.a $G/libbggfx.a $G/libbginput.a $G/libbgload.a $G/libbgsound.a $G/libmod_3d.a $G/libmod_ads.a $G/libmod_debug.a $G/libmod_gfx.a $G/libmod_iap.a $G/libmod_input.a $G/libmod_misc.a $G/libmod_net.a $G/libmod_sound.a $G/libmod_video.a $G/libsdlhandler.a $F/libtheoradec.a $F/libvorbis.a $F/libogg.a $B/libs/libps5_runtime_gaps.a $B/libs/libSDL2_gpu.a $B/libs/libSDL2_image_shim.a $B/libs/libSDL2_mixer.a $B/libs/libSDL2.a $F/libavformat.a $F/libavcodec.a $F/libswscale.a $F/libswresample.a $F/libavutil.a $F/libssl.a $F/libcrypto.a $F/libiconv.a $F/liblzma.a $B/libs/libfreetype.a $B/libs/libpng16.a $F/libbz2.a $B/libs/libz.a $B/libs/libsamplerate.a vendor/ps5-opengl-sdk/lib/libPS5OpenGL.a vendor/payload-sdk-cxx/libcxx.a vendor/payload-sdk-cxx/libcxxabi.a vendor/payload-sdk-cxx/libunwind.a vendor/extras/libextras.a $B/libs/libps5_runtime_gaps.a"
-+ARCH="$G/libbgdrtm.a $G/libbggfx.a $G/libbginput.a $G/libbgload.a $G/libbgsound.a $G/libmod_3d.a $G/libmod_ads.a $G/libmod_debug.a $G/libmod_gfx.a $G/libmod_iap.a $G/libmod_input.a $G/libmod_misc.a $G/libmod_net.a $G/libmod_sound.a $G/libmod_video.a $G/libsdlhandler.a $F/libtheoradec.a $F/libvorbis.a $F/libogg.a $B/libs/libps5_runtime_gaps.a $B/libs/libSDL2_gpu.a $B/libs/libSDL2_image_shim.a $B/libs/libSDL2_mixer.a $B/libs/libSDL2.a $F/libavformat.a $F/libavcodec.a $F/libswscale.a $F/libswresample.a $F/libmp3lame.a $F/libavutil.a $F/libssl.a $F/libcrypto.a $F/libiconv.a $F/liblzma.a $B/libs/libfreetype.a $B/libs/libpng16.a $F/libbz2.a $B/libs/libz.a $B/libs/libsamplerate.a vendor/ps5-opengl-sdk/lib/libPS5OpenGL.a vendor/payload-sdk-cxx/libcxx.a vendor/payload-sdk-cxx/libcxxabi.a vendor/payload-sdk-cxx/libunwind.a vendor/extras/libextras.a $B/libs/libps5_runtime_gaps.a"
- timeout 900 env APP_WRAP_SYMBOLS="malloc calloc realloc free posix_memalign malloc_usable_size fopen opendir gzopen open stat lstat getcwd realpath" \
-   APP_DEFINITIONS="$DEFS" APP_INCLUDE_PATHS="$INCLUDES" APP_STATIC_ARCHIVES="$ARCH" APP_SOURCE_DIR="$B/src" \
-   APP_PARAM="$SCE_SYS/param.json" APP_SCE_SYS="$SCE_SYS" APP_ASSETS="" TITLE_ID="$TITLE_ID" APP_NAME="$APP_NAME" USE_CCACHE=0 \
-diff --git a/ps5/tools/commondialog_link_stub.c b/ps5/tools/commondialog_link_stub.c
-new file mode 100644
-index 00000000..f8635731
---- /dev/null
-+++ b/ps5/tools/commondialog_link_stub.c
-@@ -0,0 +1,5 @@
-+/* Link stub for the console's libSceCommonDialog (the shared dialog subsystem the on-screen keyboard rides on, see
-+ * libmod_misc/m_ime.c). Only linked against, never run: the console's own library answers these calls.
-+ * Build with ps5/tools/build-commondialog-stub.sh. */
-+int sceCommonDialogInitialize(void) { return -1; }
-+int sceCommonDialogIsUsed(void) { return 0; }
+ #else   /* no system keyboard on this platform: the script keeps its own */
+ 
+ int ps5_dialogs_init( int sysmodule ) { ( void ) sysmodule; return -100; }

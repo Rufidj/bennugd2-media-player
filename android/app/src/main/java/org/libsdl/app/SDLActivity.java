@@ -216,6 +216,63 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
 
     // Main components
     protected static SDLActivity mSingleton;
+
+    // ---- teclado de Android para el reproductor: un cuadro de texto nativo que el motor abre por JNI (libmod_misc, m_ime.c)
+    // estado: 0 cerrado, 1 en pantalla, 2 terminado (leer textInputOk() y textInputText())
+    private static volatile int sTextState = 0;
+    private static volatile boolean sTextOk = false;
+    private static volatile String sTextValue = "";
+    private static AlertDialog sTextDialog = null;
+
+    // flags: 1 = contrasena (texto oculto), 2 = teclado para direcciones web
+    public static void showTextInput(final String title, final String initial, final int flags) {
+        sTextState = 1; sTextOk = false; sTextValue = initial;
+        if (mSingleton == null) { sTextState = 2; return; }
+        mSingleton.runOnUiThread(new Runnable() {
+            @Override public void run() {
+                final EditText input = new EditText(mSingleton);
+                int type = InputType.TYPE_CLASS_TEXT;
+                if ((flags & 1) != 0) type |= InputType.TYPE_TEXT_VARIATION_PASSWORD;
+                else if ((flags & 2) != 0) type |= InputType.TYPE_TEXT_VARIATION_URI;
+                input.setInputType(type);
+                input.setSingleLine(true);
+                input.setImeOptions(EditorInfo.IME_ACTION_DONE | EditorInfo.IME_FLAG_NO_EXTRACT_UI);   // en horizontal el teclado no pasa a pantalla completa
+                input.setText(initial);
+                input.setSelection(input.getText().length());
+                AlertDialog.Builder b = new AlertDialog.Builder(mSingleton);
+                b.setTitle(title);
+                b.setView(input);
+                b.setPositiveButton(android.R.string.ok, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) { sTextValue = input.getText().toString(); sTextOk = true; sTextState = 2; }
+                });
+                b.setNegativeButton(android.R.string.cancel, new DialogInterface.OnClickListener() {
+                    @Override public void onClick(DialogInterface d, int w) { sTextState = 2; }
+                });
+                b.setOnCancelListener(new DialogInterface.OnCancelListener() {
+                    @Override public void onCancel(DialogInterface d) { sTextState = 2; }
+                });
+                sTextDialog = b.create();
+                input.setOnEditorActionListener(new TextView.OnEditorActionListener() {      // la tecla de "hecho" del teclado acepta
+                    @Override public boolean onEditorAction(TextView v, int actionId, KeyEvent ev) {
+                        sTextValue = input.getText().toString(); sTextOk = true; sTextState = 2;
+                        if (sTextDialog != null) sTextDialog.dismiss();
+                        return true;
+                    }
+                });
+                sTextDialog.getWindow().setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_VISIBLE);
+                sTextDialog.show();
+            }
+        });
+    }
+    public static int textInputState() { return sTextState; }
+    public static boolean textInputOk() { return sTextOk; }
+    public static String textInputText() { return sTextValue; }
+    public static void textInputClose() {
+        sTextState = 0;
+        if (mSingleton != null) mSingleton.runOnUiThread(new Runnable() {
+            @Override public void run() { if (sTextDialog != null) { sTextDialog.dismiss(); sTextDialog = null; } }
+        });
+    }
     protected static SDLSurface mSurface;
     protected static TouchOverlayView mTouchOverlay;
     protected static DummyEdit mTextEdit;
@@ -438,6 +495,13 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         }
     }
 
+    private static void deleteTree(File f) {
+        if (f == null || !f.exists()) return;
+        File[] kids = f.listFiles();
+        if (kids != null) for (File k : kids) deleteTree(k);
+        f.delete();
+    }
+
     // Setup
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -471,6 +535,21 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
             // el .dcb del reproductor y sus recursos (res/ y lang/) van de los assets
             // a la carpeta de la app: el motor los carga por ruta relativa al .dcb
             try {
+                // una app actualizada trae un .dcb, recursos, idiomas y addons nuevos: si cambio la instalacion se vuelven a copiar
+                // (los addons que el usuario instala desde la tienda viven en su propio almacen, no aqui)
+                try {
+                    long stamp = getPackageManager().getPackageInfo(getPackageName(), 0).lastUpdateTime;
+                    android.content.SharedPreferences prefs = getSharedPreferences("mediaplayer_assets", MODE_PRIVATE);
+                    if (prefs.getLong("stamp", -1) != stamp) {
+                        new File(getFilesDir(), "game.dcb").delete();
+                        deleteTree(new File(getFilesDir(), "res"));
+                        deleteTree(new File(getFilesDir(), "lang"));
+                        deleteTree(new File(getFilesDir(), "addons"));
+                        prefs.edit().putLong("stamp", stamp).apply();
+                    }
+                } catch (Exception ex) {
+                    Log.v(TAG, "assets stamp: " + ex.toString());
+                }
                 File dcb = new File(getFilesDir(), "game.dcb");
                 if (!dcb.exists()) {
                     copyAsset("game.dcb", dcb);
