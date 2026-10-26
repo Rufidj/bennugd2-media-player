@@ -121,7 +121,8 @@ global
     int    n_entries;
     int    sel, top_row;
     string row_label[ROWS];
-    int    txt_row[ROWS];
+    int    txt_row[ROWS];             // textos de las filas en modo lista
+    int    txt_cell[ROWS];            // textos de las casillas en modo cuadricula (se crean una sola vez: crear y borrar textos cada vez agotaba los 128 identificadores)
     int    txt_path, txt_hint, txt_empty;
     string s_path, s_hint, s_empty;
 
@@ -465,6 +466,7 @@ begin
     // z negativo = por encima de los sprites
     for (i = 0; i < ROWS; i++)
         txt_row[i] = write_var(fnt_t, ur(110), ur(ROW_Y0 + i * ROW_H + ROW_H / 2), -20, 3, row_label[i]);
+        txt_cell[i] = write_var(fnt_t, ur(grid_cx(i)), ur(grid_cy(i) + 30), -20, 4, row_label[i]);     // alineacion 4 = centrado
     end
     txt_path  = write_var(fnt_t, ur(76), ur(40), -20, 3, s_path);
     txt_hint  = write_var(fnt_t, ur(SW / 2), ur(SH - 24), -20, 4, s_hint);
@@ -2637,7 +2639,7 @@ private
     string t, l[3];
 begin
     hide_sprites();
-    for (i = 0; i < ROWS; i++) txt_want[txt_row[i]] = 8589934336 + (0); end
+    for (i = 0; i < ROWS; i++) txt_want[txt_row[i]] = 8589934336 + (0); txt_want[txt_cell[i]] = 8589934336 + (0); end
     txt_want[txt_path] = 8589934336 + (0); txt_want[txt_hint] = 8589934336 + (0); txt_want[txt_empty] = 8589934336 + (0);
     txt_want[txt_time] = 8589934336 + (0); txt_want[txt_title] = 8589934336 + (0); txt_want[txt_toast] = 8589934336 + (0);
     for (i = 0; i < 6; i++) txt_want[txt_sub[i]] = 8589934336 + (0); end
@@ -2672,20 +2674,7 @@ begin
                     row_label[i] = "";
                 end
             end
-            // al cambiar entre lista y cuadricula los textos de fila se recrean en su sitio:
-            // moverlos con write_move no vale (el identificador se recicla y se rompe el dibujo)
-            if (grid_mode != grid_last)
-                grid_last = grid_mode;
-                for (i = 0; i < ROWS; i++)
-                    if (txt_row[i] > 0) write_delete(txt_row[i]); txt_cache[txt_row[i]] = 0; end
-                    if (grid_mode == 1)
-                        // alineacion 4 = centrado: el motor lo recentra cada vez que cambia el texto
-                        txt_row[i] = write_var(fnt_t, ur(grid_cx(i)), ur(grid_cy(i) + 30), -20, 4, row_label[i]);
-                    else
-                        txt_row[i] = write_var(fnt_t, ur(110), ur(ROW_Y0 + i * ROW_H + ROW_H / 2), -20, 3, row_label[i]);
-                    end
-                end
-            end
+            grid_last = grid_mode;
 
             lbl_ver = dir_ver; lbl_top = top_row;
         end
@@ -2709,7 +2698,7 @@ begin
             if (rowi < n_entries)
                 by = ROW_Y0 + i * ROW_H + ROW_H / 2;
                 if (grid_mode == 1) by = grid_cy(i); end
-                txt_want[txt_row[i]] = 8589934336 + (rowi == sel && !tab_focus ? 255 : 190);
+                txt_want[grid_mode == 1 ? txt_cell[i] : txt_row[i]] = 8589934336 + (rowi == sel && !tab_focus ? 255 : 190);
                 switch (entry_dir[rowi])
                     case K_DIR, K_MYLISTS, K_AFOLDER, K_DOWNLOADS: g = g_icon[10]; end
                     case K_ADDONS, K_ADDON: g = g_icon[16]; end
