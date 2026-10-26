@@ -1603,7 +1603,9 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
         // Furthermore, it's possible a game controller has SOURCE_KEYBOARD and
         // SOURCE_JOYSTICK, while its key events arrive from the keyboard source
         // So, retrieve the device itself and check all of its sources
-        if (SDLControllerManager.isDeviceSDLJoystick(deviceId)) {
+        // Android TV: el mando a distancia es una fuente "DPAD" (no un mando de juego) y llega como teclas: solo los mandos
+        // de juego de verdad van por la via de joystick (si no, las flechas y OK no llegarian al reproductor)
+        if (SDLControllerManager.isDeviceSDLJoystick(deviceId) && isGameController(deviceId)) {
             // Note that we process events with specific key codes here
             if (event.getAction() == KeyEvent.ACTION_DOWN) {
                 if (SDLControllerManager.onNativePadDown(deviceId, keyCode) == 0) {
@@ -1638,14 +1640,38 @@ public class SDLActivity extends Activity implements View.OnSystemUiVisibilityCh
                     SDLInputConnection.nativeCommitText(String.valueOf((char) event.getUnicodeChar()), 1);
                 }
             }
-            onNativeKeyDown(keyCode);
+            onNativeKeyDown(remoteKey(keyCode));
             return true;
         } else if (event.getAction() == KeyEvent.ACTION_UP) {
-            onNativeKeyUp(keyCode);
+            onNativeKeyUp(remoteKey(keyCode));
             return true;
         }
 
         return false;
+    }
+
+    // Teclas de un mando a distancia de TV traducidas a las que conoce el reproductor (las flechas y OK entre ellas).
+    // HOME no llega nunca a una app: Android la reserva para volver al menu de la TV.
+    private static int remoteKey(int keyCode) {
+        switch (keyCode) {
+            case KeyEvent.KEYCODE_DPAD_CENTER:       return KeyEvent.KEYCODE_ENTER;     // OK
+            case KeyEvent.KEYCODE_MENU:              return KeyEvent.KEYCODE_M;         // opciones
+            case KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE:
+            case KeyEvent.KEYCODE_MEDIA_PLAY:
+            case KeyEvent.KEYCODE_MEDIA_PAUSE:       return KeyEvent.KEYCODE_SPACE;     // pausa
+            case KeyEvent.KEYCODE_MEDIA_FAST_FORWARD: return KeyEvent.KEYCODE_P;        // saltar adelante
+            case KeyEvent.KEYCODE_MEDIA_REWIND:      return KeyEvent.KEYCODE_N;         // saltar atras
+            case KeyEvent.KEYCODE_MEDIA_STOP:        return KeyEvent.KEYCODE_ESCAPE;    // volver
+            default: return keyCode;
+        }
+    }
+
+    // true si el dispositivo es un mando de juego o un joystick (no solo un mando a distancia con cruceta)
+    private static boolean isGameController(int deviceId) {
+        InputDevice d = InputDevice.getDevice(deviceId);
+        if (d == null || deviceId < 0) return false;
+        int src = d.getSources();
+        return (src & InputDevice.SOURCE_CLASS_JOYSTICK) != 0 || (src & InputDevice.SOURCE_GAMEPAD) == InputDevice.SOURCE_GAMEPAD;
     }
 
     /**
