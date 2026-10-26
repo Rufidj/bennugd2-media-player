@@ -65,8 +65,18 @@ On Android the app turns the finger gestures into the keys the player already kn
 
 ## Android
 
-The app is built from the SDL2 template in [`android/`](android). It runs on phones
-(arm64-v8a) and on the emulator (x86_64); the APK is universal.
+The app is built from the SDL2 template in [`android/`](android). It runs on phones and tablets
+(arm64-v8a, and armeabi-v7a for 32-bit devices) and on the emulator (x86_64); the APK is universal.
+Text is typed in Android's own text dialog (the phone's or the TV's keyboard, with a password mode),
+opened by the engine through JNI (`SYSTEM_KEYBOARD_*`, see `libmod_misc`).
+
+### Android TV
+
+The same APK installs on an Android TV: it declares the leanback launcher and a banner, and it does not
+need a touchscreen. The remote control (arrows, OK, back) and game controllers work as they do on the
+PS5 pad. Things to keep in mind on a TV: video is decoded in software with FFmpeg, so a weak TV box can
+stutter at 1080p; and access to local files is more restricted than on a phone, so the network addons
+(Jellyfin, Plex, YouTube...) are the most practical content there.
 
 To build it you need the engine compiled for Android and the third-party libraries
 (SDL2, SDL2_image, SDL2_mixer, FreeType, sdl-gpu, FFmpeg and mbedTLS for HTTPS):
@@ -75,6 +85,7 @@ To build it you need the engine compiled for Android and the third-party librari
 # en el checkout de BennuGD2
 ANDROID_NDK=$HOME/Android/Sdk/ndk/27.0.12077973 ./build.sh aarch64-linux-android
 ANDROID_NDK=$HOME/Android/Sdk/ndk/27.0.12077973 ./build.sh x86_64-linux-android
+ANDROID_NDK=$HOME/Android/Sdk/ndk/27.0.12077973 ./build.sh armv7a-linux-androideabi   # 32-bit devices (many TVs)
 
 # en este repositorio: copia las librerias y el .dcb a donde el Gradle los espera
 ./android/preparar.sh

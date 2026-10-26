@@ -17,7 +17,7 @@ ENGINE="${BENNUGD2:-$HOME/BennuGD2}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 
 # pares <target del motor>:<abi de Android>
-ALL="aarch64-linux-android:arm64-v8a x86_64-linux-android:x86_64"
+ALL="aarch64-linux-android:arm64-v8a armv7a-linux-androideabi:armeabi-v7a x86_64-linux-android:x86_64"
 PAIRS="${*:-$ALL}"
 
 DEPS="libSDL2.so libSDL2_image.so libSDL2_mixer.so libfreetype.so \
