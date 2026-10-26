@@ -54,13 +54,18 @@ const
     K_XCAT = 12; K_XSTR = 13; K_XSER = 14;   // entradas de una pantalla de Xtream (categoría, canal, serie)
     // tienda de addons: repositorio oficial del reproductor (se puede apuntar a otro con MP_STORE_URL)
     STORE_URL = "https://raw.githubusercontent.com/Rufidj/bennugd2-media-player/main/addons";
-    M_NONE = 0; M_MENU = 1; M_KB = 2; M_CREDITS = 3; M_SYSKB = 4;                             // pantallas modales (menu / teclado)
+    M_NONE = 0; M_MENU = 1; M_KB = 2; M_CREDITS = 3; M_SYSKB = 4; M_SETTINGS = 5;                             // pantallas modales (menu / teclado)
     KB_NEWLIST = 1; KB_RENAME_LIST = 2; KB_URL = 3; KB_NEW_TITLE = 4; KB_ENTRY_TITLE = 5; KB_LOGO = 6; KB_ADDON = 7; KB_ASET = 8;
-    KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11; KB_AUTH_SERVER = 12; KB_TMDB = 13;
+    KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11; KB_AUTH_SERVER = 12; KB_TMDB = 13; KB_ADDON_URL = 14; KB_STORE_URL = 15;
     MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
     MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_TMDB = 28; MA_ASET = 300; MA_PICK = 100;
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
-    MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27; MA_DOWNLOAD = 29; MA_DELETE_DL = 30; MA_DELETE_DL_YES = 31; MA_DL_VIDEO = 32; MA_DL_AUDIO = 33; MA_DL_FMT = 400;
+    MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27; MA_DOWNLOAD = 29; MA_DELETE_DL = 30; MA_DELETE_DL_YES = 31; MA_DL_VIDEO = 32; MA_DL_AUDIO = 33; MA_DL_FMT = 400; MA_UNK_YES = 34; MA_CACHE_YES = 35; MA_ST_BACK = 36;
+    // ajustes: tipo de fila y su identificador
+    STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
+    ST_LANG = 1; ST_SKIN = 2; ST_PREVIEW = 3; ST_SEEK = 4; ST_VIZ = 5; ST_UNKNOWN = 6; ST_INSTALL = 7; ST_STOREURL = 8; ST_ACCOUNTS = 9; ST_TMDB = 10;
+    ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17;
+    APP_VERSION = "1.2";
 end
 
 global
@@ -161,8 +166,15 @@ global
     string wl_t[2048]; string wl_u[2048]; string wl_l[2048]; int wl_n;     // lista de trabajo
     int modal, modal_ver, mlbl_ver = -1;
     // menu horizontal del inicio (estilo Kodi): secciones 0 Archivos, 1 Addons, 2 Tienda, 3 Mis listas, 4 Descargas
-    int tab_focus;                              // 1 = el foco esta en la barra de secciones
-    string s_tab[5]; int txt_tab[5]; int tab_x[5], tab_w[5]; int tab_key = -1;
+    int tab_focus, tab_cur;                     // 1 = el foco esta en la barra de secciones; tab_cur = la casilla con el foco
+    // ajustes (guardados en config.cfg)
+    int set_preview = 1, set_seek = 1, set_unknown, set_dlfmt;
+    string set_store_url = "";
+    // pantalla de ajustes (estilo Kodi): categorias a la izquierda, opciones a la derecha
+    int st_cat, st_col, st_sel, st_n;           // categoria, columna con el foco (0 categorias, 1 opciones), fila, filas
+    string st_label[10], st_value[10]; int st_type[10], st_id[10];
+    string s_stv[10]; int txt_stv[10]; string s_stc[6]; int txt_stc[6];
+    string s_tab[6]; int txt_tab[6]; int tab_x[6], tab_w[6]; int tab_key = -1;
     int dlg_key = -1;                           // forma de la ventana del menu (para recolocar sus textos solo cuando cambia)
     string menu_title = "", menu_opt[10]; int menu_act[10], menu_n, menu_sel; string pick_name[10];
     int kb_secret, kb_secret_next;
@@ -173,7 +185,7 @@ global
     string s_mtitle, s_mopt[10], s_mhint, s_kbtitle, s_kbin, s_kbrow[5], s_kbs[6];
     int txt_mtitle, txt_mopt[10], txt_mhint, txt_kbin, txt_kbrow[5], txt_kbs[6];
     // idioma y aspecto
-    string lang_cur = "es"; string lang_k[200]; string lang_v[200]; int lang_n, lang_ver;
+    string lang_cur = "es"; string lang_k[320]; string lang_v[320]; int lang_n, lang_ver;
     int skin = 1;                                 // 0 clasico, 1 PlayStation
     int g_bg_ps, g_wave[3], g_pill, g_sym[4];
     int hint_key = -1, hint_n, hint_ic[6], hint_icx[6]; string s_h[6]; int txt_h[6];
@@ -473,7 +485,9 @@ begin
     txt_ovt = write_var(fnt_t, ur(SW / 2), ur(OV_TY), -30, 4, s_ovt);
     txt_ovp = write_var(fnt_t, ur(SW / 2), ur(OV_PY), -30, 4, s_ovp);
     txt_ovh = write_var(fnt_t, ur(SW / 2), ur(OV_BY), -30, 4, s_ovh);
-    for (i = 0; i < 5; i++) txt_tab[i] = write_var(fnt_t, ur(0), ur(44), -20, 3, s_tab[i]); end
+    for (i = 0; i < 6; i++) txt_tab[i] = write_var(fnt_t, ur(0), ur(44), -20, 3, s_tab[i]); end
+    for (i = 0; i < 10; i++) txt_stv[i] = write_var(fnt_t, ur(SW - 130), ur(190 + i * 52), -30, 5, s_stv[i]); end
+    for (i = 0; i < 6; i++) txt_stc[i] = write_var(fnt_t, ur(140), ur(190 + i * 60), -30, 3, s_stc[i]); end
     create_sub_texts(sub_font_id(lang_script()));
 end
 
@@ -703,7 +717,20 @@ end
 // ---- secciones del inicio (menu horizontal, estilo Kodi)
 function int tab_count()
 begin
-    return store_dir != "" ? 5 : 2;
+    return store_dir != "" ? 6 : 3;                     // Archivos, Addons[, Tienda, Mis listas, Descargas] y Ajustes
+end
+
+// numero de la seccion de una casilla: 0..4, o 5 = Ajustes (que no es una seccion sino una ventana)
+function int tab_id(int i)
+begin
+    if (store_dir != "") return i; end
+    return i < 2 ? i : 5;
+end
+
+// casilla de la barra que corresponde a una seccion
+function int tab_index(int sec)
+begin
+    return (store_dir == "" && sec > 1) ? 2 : sec;
 end
 
 // seccion en la que esta el explorador (-1 = dentro de algo: un addon, una lista, una carpeta...: sin barra de secciones)
@@ -725,6 +752,7 @@ begin
         case 1: return tr("s_addons"); end
         case 2: return tr("s_store"); end
         case 3: return tr("m_mylists"); end
+        case 5: return tr("m_settings"); end
     end
     return tr("s_downloads");
 end
@@ -743,50 +771,62 @@ end
 
 // true si ya se ha atendido la pulsacion (la barra de secciones la ha usado)
 function int update_tabs()
-private int ts, n, i;
+private int ts, n, i, tid;
 begin
     ts = cur_section();
     if (ts < 0) tab_focus = 0; return 0; end
     n = tab_count();
-    if (act_press[A_SEEKB]) tab_goto((ts + n - 1) % n); return 1; end             // L1 / R1 cambian de seccion desde cualquier fila
-    if (act_press[A_SEEKF]) tab_goto((ts + 1) % n); return 1; end
-    // un toque sobre una seccion
+    if (act_press[A_SEEKB]) tab_goto(tab_id((tab_index(ts) + n - 2) % (n - 1))); return 1; end      // L1 / R1: de seccion en seccion (sin pasar por Ajustes)
+    if (act_press[A_SEEKF]) tab_goto(tab_id((tab_index(ts) + 1) % (n - 1))); return 1; end
+    // un toque sobre una casilla
     if (touch_mode && act_press[A_OK] && touch_age <= 8 && touch_y < 84)
         for (i = 0; i < n; i++)
-            if (touch_x >= tab_x[i] - 24 && touch_x <= tab_x[i] + tab_w[i] + 24) tab_goto(i); return 1; end
+            if (touch_x >= tab_x[i] - 24 && touch_x <= tab_x[i] + tab_w[i] + 24)
+                if (tab_id(i) == 5) settings_open(); else tab_goto(tab_id(i)); end
+                return 1;
+            end
         end
     end
     if (tab_focus)
-        if (act_press[A_LEFT])  tab_goto((ts + n - 1) % n); return 1; end
-        if (act_press[A_RIGHT]) tab_goto((ts + 1) % n); return 1; end
+        if (act_press[A_LEFT] && tab_cur > 0)
+            tab_cur--; tid = tab_id(tab_cur); if (tid != 5) tab_goto(tid); end
+            return 1;
+        end
+        if (act_press[A_RIGHT] && tab_cur < n - 1)
+            tab_cur++; tid = tab_id(tab_cur); if (tid != 5) tab_goto(tid); end
+            return 1;
+        end
+        if (act_press[A_OK] && tab_id(tab_cur) == 5) tab_focus = 0; settings_open(); return 1; end
         if (act_press[A_DOWN] || act_press[A_OK] || act_press[A_BACK]) tab_focus = 0; return 1; end
         return 1;
     end
     // subir desde la primera fila lleva el foco a la barra
-    if (act_press[A_UP] && sel == (grid_mode == 1 ? sel % GRID_COLS : 0) && n_entries > 0)
-        if (grid_mode != 1 || sel < GRID_COLS) tab_focus = 1; return 1; end
+    if (act_press[A_UP] && n_entries > 0 && (grid_mode == 1 ? sel < GRID_COLS : sel == 0))
+        tab_focus = 1; tab_cur = tab_index(ts); return 1;
     end
     return 0;
 end
 
 // la barra: los nombres de las secciones, la actual subrayada (y con la seleccion cuando tiene el foco)
 function draw_tabs(int ts)
-private int i, n, tx, k;
+private int i, n, tx, k, cur;
 begin
     n = tab_count();
     k = n * 100 + lang_ver * 7;
     if (k != tab_key)
         tab_key = k; tx = 60;
         for (i = 0; i < n; i++)
-            s_tab[i] = tab_name(i); tab_w[i] = tw(s_tab[i]); tab_x[i] = tx;
+            s_tab[i] = tab_name(tab_id(i)); tab_w[i] = tw(s_tab[i]); tab_x[i] = tx;
             write_move(txt_tab[i], ur(tx), ur(44));
             tx += tab_w[i] + 60;
         end
     end
-    for (i = 0; i < n; i++) txt_want[txt_tab[i]] = 8589934336 + (i == ts ? 255 : (tab_focus ? 210 : 150)); end
-    put(S_TABUL, g_white, tab_x[ts] + tab_w[ts] / 2, 76, 100, tab_focus ? 0 : 255, -10);
-    spr_sizex[S_TABUL] = tab_w[ts] * 100 / 8; spr_sizey[S_TABUL] = 4 * 100 / 8;
-    if (tab_focus) put_sel(S_TABSEL, tab_x[ts] + tab_w[ts] / 2, 44, tab_w[ts] + 48, 52, -9); end
+    cur = tab_focus ? tab_cur : tab_index(ts);
+    for (i = 0; i < n; i++) txt_want[txt_tab[i]] = 8589934336 + (i == cur ? 255 : (tab_focus ? 210 : 150)); end
+    k = tab_index(ts);
+    put(S_TABUL, g_white, tab_x[k] + tab_w[k] / 2, 76, 100, tab_focus && cur == k ? 0 : 255, -10);
+    spr_sizex[S_TABUL] = tab_w[k] * 100 / 8; spr_sizey[S_TABUL] = 4 * 100 / 8;
+    if (tab_focus) put_sel(S_TABSEL, tab_x[cur] + tab_w[cur] / 2, 44, tab_w[cur] + 48, 52, -9); end
 end
 
 function update_browser()
@@ -930,7 +970,7 @@ begin
         end
     end
     pv_rest++;
-    if (pv_phase == 0 && pv_rest == (entry_dir[sel] == K_URL || entry_dir[sel] == K_AFOLDER ? 45 : 25) && sel >= 0 && sel < n_entries && (entry_dir[sel] == K_FILE || entry_dir[sel] == K_URL || entry_dir[sel] == K_XSTR || ((entry_dir[sel] == K_AFOLDER || entry_dir[sel] == K_ADDON) && entry_logo[sel] != "")) && entries[sel] != "..")
+    if (set_preview && pv_phase == 0 && pv_rest == (entry_dir[sel] == K_URL || entry_dir[sel] == K_AFOLDER ? 45 : 25) && sel >= 0 && sel < n_entries && (entry_dir[sel] == K_FILE || entry_dir[sel] == K_URL || entry_dir[sel] == K_XSTR || ((entry_dir[sel] == K_AFOLDER || entry_dir[sel] == K_ADDON) && entry_logo[sel] != "")) && entries[sel] != "..")
         video_use_hw(0);
         // emisoras con logo: se abre la imagen del logo; el resto de enlaces: el propio video por red (puede tardar un poco)
         if (entry_dir[sel] == K_XSTR)
@@ -1372,7 +1412,7 @@ begin
     fh = fopen("lang/" + code + ".txt", O_READ);
     if (!fh) return 0; end
     lang_n = 0;
-    while (!feof(fh) && lang_n < 200)
+    while (!feof(fh) && lang_n < 320)
         ln = fgets(fh);
         p = find(ln, "=");
         if (p > 0 && substr(ln, 0, 1) != "#")
@@ -1417,6 +1457,11 @@ begin
             if (k == "lang" && is_lang(v)) lang_cur = v; end
             if (k == "skin") skin = atoi(v) ? 1 : 0; end
             if (k == "tmdb") tmdb_key = v; end
+            if (k == "pv") set_preview = atoi(v) ? 1 : 0; end
+            if (k == "seek") set_seek = atoi(v); if (set_seek < 0 || set_seek > 3) set_seek = 1; end end
+            if (k == "unk") set_unknown = atoi(v) ? 1 : 0; end
+            if (k == "dlfmt") set_dlfmt = atoi(v); if (set_dlfmt < 0 || set_dlfmt > 3) set_dlfmt = 0; end end
+            if (k == "storeurl") set_store_url = v; end
         end
     end
     fclose(fh);
@@ -1431,7 +1476,211 @@ begin
     fputs(fh, "lang=" + lang_cur);
     fputs(fh, "skin=" + skin);
     fputs(fh, "tmdb=" + tmdb_key);
+    fputs(fh, "pv=" + set_preview);
+    fputs(fh, "seek=" + set_seek);
+    fputs(fh, "unk=" + set_unknown);
+    fputs(fh, "dlfmt=" + set_dlfmt);
+    fputs(fh, "storeurl=" + set_store_url);
     fclose(fh);
+end
+
+// ====================================================================== pantalla de ajustes (estilo Kodi)
+function st_row(int i, int sid, int sty, string slabel, string sval)
+begin
+    st_id[i] = sid; st_type[i] = sty; st_label[i] = slabel; st_value[i] = sval;
+end
+
+function string st_onoff(int v)
+begin
+    return v ? tr("st_on") : tr("st_off");
+end
+
+function int seek_ms()
+begin
+    switch (set_seek)
+        case 0: return 5000; end
+        case 2: return 30000; end
+        case 3: return 60000; end
+    end
+    return 10000;
+end
+
+function string seek_txt()
+begin
+    return (seek_ms() / 1000) + " s";
+end
+
+// rellena las filas de la categoria actual
+function st_build()
+private int n;
+begin
+    n = 0;
+    switch (st_cat)
+        case 0:                                                  // interfaz
+            st_row(n, ST_LANG, STT_CHOICE, tr("st_lang"), tr("lang_name")); n++;
+            st_row(n, ST_SKIN, STT_CHOICE, tr("st_skin"), skin ? tr("skin_ps") : tr("skin_classic")); n++;
+            st_row(n, ST_PREVIEW, STT_TOGGLE, tr("st_preview"), st_onoff(set_preview)); n++;
+        end
+        case 1:                                                  // reproduccion
+            st_row(n, ST_SEEK, STT_CHOICE, tr("st_seek"), seek_txt()); n++;
+            st_row(n, ST_VIZ, STT_CHOICE, tr("st_viz"), viz_mode ? tr("st_viz_wave") : tr("st_viz_bars")); n++;
+        end
+        case 2:                                                  // addons y fuentes
+            st_row(n, ST_UNKNOWN, STT_TOGGLE, tr("st_unknown"), st_onoff(set_unknown)); n++;
+            st_row(n, ST_INSTALL, STT_ACTION, tr("st_install_url"), set_unknown ? "" : tr("st_needs_unknown")); n++;
+            if (set_unknown) st_row(n, ST_STOREURL, STT_ACTION, tr("st_store_url"), set_store_url == "" ? tr("st_default") : fit_text(set_store_url, 380)); n++; end
+            st_row(n, ST_ACCOUNTS, STT_ACTION, tr("m_accounts"), ""); n++;
+            st_row(n, ST_TMDB, STT_ACTION, tr("m_tmdb"), tmdb_key == "" ? "-" : "********"); n++;
+        end
+        case 3:                                                  // descargas
+            st_row(n, ST_DLFMT, STT_CHOICE, tr("st_dlfmt"), set_dlfmt == 1 ? tr("st_dl_video") : (set_dlfmt == 2 ? tr("st_dl_audio") : (set_dlfmt == 3 ? tr("st_dl_mp3") : tr("st_dl_ask")))); n++;
+            st_row(n, ST_DOWNDIR, STT_INFO, tr("st_downdir"), fit_text(downloads_dir, 400)); n++;
+            if (store_dir != "") st_row(n, ST_OPENDL, STT_ACTION, tr("st_openfolder"), ""); n++; end
+        end
+        case 4:                                                  // almacenamiento
+            st_row(n, ST_DATADIR, STT_INFO, tr("st_datadir"), fit_text(store_dir, 400)); n++;
+            st_row(n, ST_CLEARCACHE, STT_ACTION, tr("st_clear_cache"), ""); n++;
+        end
+        default:                                                 // acerca de
+            st_row(n, ST_VERSION, STT_INFO, tr("st_version"), APP_VERSION); n++;
+            st_row(n, ST_CREDITS, STT_ACTION, tr("m_about"), ""); n++;
+        end
+    end
+    st_n = n;
+    if (st_sel >= st_n) st_sel = st_n - 1; end
+    if (st_sel < 0) st_sel = 0; end
+end
+
+function settings_open()
+begin
+    modal = M_SETTINGS; modal_ver++; dlg_key = -1;
+    st_build();
+end
+
+// cambia el valor de una opcion de tipo interruptor o selector (d = +1 / -1)
+function st_change(int d)
+begin
+    switch (st_id[st_sel])
+        case ST_LANG:
+            lang_load(d > 0 ? next_lang() : next_lang());       // el reproductor solo avanza en la lista de idiomas
+            cfg_save();
+        end
+        case ST_SKIN: skin = !skin; cfg_save(); end
+        case ST_PREVIEW: set_preview = !set_preview; if (!set_preview) close_preview(); pv_idx = -1; end cfg_save(); end
+        case ST_SEEK: set_seek = (set_seek + 4 + d) % 4; cfg_save(); end
+        case ST_VIZ: viz_mode = !viz_mode; end
+        case ST_DLFMT: set_dlfmt = (set_dlfmt + 4 + d) % 4; cfg_save(); end
+        case ST_UNKNOWN:
+            if (set_unknown)
+                set_unknown = 0; cfg_save();
+            else
+                // aviso antes de activarlo: un addon de fuera de la tienda puede conectarse a cualquier servidor
+                menu_clear(); menu_add(tr("m_yes_allow"), MA_UNK_YES); menu_add(tr("m_no"), MA_ST_BACK);
+                menu_show(tr("mt_unknown"));
+                return 0;
+            end
+        end
+    end
+    st_build();
+end
+
+// pulsar OK sobre una fila
+function st_activate()
+begin
+    switch (st_type[st_sel])
+        case STT_TOGGLE, STT_CHOICE: st_change(1); return 0; end
+        case STT_INFO: return 0; end
+    end
+    switch (st_id[st_sel])
+        case ST_INSTALL:
+            if (!set_unknown) toast(tr("st_needs_unknown")); else kb_open(tr("k_addon_url"), "https://", KB_ADDON_URL); end
+        end
+        case ST_STOREURL: kb_open(tr("k_store_url"), set_store_url, KB_STORE_URL); end
+        case ST_ACCOUNTS: open_accounts_menu(); end
+        case ST_TMDB: kb_open(tr("k_tmdb"), tmdb_key, KB_TMDB); end
+        case ST_OPENDL: modal = M_NONE; tab_goto(4); end
+        case ST_CLEARCACHE:
+            menu_clear(); menu_add(tr("m_yes_clear"), MA_CACHE_YES); menu_add(tr("m_no"), MA_ST_BACK);
+            menu_show(tr("mt_clear_cache"));
+        end
+        case ST_CREDITS: credits_open(); end
+    end
+end
+
+// vacia las imagenes de logos guardadas
+function clear_image_cache()
+private int dh; string nm;
+begin
+    if (logo_dir() == "") return 0; end
+    dh = diropen(join_path(logo_dir(), "*"));
+    if (!dh) return 0; end
+    nm = dirread(dh);
+    while (nm != "")
+        if (nm != "." && nm != "..") fremove(join_path(logo_dir(), nm)); end
+        nm = dirread(dh);
+    end
+    dirclose(dh);
+    return 1;
+end
+
+// control de la pantalla de ajustes (sin Kodi no se entenderia: izquierda = categorias, derecha = opciones)
+function update_settings()
+begin
+    if (st_col == 0)
+        if (act_press[A_UP])   st_cat = (st_cat + 5) % 6; st_sel = 0; st_build(); end
+        if (act_press[A_DOWN]) st_cat = (st_cat + 1) % 6; st_sel = 0; st_build(); end
+        if ((act_press[A_OK] || act_press[A_RIGHT]) && st_n > 0) st_col = 1; end
+        if (act_press[A_BACK] || act_press[A_MUTE]) modal = M_NONE; end
+    else
+        if (act_press[A_UP])   st_sel = (st_sel + st_n - 1) % st_n; end
+        if (act_press[A_DOWN]) st_sel = (st_sel + 1) % st_n; end
+        if (act_press[A_LEFT])
+            if (st_type[st_sel] == STT_TOGGLE || st_type[st_sel] == STT_CHOICE) st_change(-1); else st_col = 0; end
+        end
+        if (act_press[A_RIGHT] && (st_type[st_sel] == STT_TOGGLE || st_type[st_sel] == STT_CHOICE)) st_change(1); end
+        if (act_press[A_OK]) st_activate(); end
+        if (act_press[A_BACK]) st_col = 0; end
+        if (act_press[A_MUTE]) modal = M_NONE; end
+    end
+end
+
+// dibujo: una ventana grande con las categorias a la izquierda y las opciones a la derecha
+function draw_settings()
+private int i, x0, y0, w, h, a;
+begin
+    x0 = 70; y0 = 56; w = SW - 140; h = SH - 112;
+    put(S_OVBOX, g_ovbox, SW / 2, SH / 2, 100, 255, -22);
+    spr_sizex[S_OVBOX] = w * 100 / 8; spr_sizey[S_OVBOX] = h * 100 / 8;
+    put(S_OVBG, g_barbg, SW / 2, y0 + 78, 100, 255, -23);
+    spr_sizex[S_OVBG] = (w - 60) * 100 / 8; spr_sizey[S_OVBG] = 2 * 100 / 8;
+    put(S_OVDIM, g_barbg, x0 + 330, y0 + 100 + (h - 124) / 2, 100, 255, -23);        // separador vertical
+    spr_sizex[S_OVDIM] = 2 * 100 / 8; spr_sizey[S_OVDIM] = (h - 124) * 100 / 8;
+    s_mtitle = tr("mt_settings");
+    for (i = 0; i < 6; i++) s_stc[i] = i == 0 ? tr("sc_interface") : (i == 1 ? tr("sc_player") : (i == 2 ? tr("sc_addons") : (i == 3 ? tr("sc_downloads") : (i == 4 ? tr("sc_storage") : tr("sc_about"))))); end
+    for (i = 0; i < 10; i++)
+        s_mopt[i] = i < st_n ? fit_text(st_label[i], 600) : "";
+        s_stv[i] = i < st_n ? st_value[i] : "";
+    end
+    if (dlg_key != -7)                                // los textos se colocan una vez (el menu de opciones comparte los mismos)
+        dlg_key = -7;
+        write_move(txt_mtitle, ur((SW - tw(s_mtitle)) / 2), ur(y0 + 40));
+        for (i = 0; i < 10; i++)
+            write_move(txt_mopt[i], ur(x0 + 380), ur(y0 + 134 + i * 52));
+            write_move(txt_stv[i], ur(x0 + w - 50), ur(y0 + 134 + i * 52));
+        end
+        for (i = 0; i < 6; i++) write_move(txt_stc[i], ur(x0 + 54), ur(y0 + 134 + i * 60)); end
+    end
+    txt_want[txt_mtitle] = 8589934336 + (255);
+    for (i = 0; i < 6; i++) txt_want[txt_stc[i]] = 8589934336 + (i == st_cat ? (st_col == 0 ? 255 : 220) : 160); end
+    for (i = 0; i < st_n; i++)
+        a = (i == st_sel && st_col == 1) ? 255 : 190;
+        txt_want[txt_mopt[i]] = 8589934336 + (a);
+        txt_want[txt_stv[i]] = 8589934336 + (a == 255 ? 255 : 170);
+    end
+    put_sel(S_TABSEL, x0 + 175, y0 + 134 + st_cat * 60, 300, 52, -24);
+    if (st_col == 1) spr_alpha[S_TABSEL] = 110; end
+    if (st_col == 1) put_sel(S_MSEL, x0 + 335 + (w - 335) / 2 - 10, y0 + 134 + st_sel * 52, w - 365, 46, -24); end
+    if (skin) hint_set(2); else txt_want[txt_mhint] = 8589934336 + (170); end
 end
 
 function open_settings_menu(int keep)
@@ -1658,7 +1907,10 @@ begin
     modal = M_NONE;
     switch (act)
         case MA_CANCEL: end
-        case MA_SETTINGS: open_settings_menu(0); end
+        case MA_SETTINGS: settings_open(); end
+        case MA_UNK_YES: set_unknown = 1; cfg_save(); toast(tr("t_unknown_on")); settings_open(); end
+        case MA_CACHE_YES: clear_image_cache(); toast(tr("t_cache_cleared")); settings_open(); end
+        case MA_ST_BACK: settings_open(); end
         case MA_ASETTINGS:
             if (addon_mode == 1) addon_open_settings(entry_url[sel]); else addon_open_settings(addon_dir); end
         end
@@ -1668,6 +1920,9 @@ begin
         case MA_ABOUT: credits_open(); end
         case MA_TMDB:  kb_open(tr("k_tmdb"), tmdb_key, KB_TMDB); end
         case MA_DOWNLOAD:
+            if (set_dlfmt == 1 && dl_possible(sel) == 1) dl_start(sel, 0); return 0; end                         // formato predeterminado (Ajustes > Descargas)
+            if (set_dlfmt == 2) dl_start(sel, 1); return 0; end
+            if (set_dlfmt == 3) dl_start(sel, 10); return 0; end
             // se elige el formato: el video tal cual, el audio original o el audio convertido a otro formato
             dl_pick = sel;
             menu_clear();
@@ -1927,7 +2182,13 @@ begin
             end
         end
         case KB_TMDB:
-            tmdb_key = kb_text; cfg_save(); open_settings_menu(0); toast(tr("t_tmdb_saved"));
+            tmdb_key = kb_text; cfg_save(); settings_open(); toast(tr("t_tmdb_saved"));
+        end
+        case KB_ADDON_URL:
+            addon_install_url(kb_text); settings_open();
+        end
+        case KB_STORE_URL:
+            set_store_url = kb_text; if (set_store_url == "https://") set_store_url = ""; end cfg_save(); settings_open();
         end
         case KB_LOGO:
             wl_l[op_idx] = (kb_text == "https://") ? "" : kb_text; if (wl_save(cur_list)) read_list(); reselect(op_idx + 1); toast(tr("t_logo_updated")); end
@@ -1983,6 +2244,8 @@ begin
         if (act_press[A_DOWN]) menu_sel = (menu_sel + 1) % menu_n; end
         if (act_press[A_OK])   menu_run(menu_act[menu_sel]); end
         if (act_press[A_BACK] || act_press[A_MUTE]) modal = M_NONE; end
+    elseif (modal == M_SETTINGS)
+        update_settings();
     elseif (modal == M_CREDITS)
         cr_pos += cr_fast ? 300 : 80;
         if (act_press[A_OK]) cr_fast = !cr_fast; end
@@ -2084,6 +2347,10 @@ begin
         put(S_SHADE_BOT, g_shade, SW / 2, SH - 128, 100, 255, -10);
         spr_sizex[S_SHADE_BOT] = SW / 64 * 100; spr_sizey[S_SHADE_BOT] = 100;
         if (skin) hint_set(4); else txt_want[txt_mhint] = 8589934336 + (170); end
+        return 0;
+    end
+    if (modal == M_SETTINGS)
+        draw_settings();
         return 0;
     end
     modal_labels();
@@ -2278,10 +2545,10 @@ function press_button(int b)
 begin
     switch (b)
         case B_PREV: next_video(-1); end
-        case B_RW:   seek_rel(-10000); end
+        case B_RW:   seek_rel(-seek_ms()); end
         case B_PLAY: toggle_pause(); end
         case B_STOP: stop_video(); end
-        case B_FF:   seek_rel(10000); end
+        case B_FF:   seek_rel(seek_ms()); end
         case B_NEXT: next_video(1); end
         case B_SUBS: cycle_subs(); end
         case B_AUDIO: cycle_audio(); end
@@ -2311,8 +2578,8 @@ begin
     if (any_input && !(act_hold[A_UP] && !shown && 0)) overlay_t = 0; end
 
     // atajos que funcionan siempre
-    if (act_press[A_SEEKB]) seek_rel(-10000); toast("-10 s"); end
-    if (act_press[A_SEEKF]) seek_rel(10000);  toast("+10 s"); end
+    if (act_press[A_SEEKB]) seek_rel(-seek_ms()); toast("-" + seek_txt()); end
+    if (act_press[A_SEEKF]) seek_rel(seek_ms()); toast("+" + seek_txt()); end
     if (act_press[A_PAUSE]) toggle_pause(); end
     if (act_press[A_SUBS])
         if (music_mode) viz_mode = !viz_mode; toast(viz_mode ? tr("t_viz_wave") : tr("t_viz_bars")); else cycle_subs(); end
@@ -2333,8 +2600,8 @@ begin
         if (act_press[A_OK])    press_button(focus); end
     else
         // iconos ocultos: la cruceta salta/regula, X pausa
-        if (act_press[A_LEFT])  seek_rel(-10000); toast("-10 s"); end
-        if (act_press[A_RIGHT]) seek_rel(10000);  toast("+10 s"); end
+        if (act_press[A_LEFT])  seek_rel(-seek_ms()); toast("-" + seek_txt()); end
+        if (act_press[A_RIGHT]) seek_rel(seek_ms()); toast("+" + seek_txt()); end
         if (act_press[A_UP])    set_volume(vol + 5); end
         if (act_press[A_DOWN])  set_volume(vol - 5); end
         if (act_press[A_OK])    toggle_pause(); end
@@ -2412,7 +2679,9 @@ begin
     txt_want[txt_time] = 8589934336 + (0); txt_want[txt_title] = 8589934336 + (0); txt_want[txt_toast] = 8589934336 + (0);
     for (i = 0; i < 6; i++) txt_want[txt_sub[i]] = 8589934336 + (0); end
     for (i = 0; i < 7; i++) txt_want[txt_info[i]] = 8589934336 + (0); end
-    for (i = 0; i < 5; i++) txt_want[txt_tab[i]] = 8589934336 + (0); end
+    for (i = 0; i < 6; i++) txt_want[txt_tab[i]] = 8589934336 + (0); end
+    for (i = 0; i < 10; i++) txt_want[txt_stv[i]] = 8589934336 + (0); end
+    for (i = 0; i < 6; i++) txt_want[txt_stc[i]] = 8589934336 + (0); end
     txt_want[txt_amsg] = 8589934336 + (0); txt_want[txt_ovt] = 8589934336 + (0); txt_want[txt_ovp] = 8589934336 + (0); txt_want[txt_ovh] = 8589934336 + (0);
     txt_want[txt_mtitle] = 8589934336 + (0); txt_want[txt_mhint] = 8589934336 + (0); txt_want[txt_kbin] = 8589934336 + (0); for (i = 0; i < 6; i++) txt_want[txt_kbs[i]] = 8589934336 + (0); end
     for (i = 0; i < 10; i++) txt_want[txt_mopt[i]] = 8589934336 + (0); end

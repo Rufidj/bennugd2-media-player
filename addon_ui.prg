@@ -567,6 +567,7 @@ end
 function string store_root()
 begin
     if (store_base != "") return store_base; end
+    if (set_unknown && set_store_url != "") return set_store_url; end            // Ajustes > Addons y fuentes
     return STORE_URL;
 end
 
@@ -1030,6 +1031,45 @@ begin
         fremove(dl_path);
         show_error(tr("s_downloads"), tr("t_dl_fail") + ": " + why);
     end
+end
+
+// Instala un addon de fuera de la tienda (Ajustes > Addons y fuentes > Origenes desconocidos): se baja main.addon desde la
+// direccion (o desde la carpeta que se escribe), se comprueba que es un addon y se guarda en el almacen de addons
+function addon_install_url(string url)
+private string abase, aid, adir, nm, tmp, ch; int st, i;
+begin
+    if (!set_unknown) toast(tr("st_needs_unknown")); return 0; end
+    if (store_dir == "") toast(tr("t_no_store")); return 0; end
+    if (len(url) < 9 || url == "https://") return 0; end
+    if (lcase(substr(url, len(url) - 10, 10)) != "main.addon")
+        if (substr(url, len(url) - 1, 1) != "/") url += "/"; end
+        url += "main.addon";
+    end
+    abase = substr(url, 0, len(url) - 10);
+    toast(tr("s_loading")); frame;
+    st = http_fetch(url, "", "GET", "");
+    tmp = join_path(store_dir, "addon_nuevo.tmp");
+    if (st != 200 || !http_save(tmp))
+        show_error(tr("st_install_url"), tr("t_addon_fail") + ": " + (st > 0 ? tr("t_store_http") + " " + st : http_error())); return 0;
+    end
+    if (!ad_peek_info(tmp)) fremove(tmp); show_error(tr("st_install_url"), tr("t_store_badfile")); return 0; end
+    nm = ad_i_name; aid = "";
+    for (i = 0; i < len(ad_i_id); i++)                                  // el id es el nombre de la carpeta: solo letras, numeros, - y _
+        ch = lcase(substr(ad_i_id, i, 1));
+        if ((ch >= "a" && ch <= "z") || (ch >= "0" && ch <= "9") || ch == "-" || ch == "_") aid += ch; end
+    end
+    if (aid == "") fremove(tmp); show_error(tr("st_install_url"), tr("t_store_badfile")); return 0; end
+    adir = join_path(join_path(store_dir, "addons"), aid);
+    mkdir(join_path(store_dir, "addons")); mkdir(adir);
+    if (!http_save(join_path(adir, "main.addon"))) fremove(tmp); show_error(tr("st_install_url"), tr("t_store_nosave")); return 0; end
+    fremove(tmp);
+    // opcionales: el logo y la traduccion a este idioma, si estan junto al addon
+    if (http_fetch(abase + "logo.png", "", "GET", "") == 200) http_save(join_path(adir, "logo.png")); end
+    if (lang_cur != "en")
+        mkdir(join_path(adir, "lang"));
+        if (http_fetch(abase + "lang/" + lang_cur + ".txt", "", "GET", "") == 200) http_save(join_path(join_path(adir, "lang"), lang_cur + ".txt")); end
+    end
+    toast(tr("t_addon_installed") + " " + nm);
 end
 
 function open_store_menu()
