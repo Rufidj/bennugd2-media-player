@@ -695,7 +695,7 @@ begin
             aid = field_of(line, "|", 1); nm = field_of(line, "|", 2); ver = field_of(line, "|", 3); files = field_of(line, "|", 4); desc = field_of(line, "|", 5);
             if (aid != "" && nm != "")
                 entries[n_entries] = nm; entry_dir[n_entries] = K_SITEM; entry_url[n_entries] = aid;
-                entry_size[n_entries] = 0; entry_logo[n_entries] = (find(files, "logo.png") >= 0) ? store_root() + "/" + aid + "/logo.png" : ""; entry_info[n_entries] = desc;
+                entry_size[n_entries] = 0; entry_logo[n_entries] = (find(files, "logo.png") >= 0) ? store_root() + "/" + aid + "/logo.png?v=" + ver : "";      // la version en la direccion: si el logo cambia, la cache de imagenes no sirve el antiguo entry_info[n_entries] = desc;
                 entry_sver[n_entries] = ver; entry_sfiles[n_entries] = files; entry_siver[n_entries] = installed_ver(aid);
                 entry_skind[n_entries] = 0; entry_surl[n_entries] = "";
                 n_entries++;
