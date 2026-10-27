@@ -320,3 +320,6 @@ t_ru_done=개 파일을 받았습니다
 t_ru_busy=먼저 토런트 작업을 끝내세요
 h_stop=중지
 s_ru_hint=끝나면 "중지"를 누르세요
+s_tor_rebuf=버퍼링 중
+st_torextra=추가 공개 트래커(토런트)
+st_tordht=DHT: 트래커 없이 피어 찾기(토런트)

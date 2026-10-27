@@ -16,6 +16,9 @@ global
     int    tor_pick[10];                 // archivos del menu de eleccion
     uint32 tor_t0;
     int    set_tor_keep, set_tor_up;     // ajustes: conservar lo descargado; subida (indice)
+    int    set_tor_extra = 1, set_tor_dht = 1;                   // ajustes: trackers publicos adicionales y DHT
+    int    tor_stall;                    // 1 = el video esta en pausa porque se acabo el colchon (se reanuda solo)
+    int    tor_fsize;                    // tamano del archivo que se ve
 end
 
 function int is_torrent_src(string p)
@@ -37,12 +40,13 @@ end
 function tor_apply_settings()
 begin
     torrent_upload_limit(tor_up_kb(set_tor_up) * 1024);
+    torrent_options(set_tor_extra, set_tor_dht);
 end
 
 function tor_cleanup()
 begin
     if (tor_h) torrent_remove(tor_h, !set_tor_keep); tor_h = 0; end
-    tor_job = 0; tor_playing = 0;
+    tor_job = 0; tor_playing = 0; tor_stall = 0;
     prog_stop();
 end
 
@@ -77,7 +81,7 @@ end
 // el archivo elegido empieza a prepararse
 function tor_use_file(int fi)
 begin
-    tor_sel = fi; torrent_select(tor_h, fi);
+    tor_sel = fi; torrent_select(tor_h, fi); tor_fsize = (int)torrent_file_size(tor_h, fi); tor_stall = 0;
     tor_job = 3; tor_t0 = get_timer();
     prog_stop(); prog_start(tr("s_tor_buffer"), 1);
 end
@@ -125,22 +129,48 @@ begin
         if (st == 1) tor_pick_file(); end
     elseif (tor_job == 3)
         p = torrent_ready(tor_h);
-        need = TOR_NEED_MB * 1048576; if (need > torrent_file_size(tor_h, tor_sel) / 4) need = (int)(torrent_file_size(tor_h, tor_sel) / 4); end
+        need = tor_fsize / 200; if (need < 16777216) need = 16777216; end if (need > 50331648) need = 50331648; end     // un colchon de entre 16 y 48 MB
+        if (need > tor_fsize / 4) need = tor_fsize / 4; end
         ov_pct = p < 100 ? p * 70 / 100 : 70 + (int)(torrent_buffered(tor_h) * 30 / (need > 0 ? need : 1));
         if (ov_pct > 99) ov_pct = 99; end
         ov_title = tr("s_tor_buffer") + "   " + (torrent_rate(tor_h) / 1024) + " KB/s   " + torrent_peers(tor_h) + " " + tr("s_tor_peers");
         if (p >= 100 && torrent_buffered(tor_h) >= need)
             u = torrent_url(tor_h, tor_sel);
             prog_stop(); tor_job = 0; tor_playing = 1;
+            pending_title = base_name(torrent_file_name(tor_h, tor_sel));            // el titulo es el nombre del archivo, no la direccion codificada
             start_video(u);
             if (!vh) tor_cleanup(); end
         end
     end
 end
 
+// Mientras se ve: si el colchon que queda por delante baja de lo que se gasta en unos 3 segundos, se pausa el video y se reanuda solo
+// cuando hay para unos 12 (en vez de ir a tirones). Se calcula con lo que pesa el archivo y lo que dura.
+function tor_watch()
+private int rate, low, high, b, d;
+begin
+    if (!tor_playing || !tor_h || !vh) return 0; end
+    d = vdur();
+    rate = (d > 0 && tor_fsize > 0) ? (int)((tor_fsize / 1000) * 1000 / (d / 1000 + 1)) : 2000000;           // bytes por segundo
+    high = rate * 12; if (high < 12582912) high = 12582912; end if (high > 100663296) high = 100663296; end
+    low = rate * 3; if (low < 4194304) low = 4194304; end if (low > high / 2) low = high / 2; end
+    if (getenv("MP_TOR_HIGH") != "") high = atoi(getenv("MP_TOR_HIGH")); low = high / 2; end                    // solo pruebas
+    b = (int)torrent_buffered(tor_h);
+    if (tor_stall)
+        if (video_is_playing(vh)) tor_stall = 0;                              // se reanudo a mano
+        elseif (b >= high || torrent_percent(tor_h) >= 99) video_pause(vh, 0); tor_stall = 0;
+        else s_toast = tr("s_tor_rebuf") + " " + (b * 100 / high) + " %   " + (torrent_rate(tor_h) / 1024) + " KB/s"; toast_t = 6;
+        end
+    elseif (video_is_playing(vh) && b < low && torrent_percent(tor_h) < 98)
+        video_pause(vh, 1); tor_stall = 1;
+    end
+end
+
 // texto con la velocidad y los peers, para mostrar mientras se ve
 function string tor_stats()
+private int r;
 begin
     if (!tor_playing || !tor_h) return ""; end
-    return "   " + (torrent_rate(tor_h) / 1024) + " KB/s  " + torrent_peers(tor_h) + " " + tr("s_tor_peers") + "  " + torrent_percent(tor_h) + "%";
+    r = torrent_rate(tor_h) / 1024;
+    return "   " + (r / 1024) + "." + ((r % 1024) * 10 / 1024) + " MB/s (" + torrent_peers(tor_h) + ")";
 end

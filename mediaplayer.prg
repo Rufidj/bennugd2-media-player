@@ -67,7 +67,7 @@ const
     // ajustes: tipo de fila y su identificador
     STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
     ST_LANG = 1; ST_SKIN = 2; ST_PREVIEW = 3; ST_SEEK = 4; ST_VIZ = 5; ST_UNKNOWN = 6; ST_INSTALL = 7; ST_STOREURL = 8; ST_ACCOUNTS = 9;
-    ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18; ST_HIDDEN = 19; ST_ALLFILES = 20; ST_TORKEEP = 21; ST_TORUP = 22;
+    ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18; ST_HIDDEN = 19; ST_ALLFILES = 20; ST_TORKEEP = 21; ST_TORUP = 22; ST_TOREXTRA = 23; ST_TORDHT = 24;
     APP_VERSION = "1.2";
 end
 
@@ -1464,6 +1464,8 @@ begin
             if (k == "dlfmt") set_dlfmt = atoi(v); if (set_dlfmt < 0 || set_dlfmt > 3) set_dlfmt = 0; end end
             if (k == "storeurl") set_store_url = v; end
             if (k == "torkeep") set_tor_keep = atoi(v); end
+            if (k == "torextra") set_tor_extra = atoi(v); end
+            if (k == "tordht") set_tor_dht = atoi(v); end
             if (k == "torup") set_tor_up = atoi(v); if (set_tor_up < 0 || set_tor_up > 3) set_tor_up = 0; end end
             if (k == "imgint") set_img_int = atoi(v); if (set_img_int < 0 || set_img_int > 5) set_img_int = 1; end end
             if (k == "imgtr") set_img_tr = atoi(v); if (set_img_tr < 0 || set_img_tr > 4) set_img_tr = 3; end end
@@ -1491,6 +1493,8 @@ begin
     fputs(fh, "storeurl=" + set_store_url);
     fputs(fh, "view=" + set_view);
     fputs(fh, "torkeep=" + set_tor_keep);
+    fputs(fh, "torextra=" + set_tor_extra);
+    fputs(fh, "tordht=" + set_tor_dht);
     fputs(fh, "torup=" + set_tor_up);
     fputs(fh, "imgint=" + set_img_int);
     fputs(fh, "imgtr=" + set_img_tr);
@@ -1554,6 +1558,8 @@ begin
             st_row(n, ST_DLFMT, STT_CHOICE, tr("st_dlfmt"), set_dlfmt == 1 ? tr("st_dl_video") : (set_dlfmt == 2 ? tr("st_dl_audio") : (set_dlfmt == 3 ? tr("st_dl_mp3") : tr("st_dl_ask")))); n++;
             st_row(n, ST_DOWNDIR, STT_INFO, tr("st_downdir"), fit_text(downloads_dir, 400)); n++;
             st_row(n, ST_TORKEEP, STT_TOGGLE, tr("st_torkeep"), st_onoff(set_tor_keep)); n++;
+            st_row(n, ST_TOREXTRA, STT_TOGGLE, tr("st_torextra"), st_onoff(set_tor_extra)); n++;
+            st_row(n, ST_TORDHT, STT_TOGGLE, tr("st_tordht"), st_onoff(set_tor_dht)); n++;
             st_row(n, ST_TORUP, STT_CHOICE, tr("st_torup"), set_tor_up == 0 ? tr("st_up_off") : tor_up_kb(set_tor_up) + " KB/s"); n++;
             if (store_dir != "") st_row(n, ST_OPENDL, STT_ACTION, tr("st_openfolder"), ""); n++; end
         end
@@ -1587,6 +1593,8 @@ begin
         end
         case ST_SKIN: skin = !skin; cfg_save(); end
         case ST_TORKEEP: set_tor_keep = !set_tor_keep; cfg_save(); end
+        case ST_TOREXTRA: set_tor_extra = !set_tor_extra; tor_apply_settings(); cfg_save(); end
+        case ST_TORDHT: set_tor_dht = !set_tor_dht; tor_apply_settings(); cfg_save(); end
         case ST_TORUP: set_tor_up = (set_tor_up + 4 + d) % 4; tor_apply_settings(); cfg_save(); end
         case ST_HIDDEN: set_hidden = !set_hidden; cfg_save(); end
         case ST_ALLFILES: set_allfiles = !set_allfiles; cfg_save(); end
@@ -2661,6 +2669,7 @@ function update_player()
 private int shown, hs;
 begin
     if (!vh) state = ST_BROWSE; return 0; end
+    if (tor_playing) tor_watch(); end
 
     // salto pendiente en un stream HLS: se ejecuta cuando se deja de pulsar
     if (hls_seek_to >= 0 && get_timer() - hls_seek_t > 450)

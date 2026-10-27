@@ -321,3 +321,6 @@ t_ru_done=archivos recibidos
 t_ru_busy=Termina antes lo que estás haciendo con el torrent
 h_stop=Parar
 s_ru_hint=Pulsa Parar al acabar
+s_tor_rebuf=Almacenando en búfer
+st_torextra=Trackers públicos adicionales (torrents)
+st_tordht=DHT: buscar peers sin trackers (torrents)
