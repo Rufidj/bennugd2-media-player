@@ -5,7 +5,7 @@ import glob, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.join(HERE, "..")
-SOURCES = ["mediaplayer.prg", "addon_ui.prg", "addon.prg", "fileops.prg", "imageviewer.prg", "torrentplay.prg", "receive.prg"]
+SOURCES = ["mediaplayer.prg", "addon_ui.prg", "addon.prg", "fileops.prg", "imageviewer.prg", "torrentplay.prg", "receive.prg", "resume.prg"]
 
 
 def keys_used():

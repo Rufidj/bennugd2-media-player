@@ -63,11 +63,11 @@ const
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
     MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27; MA_DOWNLOAD = 29; MA_DELETE_DL = 30; MA_DELETE_DL_YES = 31; MA_DL_VIDEO = 32; MA_DL_AUDIO = 33; MA_DL_FMT = 400; MA_UNK_YES = 34; MA_CACHE_YES = 35; MA_ST_BACK = 36;
     MA_FILES = 37; MA_FCOPY = 38; MA_FMOVE = 39; MA_FPASTE = 40; MA_FRENAME = 41; MA_FDEL = 42; MA_FDEL_YES = 43; MA_FNEWDIR = 44; MA_FMARK = 45; MA_FMARKALL = 46; MA_FPROPS = 47;
-    MA_IMG_SLIDE = 48; MA_IMG_INT = 49; MA_IMG_TR = 50; MA_IMG_SHUF = 51; MA_IMG_ROT = 52; MA_IMG_INFO = 53; MA_IMG_CLOSE = 54; MA_TOR_FILE = 60; MA_FRECV = 55;
+    MA_IMG_SLIDE = 48; MA_IMG_INT = 49; MA_IMG_TR = 50; MA_IMG_SHUF = 51; MA_IMG_ROT = 52; MA_IMG_INFO = 53; MA_IMG_CLOSE = 54; MA_TOR_FILE = 60; MA_FRECV = 55; MA_RS_YES = 56; MA_RS_NO = 57;
     // ajustes: tipo de fila y su identificador
     STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
     ST_LANG = 1; ST_SKIN = 2; ST_PREVIEW = 3; ST_SEEK = 4; ST_VIZ = 5; ST_UNKNOWN = 6; ST_INSTALL = 7; ST_STOREURL = 8; ST_ACCOUNTS = 9;
-    ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18; ST_HIDDEN = 19; ST_ALLFILES = 20; ST_TORKEEP = 21; ST_TORUP = 22; ST_TOREXTRA = 23; ST_TORDHT = 24;
+    ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18; ST_HIDDEN = 19; ST_ALLFILES = 20; ST_TORKEEP = 21; ST_TORUP = 22; ST_TOREXTRA = 23; ST_TORDHT = 24; ST_RESUME = 25;
     APP_VERSION = "1.2";
 end
 
@@ -290,6 +290,7 @@ include "fileops.prg";
 include "imageviewer.prg";
 include "torrentplay.prg";
 include "receive.prg";
+include "resume.prg";
 
 process main()
 private
@@ -308,6 +309,7 @@ begin
 
     storage_init();
     cfg_load();
+    rs_load();
     torrent_cache(store_dir != "" ? join_path(store_dir, "torrents") : join_path(cd(), "torrents")); tor_apply_settings(); tor_purge();
     lang_load(lang_cur);          // carga el idioma, abre sus fuentes TrueType y crea los textos
     load_script();
@@ -856,6 +858,7 @@ begin
     if (xt_job) xt_step(); return 0; end                          // Xtream: cargando categorías o canales
     if (store_job == 1) store_step(); return 0; end                // instalando: no se atiende al mando
     if (fo_job == 1) fo_step(); return 0; end                      // copiando, moviendo o borrando: solo se puede cancelar
+    if (rs_wait && modal == M_NONE) rs_wait = 0; if (tor_playing && !vh) tor_cleanup(); end end      // se cerro la ventana de continuar sin elegir
     if (ru_job) ru_step(); return 0; end                           // recibiendo archivos del PC: solo se puede parar
     if (tor_job > 0) tor_step(); return 0; end                    // preparando un torrent: solo se puede cancelar
     if (dl_job == 1) dl_step(); return 0; end                      // descargando un video: solo se puede cancelar
@@ -1463,6 +1466,7 @@ begin
             if (k == "unk") set_unknown = atoi(v) ? 1 : 0; end
             if (k == "dlfmt") set_dlfmt = atoi(v); if (set_dlfmt < 0 || set_dlfmt > 3) set_dlfmt = 0; end end
             if (k == "storeurl") set_store_url = v; end
+            if (k == "resume") set_resume = atoi(v); end
             if (k == "torkeep") set_tor_keep = atoi(v); end
             if (k == "torextra") set_tor_extra = atoi(v); end
             if (k == "tordht") set_tor_dht = atoi(v); end
@@ -1492,6 +1496,7 @@ begin
     fputs(fh, "dlfmt=" + set_dlfmt);
     fputs(fh, "storeurl=" + set_store_url);
     fputs(fh, "view=" + set_view);
+    fputs(fh, "resume=" + set_resume);
     fputs(fh, "torkeep=" + set_tor_keep);
     fputs(fh, "torextra=" + set_tor_extra);
     fputs(fh, "tordht=" + set_tor_dht);
@@ -1541,6 +1546,7 @@ begin
             st_row(n, ST_SKIN, STT_CHOICE, tr("st_skin"), skin ? tr("skin_ps") : tr("skin_classic")); n++;
             st_row(n, ST_VIEW, STT_CHOICE, tr("st_view"), set_view == 0 ? tr("st_view_list") : (set_view == 1 ? tr("st_view_grid") : tr("st_view_auto"))); n++;
             st_row(n, ST_PREVIEW, STT_TOGGLE, tr("st_preview"), st_onoff(set_preview)); n++;
+            st_row(n, ST_RESUME, STT_TOGGLE, tr("st_resume"), st_onoff(set_resume)); n++;
             st_row(n, ST_HIDDEN, STT_TOGGLE, tr("st_hidden"), st_onoff(set_hidden)); n++;
             st_row(n, ST_ALLFILES, STT_TOGGLE, tr("st_allfiles"), st_onoff(set_allfiles)); n++;
         end
@@ -1592,6 +1598,7 @@ begin
             cfg_save();
         end
         case ST_SKIN: skin = !skin; cfg_save(); end
+        case ST_RESUME: set_resume = !set_resume; cfg_save(); end
         case ST_TORKEEP: set_tor_keep = !set_tor_keep; cfg_save(); end
         case ST_TOREXTRA: set_tor_extra = !set_tor_extra; tor_apply_settings(); cfg_save(); end
         case ST_TORDHT: set_tor_dht = !set_tor_dht; tor_apply_settings(); cfg_save(); end
@@ -2018,6 +2025,8 @@ begin
         end
         case MA_FDEL_YES: fo_start(FO_DEL); end
         case MA_FRECV: ru_begin(cur_dir); end
+        case MA_RS_YES: rs_wait = 0; rs_skip = 1; rs_start_pos = rs_pending_pos; start_video(rs_pending_path); rs_skip = 0; end
+        case MA_RS_NO: rs_wait = 0; rs_skip = 1; rs_start_pos = 0; start_video(rs_pending_path); rs_skip = 0; end
         case MA_FPROPS: fo_start(FO_INFO); end
         case MA_FNEWDIR: kb_open(tr("k_newdir"), "", KB_NEWDIR); end
         case MA_FMARK: mark_toggle(sel); if (sel + 1 < n_entries) sel++; if (sel >= top_row + ROWS) top_row++; end end end
@@ -2493,10 +2502,11 @@ function start_video(string path)
 private int i;
 begin
     if (is_torrent_src(path)) tor_begin(path); return 0; end                  // un magnet o un .torrent: se prepara aparte y luego se abre su archivo
+    if (rs_ask(path)) return 0; end                                            // lo tenia empezado: se pregunta si continuar
     http_trace("start_video: close_preview");
     close_preview(); pv_idx = -1;
     http_trace("start_video: video_close");
-    if (vh) video_close(vh); vh = 0; end
+    if (vh) rs_on_stop(); video_close(vh); vh = 0; end
     http_trace("start_video: video_open");
     if (au_headers() != "") vh = video_open_h(path, au_headers()); else vh = video_open(path); end
     http_trace("start_video: abierto " + vh);
@@ -2531,6 +2541,9 @@ begin
     audio_sel = 0;
     video_volume(vh, muted ? 0 : vol * 128 / 100);
     video_play(vh, 0);
+    rs_cur_key = rs_key_of(path); rs_save_t = 0;
+    if (rs_start_pos > 0) video_seek(vh, rs_start_pos); toast(tr("t_resumed") + " " + fmt_time(rs_start_pos)); end
+    rs_start_pos = 0;
     state = ST_PLAY;
     overlay_a = 255; overlay_t = 0; focus = B_PLAY;
     s_title = pending_title != "" ? utf8_to_latin1(pending_title) : base_name(path);
@@ -2541,6 +2554,7 @@ end
 
 function stop_video()
 begin
+    rs_on_stop();
     if (tor_playing) tor_cleanup(); end
     if (vh) video_close(vh); end
     vh = 0;
@@ -2678,7 +2692,9 @@ begin
     end
 
     // fin del video: siguiente o volver al explorador
+    rs_tick();
     if (video_is_finished(vh))
+        if (rs_cur_key != "") rs_remove(rs_cur_key); rs_cur_key = ""; end
         if (!next_video(1)) stop_video(); end
         return 0;
     end
