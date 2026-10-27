@@ -2041,6 +2041,87 @@ begin
     return r;
 end
 
+// valor del atributo name="..." de una etiqueta (tag, y ltag = la misma en minusculas)
+function string ad_attr(string tag, string ltag, string name)
+private int c, close; string q1, v;
+begin
+    c = find(ltag, " " + name + "=");
+    if (c < 0) return ""; end
+    c += len(name) + 2; q1 = substr(tag, c, 1);
+    if (q1 == chr(34) || q1 == "'")
+        close = find(tag, q1, c + 1); v = close < 0 ? "" : substr(tag, c + 1, close - c - 1);
+    else
+        v = substr(tag, c); close = find(v, " "); if (close >= 0) v = substr(v, 0, close); end
+        if (substr(v, len(v) - 1, 1) == "/" || substr(v, len(v) - 1, 1) == ">") v = substr(v, 0, len(v) - 1); end
+    end
+    return ad_html_decode(v);
+end
+
+function string ad_host_of(string u)
+private int p, q; string h;
+begin
+    p = find(u, "://");
+    h = p < 0 ? u : substr(u, p + 3);
+    q = find(h, "/"); if (q >= 0) h = substr(h, 0, q); end
+    q = find(h, "?"); if (q >= 0) h = substr(h, 0, q); end
+    if (substr(lcase(h), 0, 4) == "www.") h = substr(h, 4); end
+    return h;
+end
+
+function string ad_origin_of(string u)
+private int p, q;
+begin
+    p = find(u, "://");
+    if (p < 0) return u; end
+    q = find(u, "/", p + 3);
+    return q < 0 ? u : substr(u, 0, q);
+end
+
+// el formulario de busqueda de una pagina: devuelve la direccion con {q} donde van las palabras ("" si no hay ninguno)
+function string ad_search_form(string t, string base)
+private string lo, ftag, lftag, act, meth, body, lbody, tag, ltag, nm, ty, val, params, qname, qtype, best, url; int p, q, e, ip, iq, score, bestscore;
+begin
+    lo = lcase(t); p = 0; best = ""; bestscore = 0;
+    while (p >= 0)
+        p = find(lo, "<form", p);
+        if (p < 0) break; end
+        q = find(t, ">", p);
+        if (q < 0) break; end
+        ftag = substr(t, p, q - p); lftag = substr(lo, p, q - p);
+        e = find(lo, "</form>", q);
+        body = e < 0 ? substr(t, q + 1) : substr(t, q + 1, e - q - 1); lbody = lcase(body);
+        p = q;
+        meth = lcase(ad_attr(ftag, lftag, "method"));
+        if (meth == "post") continue; end
+        act = ad_attr(ftag, lftag, "action");
+        qname = ""; qtype = ""; params = ""; ip = 0;
+        while (ip >= 0)
+            ip = find(lbody, "<input", ip);
+            if (ip < 0) break; end
+            iq = find(body, ">", ip);
+            if (iq < 0) break; end
+            tag = substr(body, ip, iq - ip); ltag = substr(lbody, ip, iq - ip);
+            ip = iq;
+            ty = lcase(ad_attr(tag, ltag, "type")); nm = ad_attr(tag, ltag, "name"); val = ad_attr(tag, ltag, "value");
+            if (nm == "") continue; end
+            if ((ty == "" || ty == "text" || ty == "search") && qname == "") qname = nm; qtype = ty;
+            elseif (ty == "hidden") params += "&" + nm + "=" + ad_urlenc(val); end
+        end
+        if (qname == "") continue; end
+        score = 1;
+        if (qtype == "search") score += 2; end
+        nm = lcase(qname);
+        if (nm == "q" || nm == "s" || nm == "search" || nm == "query" || nm == "keyword" || nm == "keywords" || nm == "term" || nm == "find" || nm == "k") score += 2; end
+        if (find(lcase(ftag), "search") >= 0 || find(lcase(act), "search") >= 0) score += 1; end
+        if (score > bestscore)
+            bestscore = score;
+            url = ad_abs_url(base, act == "" ? base : act);
+            best = url + (find(url, "?") >= 0 ? "&" : "?") + qname + "={q}" + params;
+        end
+    end
+    return best;
+end
+
 function ad_call_builtin(int e)
 private string f, s, t, u; int argc, i, n, r, c, ln_no, a0, a1, a2, a3, v, p; double d, d2;
 begin
@@ -2092,6 +2173,9 @@ begin
         ad_str_to_buf(ad_text(a0)); v = ad_json_parse();
         if (v < 0) return 0; end
         return v;
+    elseif (f == "search_form") return ad_str(ad_search_form(ad_text(a0), argc > 1 ? ad_text(a1) : ""));
+    elseif (f == "host_of") return ad_str(ad_host_of(ad_text(a0)));
+    elseif (f == "origin_of") return ad_str(ad_origin_of(ad_text(a0)));
     elseif (f == "magnets") return ad_magnets(ad_text(a0));
     elseif (f == "links") return ad_links(ad_text(a0), argc > 1 ? ad_text(a1) : "");
     elseif (f == "html_text") return ad_str(ad_html_text(ad_text(a0)));

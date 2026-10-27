@@ -25,7 +25,7 @@ page home:
         show header "Your websites"
         for each site in list:
             show button "{site.name}" doing site_options with name is site.name info "{site.url}  (press to remove it)"
-    show button "Add a website" doing add_site info "A name and the address of its search page, with \{q\} where the search words go. Example: https://example.org/search/\{q\}"
+    show button "Add a website" doing add_site info "Just the address of the website (example: https://example.org). The player finds out how its search works."
     show header "Options"
     show check "Look inside the result pages when the list has no magnet links" bound deep
     show choice "Order of the results" bound order
@@ -33,16 +33,24 @@ page home:
 
 # ---- websites
 page add_site:
-    ask "Name of the website" into site_name
-    if trim(site_name) is empty:
+    ask "Address of the website (example: https://example.org)" into address default "https://"
+    set address to trim(address)
+    if address is empty or address is "https://":
         stop
-    ask "Search address. Write \{q\} where the search words go (example: https://example.org/search/\{q\})" into template default "https://"
-    if not (template contains "\{q\}"):
-        fail "The address must contain \{q\} (the place where the search words go)."
-    if not (template starts with "http"):
-        fail "The address must start with http:// or https://"
+    if not (address starts with "http"):
+        set address to "https://{address}"
+    set template to address
+    if not (address contains "\{q\}"):
+        message "Looking for the search of {host_of(address)}..."
+        try:
+            fetch text from address with header "User-Agent" is browser()
+            set found_form to search_form(result, address)
+            if found_form is not empty:
+                set template to found_form
+        on error:
+            fail "Could not open {address}: {error}"
     set list to site_list()
-    add {name: clean(site_name), url: trim(template)} to list
+    add {name: clean(host_of(address)), url: template} to list
     save_sites(list)
 
 page site_options with name:
@@ -76,15 +84,26 @@ page results with query:
     set problems to []
     for each site in list:
         message "Searching {site.name}..."
-        try:
-            fetch text from replace(site.url, "\{q\}", url_encode(query)) with header "User-Agent" is browser()
-            set page_text to result
-            set base to replace(site.url, "\{q\}", url_encode(query))
-            collect(found, page_text, base, site.name)
-            if deep and length(first_hits(found, site.name)) is 0:
-                look_inside(found, page_text, base, site.name, query)
-        on error:
-            add "{site.name}: {error}" to problems
+        set got to 0
+        for each target in search_targets(site.url):
+            try:
+                set address to replace(target, "\{q\}", url_encode(query))
+                fetch text from address with header "User-Agent" is browser()
+                set page_text to result
+                set before to length(found)
+                collect(found, page_text, address, site.name)
+                if deep and length(found) is before:
+                    look_inside(found, page_text, address, site.name, query)
+                if length(found) is greater than before:
+                    set got to 1
+                    if target is not site.url:
+                        remember(site.name, target)
+                    exit loop
+            on error:
+                if got is 0 and length(problems) is less than 3:
+                    add "{site.name}: {error}" to problems
+        if got is 0 and length(problems) is 0:
+            add "{site.name}: no results" to problems
     if length(found) is 0:
         if length(problems) is greater than 0:
             fail "Nothing found. {join(problems, ' / ')}"
@@ -145,6 +164,34 @@ define look_inside(found, page_text, base, site, query):
                 collect(found, result, l.url, site)
             on error:
                 log "could not open {l.url}"
+    give back 0
+
+# where to look for the results of a website: the address that was found (or typed) if it has \{q\}, else the usual places
+define search_targets(url):
+    set out to []
+    if url contains "\{q\}":
+        add url to out
+        give back out
+    set o to origin_of(url)
+    add "{o}/search/\{q\}" to out
+    add "{o}/?s=\{q\}" to out
+    add "{o}/search?q=\{q\}" to out
+    add "{o}/search.php?q=\{q\}" to out
+    add "{o}/index.php?search=\{q\}" to out
+    add "{o}/?q=\{q\}" to out
+    add "{o}/usearch/\{q\}/" to out
+    give back out
+
+# keeps the address that worked for a website, so the next search goes straight to it
+define remember(name, target):
+    set list to site_list()
+    set changed to []
+    for each s in list:
+        if s.name is name:
+            add {name: s.name, url: target} to changed
+        otherwise:
+            add s to changed
+    save_sites(changed)
     give back 0
 
 define site_list():

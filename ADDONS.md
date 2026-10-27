@@ -116,6 +116,8 @@ A video can be a **magnet link** or the address (or file) of a **.torrent**: `sh
 | `html_decode(text)` | only decodes `&amp; &lt; &#39;...` |
 | `find_all(text, regex)` | the first group (or the whole match) of every match of a regular expression |
 | `format_size(bytes)` | `1.4 GB` |
+| `search_form(text, base)` | the address of the page's search form with `{q}` where the words go (`""` if there is none) |
+| `host_of(url)` / `origin_of(url)` | `example.org` / `https://example.org` |
 
 ## Values
 
