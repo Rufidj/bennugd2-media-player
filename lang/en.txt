@@ -320,3 +320,4 @@ t_ru_fail=The server could not be started
 t_ru_done=files received
 t_ru_busy=Finish what you are doing with the torrent first
 h_stop=Stop
+s_ru_hint=Press Stop when you are done

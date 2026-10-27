@@ -50,6 +50,6 @@ begin
         ov_sub = fit_text(utf8_to_latin1(upload_current()), 560) + "   " + p + " %";
     else
         ov_pct = 0;
-        ov_sub = n == 0 ? tr("s_ru_wait") : n + " " + tr("t_ru_done") + "   (" + fmt_size(upload_bytes()) + ")";
+        ov_sub = n == 0 ? tr("s_ru_wait") : fit_text(n + " " + tr("t_ru_done") + " (" + fmt_size(upload_bytes()) + ")  -  " + tr("s_ru_hint"), 760);
     end
 end

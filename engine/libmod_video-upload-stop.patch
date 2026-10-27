@@ -1,0 +1,142 @@
+From f9f42aeb4b18f3e56051aba3a48aefec0b05519f Mon Sep 17 00:00:00 2001
+From: Rufidj <divaio19@gmail.com>
+Date: Tue, 27 Oct 2026 11:19:17 +0100
+Subject: [PATCH] libmod_video: parar la recepcion de archivos no espera a
+ ningun hilo (cada sesion tiene su socket no bloqueante y se cierra sola); una
+ subida en curso se aborta y se borra su .part
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ modules/libmod_video/upload.c | 63 +++++++++++++++++++++--------------
+ 1 file changed, 38 insertions(+), 25 deletions(-)
+
+diff --git a/modules/libmod_video/upload.c b/modules/libmod_video/upload.c
+index e22b3cbb..904ca511 100644
+--- a/modules/libmod_video/upload.c
++++ b/modules/libmod_video/upload.c
+@@ -8,6 +8,7 @@
+ #include <errno.h>
+ #include <time.h>
+ #include <sys/stat.h>
++#include <fcntl.h>
+ #include <SDL.h>
+ 
+ #ifdef _WIN32
+@@ -39,9 +40,8 @@ typedef int sock_t;
+ #define CHUNK 262144
+ 
+ static SDL_mutex * g_mu;
+-static volatile int g_run, g_conns;
+-static sock_t g_lsock = BAD_SOCK;
+-static SDL_Thread * g_th;
++static volatile int g_run, g_conns, g_gen;
++static sock_t g_lsock = BAD_SOCK;           /* only to know that something is listening; each session closes its own socket */
+ static char g_folder[1024], g_pin[32], g_cur[256], g_err[200], g_ip[64];
+ static int g_files, g_pct = -1;
+ static int64_t g_bytes;
+@@ -127,8 +127,11 @@ static void unique_path( const char * folder, const char * name, char * out, siz
+     for ( k = 2; exists( out ) && k < 10000; k++ ) snprintf( out, outn, "%s/%s (%d)%s", folder, stem, k, ext );
+ }
+ 
++typedef struct { sock_t c; int gen; } ConnArg;
++
+ static int conn_thread( void * arg ) {
+-    sock_t c = ( sock_t ) ( intptr_t ) arg; char head[16384]; int n = 0; char * body_start, * p, * q; struct timeval tv;
++    ConnArg ca = * ( ConnArg * ) arg; sock_t c = ca.c; char head[16384]; int n = 0; char * body_start, * p, * q; struct timeval tv;
++    free( arg );
+     tv.tv_sec = 30; tv.tv_usec = 0;
+     setsockopt( c, SOL_SOCKET, SO_RCVTIMEO, ( const char * ) &tv, sizeof tv ); setsockopt( c, SOL_SOCKET, SO_SNDTIMEO, ( const char * ) &tv, sizeof tv );
+     while ( n < ( int ) sizeof head - 1 ) {
+@@ -161,7 +164,7 @@ static int conn_thread( void * arg ) {
+         SDL_LockMutex( g_mu ); snprintf( g_cur, sizeof g_cur, "%s", strrchr( path, '/' ) ? strrchr( path, '/' ) + 1 : path ); g_pct = 0; SDL_UnlockMutex( g_mu );
+         if ( have > total ) have = ( int ) total;
+         if ( have > 0 ) { if ( fwrite( body_start, 1, ( size_t ) have, f ) != ( size_t ) have ) ok = 0; got += have; SDL_LockMutex( g_mu ); g_bytes += have; SDL_UnlockMutex( g_mu ); }
+-        while ( ok && buf && got < total && g_run ) {
++        while ( ok && buf && got < total && g_run && g_gen == ca.gen ) {
+             long long want = total - got < CHUNK ? total - got : CHUNK; int k = ( int ) recv( c, buf, ( int ) want, 0 );
+             if ( k <= 0 ) { ok = 0; break; }
+             if ( fwrite( buf, 1, ( size_t ) k, f ) != ( size_t ) k ) { set_err( "write failed (is the disk full?)" ); ok = 0; break; }
+@@ -187,24 +190,29 @@ done:
+     return 0;
+ }
+ 
++typedef struct { sock_t s; int gen; } AccArg;
++
++/* each session has its own thread and its own socket; stopping only flips the flag, so nobody ever waits for it */
+ static int accept_thread( void * arg ) {
+-    ( void ) arg;
+-    while ( g_run ) {
+-        struct pollfd pf; pf.fd = g_lsock; pf.events = POLLIN; pf.revents = 0;
+-        if ( poll( &pf, 1, 300 ) > 0 ) {
+-            sock_t c = accept( g_lsock, NULL, NULL ); int busy;
++    AccArg aa = * ( AccArg * ) arg; free( arg );
++    while ( g_run && g_gen == aa.gen ) {
++        struct pollfd pf; pf.fd = aa.s; pf.events = POLLIN; pf.revents = 0;
++        if ( poll( &pf, 1, 300 ) > 0 && ( pf.revents & POLLIN ) ) {
++            sock_t c = accept( aa.s, NULL, NULL ); int busy;
+             if ( c == BAD_SOCK ) continue;
+             SDL_LockMutex( g_mu ); busy = g_conns >= MAX_CONN; if ( !busy ) g_conns++; SDL_UnlockMutex( g_mu );
+             if ( busy ) { reply( c, 503, "Busy", "text/plain", "busy", 4 ); CLOSESOCK( c ); continue; }
+-            { SDL_Thread * th = SDL_CreateThread( conn_thread, "upload", ( void * ) ( intptr_t ) c );
+-              if ( th ) SDL_DetachThread( th ); else { CLOSESOCK( c ); SDL_LockMutex( g_mu ); g_conns--; SDL_UnlockMutex( g_mu ); } }
++            { ConnArg * ca = ( ConnArg * ) malloc( sizeof *ca ); SDL_Thread * th = NULL;
++              if ( ca ) { ca->c = c; ca->gen = aa.gen; th = SDL_CreateThread( conn_thread, "upload", ca ); }
++              if ( th ) SDL_DetachThread( th ); else { free( ca ); CLOSESOCK( c ); SDL_LockMutex( g_mu ); g_conns--; SDL_UnlockMutex( g_mu ); } }
+         }
+     }
++    CLOSESOCK( aa.s );
+     return 0;
+ }
+ 
+ int upload_start( const char * folder, int port, const char * pin ) {
+-    struct sockaddr_in sa; int i, one = 1, bound = 0;
++    struct sockaddr_in sa; int i, one = 1, bound = 0; sock_t ls; AccArg * aa; SDL_Thread * th;
+     if ( g_run ) return -1;
+     if ( !g_mu ) g_mu = SDL_CreateMutex();
+ #ifdef _WIN32
+@@ -215,25 +223,30 @@ int upload_start( const char * folder, int port, const char * pin ) {
+     { size_t n = strlen( g_folder ); while ( n > 1 && g_folder[n - 1] == '/' ) g_folder[--n] = 0; }
+     snprintf( g_pin, sizeof g_pin, "%s", pin );
+     g_files = 0; g_bytes = 0; g_pct = -1; g_cur[0] = 0; g_err[0] = 0; g_conns = 0;
+-    g_lsock = socket( AF_INET, SOCK_STREAM, 0 );
+-    if ( g_lsock == BAD_SOCK ) { set_err( "no socket" ); return -3; }
+-    setsockopt( g_lsock, SOL_SOCKET, SO_REUSEADDR, ( const char * ) &one, sizeof one );
++    ls = socket( AF_INET, SOCK_STREAM, 0 );
++    if ( ls == BAD_SOCK ) { set_err( "no socket" ); return -3; }
++    setsockopt( ls, SOL_SOCKET, SO_REUSEADDR, ( const char * ) &one, sizeof one );
++#ifdef _WIN32
++    { u_long nb = 1; ioctlsocket( ls, FIONBIO, &nb ); }
++#else
++    fcntl( ls, F_SETFL, fcntl( ls, F_GETFL, 0 ) | O_NONBLOCK );                    /* accept() can then never block */
++#endif
+     for ( i = 0; i < 20 && !bound; i++ ) {
+         memset( &sa, 0, sizeof sa ); sa.sin_family = AF_INET; sa.sin_addr.s_addr = htonl( INADDR_ANY ); sa.sin_port = htons( ( unsigned short ) ( port + i ) );
+-        if ( bind( g_lsock, ( struct sockaddr * ) &sa, sizeof sa ) == 0 ) { bound = port + i; break; }
++        if ( bind( ls, ( struct sockaddr * ) &sa, sizeof sa ) == 0 ) { bound = port + i; break; }
+     }
+-    if ( !bound || listen( g_lsock, 8 ) != 0 ) { CLOSESOCK( g_lsock ); g_lsock = BAD_SOCK; set_err( "no free port" ); return -4; }
+-    g_run = 1;
+-    g_th = SDL_CreateThread( accept_thread, "uploadsrv", NULL );
++    if ( !bound || listen( ls, 8 ) != 0 ) { CLOSESOCK( ls ); set_err( "no free port" ); return -4; }
++    aa = ( AccArg * ) malloc( sizeof *aa ); aa->s = ls; aa->gen = ++g_gen;
++    g_run = 1; g_lsock = ls;
++    th = SDL_CreateThread( accept_thread, "uploadsrv", aa );
++    if ( !th ) { g_run = 0; g_lsock = BAD_SOCK; CLOSESOCK( ls ); free( aa ); set_err( "no thread" ); return -5; }
++    SDL_DetachThread( th );
+     return bound;
+ }
+ 
++/* does not wait for anything: the server thread notices the flag within 300 ms and closes its own socket */
+ void upload_stop( void ) {
+-    if ( !g_run ) return;
+-    g_run = 0;
+-    SDL_WaitThread( g_th, NULL ); g_th = NULL;
+-    if ( g_lsock != BAD_SOCK ) CLOSESOCK( g_lsock );
+-    g_lsock = BAD_SOCK;
++    g_run = 0; g_gen++; g_lsock = BAD_SOCK;
+ }
+ 
+ int          upload_running( void ) { return g_run; }
+-- 
+2.43.0
+

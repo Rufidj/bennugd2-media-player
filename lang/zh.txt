@@ -319,3 +319,4 @@ t_ru_fail=无法启动服务器
 t_ru_done=个文件已接收
 t_ru_busy=请先结束正在进行的种子操作
 h_stop=停止
+s_ru_hint=完成后请按“停止”
