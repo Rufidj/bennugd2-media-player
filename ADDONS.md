@@ -118,6 +118,8 @@ A video can be a **magnet link** or the address (or file) of a **.torrent**: `sh
 | `format_size(bytes)` | `1.4 GB` |
 | `search_form(text, base)` | the address of the page's search form with `{q}` where the words go (`""` if there is none; a form sent by POST gives `post:ADDRESS|body`) |
 | `search_hint(text, base)` | when the page has no readable form (JavaScript does the search), a search address guessed from the paths the page names (`/buscar/`, `/search/`...), with `{q}` at the end |
+| `list_files(folder, extension)` | the files of a folder as a list of `{name, path, size}` (extension without the dot, `""` for all) |
+| `data_folder()` / `make_folder(path)` | the player's data folder / creates a folder |
 | `host_of(url)` / `origin_of(url)` | `example.org` / `https://example.org` |
 
 ## Values

@@ -2159,6 +2159,25 @@ begin
     return best;
 end
 
+// ---- carpetas: list_files(carpeta, extension) -> lista de {name, path, size}; data_folder() -> la carpeta de datos del reproductor; make_folder(ruta)
+function int ad_list_files(string folder, string ext)
+private int r, dh, m; string nm;
+begin
+    r = ad_list();
+    dh = diropen(join_path(folder, "*"));
+    if (!dh) return r; end
+    nm = dirread(dh);
+    while (nm != "" && ad_vc[r] < 500)
+        if (!fileinfo.directory && nm != "." && nm != ".." && (ext == "" || lcase(ext_of(nm)) == lcase(ext)))
+            m = ad_map(); ad_map_set(m, "name", ad_str(nm)); ad_map_set(m, "path", ad_str(join_path(folder, nm))); ad_map_set(m, "size", ad_num(fileinfo.size));
+            ad_list_add(r, m);
+        end
+        nm = dirread(dh);
+    end
+    dirclose(dh);
+    return r;
+end
+
 function ad_call_builtin(int e)
 private string f, s, t, u; int argc, i, n, r, c, ln_no, a0, a1, a2, a3, v, p; double d, d2;
 begin
@@ -2214,6 +2233,9 @@ begin
     elseif (f == "search_hint") return ad_str(ad_search_hint(ad_text(a0), argc > 1 ? ad_text(a1) : ""));
     elseif (f == "host_of") return ad_str(ad_host_of(ad_text(a0)));
     elseif (f == "origin_of") return ad_str(ad_origin_of(ad_text(a0)));
+    elseif (f == "list_files") return ad_list_files(ad_text(a0), argc > 1 ? ad_text(a1) : "");
+    elseif (f == "data_folder") return ad_str(store_dir);
+    elseif (f == "make_folder") mkdir(ad_text(a0)); return 0;
     elseif (f == "magnets") return ad_magnets(ad_text(a0));
     elseif (f == "links") return ad_links(ad_text(a0), argc > 1 ? ad_text(a1) : "");
     elseif (f == "html_text") return ad_str(ad_html_text(ad_text(a0)));
