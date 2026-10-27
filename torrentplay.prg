@@ -20,6 +20,7 @@ global
     int    tor_stall;                    // 1 = el video esta en pausa porque se acabo el colchon (se reanuda solo)
     int    tor_ema, tor_ahead_mb;        // media de la velocidad de descarga y cuanto se descarga por delante (MB)
     int    tor_fsize;                    // tamano del archivo que se ve
+    int    rs_wait;                      // 1 = la ventana de continuar donde se dejo esta abierta (ver resume.prg)
 end
 
 function int is_torrent_src(string p)
@@ -141,7 +142,7 @@ begin
             prog_stop(); tor_job = 0; tor_playing = 1;
             pending_title = base_name(torrent_file_name(tor_h, tor_sel));            // el titulo es el nombre del archivo, no la direccion codificada
             start_video(u);
-            if (!vh) tor_cleanup(); end
+            if (!vh && !rs_wait) tor_cleanup(); end                                  // con la pregunta de continuar abierta el torrent sigue vivo
         end
     end
 end

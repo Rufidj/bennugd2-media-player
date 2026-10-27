@@ -29,7 +29,7 @@ FF=${FF:-}
 LIN=$ENGINE/build/linux-gnu/bin
 WIN=$ENGINE/build/x86_64-w64-mingw32/bin
 NAME=bennugd2-media-player
-ADDONS="demo internet-archive jellyfin peertube plex radio-browser somafm youtube"
+ADDONS="torrents demo internet-archive jellyfin peertube plex radio-browser somafm youtube"
 
 # ------------------------------------------------------------------------------------- .dcb
 echo "== compilando el reproductor =="
@@ -51,7 +51,7 @@ cp LICENSE ADDONS.md ADDONS.es.md "$STAGE/"
 cp lang/*.txt "$STAGE/lang/"
 cp res/*.png "$STAGE/res/" && mkdir -p "$STAGE/res/fonts" && cp res/fonts/* "$STAGE/res/fonts/"
 cp lists/*.m3u "$STAGE/lists/"
-for a in $ADDONS; do mkdir -p "$STAGE/addons/$a" && cp "addons/$a"/* "$STAGE/addons/$a/"; done
+for a in $ADDONS; do mkdir -p "$STAGE/addons/$a" && cp -r "addons/$a"/* "$STAGE/addons/$a/"; done
 
 cat > "$STAGE/mediaplayer.sh" <<'EOF'
 #!/bin/bash
@@ -131,7 +131,7 @@ cp lang/*.txt "$STAGE/lang/"
 rm -rf "$STAGE/res" && mkdir -p "$STAGE/res/fonts"
 cp res/*.png "$STAGE/res/" && cp res/fonts/* "$STAGE/res/fonts/"
 cp lists/*.m3u "$STAGE/lists/"
-for a in $ADDONS; do rm -rf "$STAGE/addons/$a"; mkdir -p "$STAGE/addons/$a" && cp "addons/$a"/* "$STAGE/addons/$a/"; done
+for a in $ADDONS; do rm -rf "$STAGE/addons/$a"; mkdir -p "$STAGE/addons/$a" && cp -r "addons/$a"/* "$STAGE/addons/$a/"; done
 
 cat > "$STAGE/README.txt" <<'EOF'
 BennuGD2 Media Player - Windows x86-64

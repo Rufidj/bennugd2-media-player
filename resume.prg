@@ -13,7 +13,7 @@ global
     string rs_cur_key = "";              // clave del video que se esta viendo
     int    rs_start_pos;                 // donde hay que empezar el que se acaba de abrir (ms)
     int    rs_save_t;                    // fotogramas desde el ultimo guardado periodico
-    int    rs_skip, rs_wait;             // rs_skip: no preguntar (viene de la ventana); rs_wait: la ventana esta abierta
+    int    rs_skip;                      // rs_skip: no preguntar (viene de la ventana); rs_wait (en torrentplay.prg): la ventana esta abierta
     string rs_pending_path = ""; int rs_pending_pos;
     int    set_resume = 1;               // ajuste: recordar donde se dejo
 end
