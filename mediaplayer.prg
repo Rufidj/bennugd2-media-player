@@ -69,7 +69,7 @@ const
     ST_WINDOW = 26;
     ST_LANG = 1; ST_SKIN = 2; ST_PREVIEW = 3; ST_SEEK = 4; ST_VIZ = 5; ST_UNKNOWN = 6; ST_INSTALL = 7; ST_STOREURL = 8; ST_ACCOUNTS = 9;
     ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18; ST_HIDDEN = 19; ST_ALLFILES = 20; ST_TORKEEP = 21; ST_TORUP = 22; ST_TOREXTRA = 23; ST_TORDHT = 24; ST_RESUME = 25;
-    APP_VERSION = "1.1.1";
+    APP_VERSION = "1.1.2";
 end
 
 global
@@ -281,6 +281,7 @@ begin
     f = 0;
     if (win_mode == 1) f |= MODE_FRAMELESS; end
     if (win_full) f |= MODE_FULLSCREEN; end
+    if (getenv("ANDROID_ROOT") == "" && !is_ps5()) f |= MODE_RESIZABLE; end                  // en PC la ventana se puede redimensionar (la imagen conserva la proporcion)
     return f;
 end
 
@@ -494,7 +495,8 @@ end
 // se dibuja encima de todo mientras se usa el raton (se esconde a los 4 s sin tocarlo)
 function draw_cursor()
 begin
-    if (touch_mode || ptr_idle > 240 || ptr_rx < 0) return 0; end
+    // en el reproductor se esconde a los 3 s sin tocar el raton; en el resto de pantallas (y en el teclado en pantalla) se queda
+    if (touch_mode || ptr_rx < 0 || ptr_idle > (state == ST_PLAY && modal == M_NONE ? 180 : 1800)) return 0; end
     put(S_CURSOR, g_cursor, ptr_x, ptr_y + 11, 100, 255, -100);      // el centro del grafico queda 11 px a la derecha y 17 abajo de la punta
     spr_xr[S_CURSOR] = 11;
 end

@@ -1,0 +1,97 @@
+# RETORRENT addon for the BennuGD2 Media Player
+# Plays torrents you already have: .torrent files kept on the console, and magnet links you paste. The player downloads
+# the video while it plays it and deletes it afterwards (Settings > Downloads says if it keeps it).
+# The .torrent files can also be opened straight from the player's file browser.
+#
+# Only use it with content you have the right to watch or download.
+
+addon "RETORRENT"
+id torrents
+version 0.2
+author "BennuGD2 Media Player"
+description "Play .torrent files from a folder of the console and magnet links while they download."
+
+setting folder is text, label "Another folder with .torrent files", default ""
+setting recent is text, hidden
+
+# ---- the first page
+page home:
+    show folder "Local .torrent files" opening local info "The .torrent files in {data_folder()}/torrent_files, in the Downloads folder and in the folder of the addon settings."
+    if recent is not empty:
+        show folder "Recent links" opening history info "The magnet links and addresses you played before."
+    show button "Play a magnet link or the address of a .torrent" doing open_link info "Paste it with the keyboard: it is played and kept in Recent links."
+    set cache_bytes to 0
+    for each f in list_files(data_folder() + "/torrents", "dat"):
+        set cache_bytes to cache_bytes + f.size
+    show button "Clear the torrent cache ({format_size(cache_bytes)})" doing clear_cache_page info "Deletes what the torrents downloaded and kept in {data_folder()}/torrents. It is not possible while a torrent is playing."
+    show button "Receive .torrent files from the PC" doing receive_page info "Shows an address and a PIN: open it in the browser of your PC and drop the .torrent files there. They are saved in {data_folder()}/torrent_files."
+
+# ---- the downloaded data of the torrents
+page clear_cache_page:
+    set deleted to clear_torrent_cache()
+
+# ---- receiving files from the PC
+page receive_page:
+    receive_files(data_folder() + "/torrent_files")
+
+# ---- .torrent files in the folders
+page local:
+    set found to []
+    set places to [data_folder() + "/torrent_files", data_folder() + "/descargas"]
+    if folder is not empty:
+        add trim(folder) to places
+    make_folder(places[1])
+    for each place in places:
+        for each f in list_files(place, "torrent"):
+            add {title: f.name, path: f.path, size: f.size, place: place} to found
+    if length(found) is 0:
+        show header "No .torrent files found"
+        show header "Copy them to {data_folder()}/torrent_files"
+        stop
+    for each t in sort(found, "title"):
+        show video t.title playing t.path info "{format_size(t.size)}"
+
+# ---- magnet links
+page open_link:
+    ask "Magnet link or address of a .torrent" into link default "magnet:?"
+    if trim(link) is empty:
+        stop
+    set link to trim(link)
+    remember_link(link)
+    go to play_link with link is link
+
+page play_link with link:
+    show video link_title(link) playing link info "{link}"
+
+page history:
+    for each item in recent_list():
+        show video item.title playing item.link info "{item.link}"
+
+# ---- helpers
+define link_title(link):
+    set hits to magnets(link)
+    if length(hits) is greater than 0:
+        give back html_decode(hits[1].name)
+    give back shorten(link, 60)
+
+# the last 15 links, newest first, kept as "title TAB link" separated by ;;
+define recent_list():
+    set out to []
+    if recent is empty:
+        give back out
+    for each part in split(recent, ";;"):
+        set bits to split(part, "\t")
+        if length(bits) is at least 2:
+            add {title: bits[1], link: bits[2]} to out
+    give back out
+
+define remember_link(link):
+    set parts to ["{clean(link_title(link))}\t{clean(link)}"]
+    for each item in recent_list():
+        if item.link is not link and length(parts) is less than 15:
+            add "{clean(item.title)}\t{clean(item.link)}" to parts
+    save recent as join(parts, ";;")
+    give back 0
+
+define clean(text):
+    give back trim(replace(replace(replace(text, ";;", ";"), "\t", " "), "\n", " "))

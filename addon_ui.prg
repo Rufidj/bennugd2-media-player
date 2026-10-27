@@ -9,6 +9,7 @@ global
     int    addon_busy;                  // el addon se está ejecutando (esperando red, teclado...)
     string s_amsg = ""; int txt_amsg;   // mensaje del addon / "cargando..."
     int    ask_ok; string ask_text = "";
+    int    ad_replay, ask_memo_n; string ask_memo_p[8]; string ask_memo_v[8];     // respuestas ya dadas, para volver atras sin volver a preguntar
     int    aset_idx;                    // ajuste que se está editando
     string as_name[48]; string as_val[48]; int as_n; string as_cfg_path = "";
     string entry_aargs[MAX_ENTRIES];    // argumentos (JSON) de una carpeta de addon
@@ -129,6 +130,7 @@ begin
     end
     for (i = 0; i < A_COUNT; i++) act_press[i] = 0; end        // lo pulsado aquí ya está gastado (no debe llegar al explorador)
     layout_all();
+    draw_cursor();
     apply_texts();
     if (shot_path != "" && frame_n == shot_frame)
         map_save(0, screen_get(), shot_path); say("captura guardada: " + shot_path); exit();
@@ -138,13 +140,24 @@ begin
 end
 
 function string host_ask(string prompt, string def, int secret)
+private int i;
 begin
+    // al volver atras a una pagina que pedia un texto (una busqueda) se reutiliza lo que se escribio, sin abrir otra vez el teclado
+    if (ad_replay && !secret)
+        for (i = 0; i < ask_memo_n; i++)
+            if (ask_memo_p[i] == prompt) host_cancelled = 0; return ask_memo_v[i]; end
+        end
+    end
     ask_ok = 0; ask_text = ""; kb_secret_next = secret;
     kb_open(prompt, def, KB_ADDON);
     while (modal != M_NONE && !ad_cancelled) ui_wait_frame(); end
     if (modal != M_NONE) modal = M_NONE; end
     if (!ask_ok) host_cancelled = 1; return ""; end
     host_cancelled = 0;
+    if (!secret)
+        for (i = 0; i < ask_memo_n; i++) if (ask_memo_p[i] == prompt) break; end end
+        if (i < 8) ask_memo_p[i] = prompt; ask_memo_v[i] = ask_text; if (i == ask_memo_n) ask_memo_n++; end end
+    end
     return ask_text;
 end
 
@@ -407,16 +420,21 @@ begin
 end
 
 function addon_back()
-private int rc;
+private int rc, d;
 begin
-    if (as_depth <= 1)
-        read_addons(); return 1;
+    // se vuelve a la pagina anterior; si esa no se puede volver a mostrar (por ejemplo una busqueda que pide un texto y se
+    // cancela) se sigue hacia atras en vez de quedarse atascado, y al final se sale a la lista de addons
+    d = as_depth - 2;
+    while (d >= 0)
+        ad_replay = 1; rc = addon_run(as_page[d], as_args[d]); ad_replay = 0;
+        if (rc == 0)
+            as_depth = d + 1;
+            addon_fill_entries();
+            return 0;
+        end
+        d--;
     end
-    rc = addon_run(as_page[as_depth - 2], as_args[as_depth - 2]);
-    if (rc != 0) return rc; end
-    as_depth--;
-    addon_fill_entries();
-    return 0;
+    read_addons(); return 1;
 end
 
 function addon_open(string dir)
@@ -425,7 +443,7 @@ begin
     if (!ad_load(join_path(dir, "main.addon")))
         show_error(tr("s_addons"), ad_perr); return 0;
     end
-    addon_dir = dir; addon_name = ad_i_name; as_depth = 0;
+    addon_dir = dir; addon_name = ad_i_name; as_depth = 0; ask_memo_n = 0;
     addon_cfg_load();
     return addon_goto("home", "");
 end
