@@ -1,11 +1,11 @@
-# Torrents addon for the BennuGD2 Media Player
+# RETORRENT addon for the BennuGD2 Media Player
 # Plays torrents you already have: .torrent files kept on the console, and magnet links you paste. The player downloads
 # the video while it plays it and deletes it afterwards (Settings > Downloads says if it keeps it).
 # The .torrent files can also be opened straight from the player's file browser.
 #
 # Only use it with content you have the right to watch or download.
 
-addon "Torrents"
+addon "RETORRENT"
 id torrents
 version 0.2
 author "BennuGD2 Media Player"
