@@ -2,6 +2,11 @@
 # You add the websites (this addon does not come with any): for each one you give a name and the address of its search
 # page. Search looks for magnet links and .torrent files in them, and what you pick is played while it downloads.
 #
+# If a website answers 403 (forbidden) here but works in your browser it is checking who asks. This addon sends what a browser sends;
+# if that is not enough, in the page of that website of your list you can paste the Cookie your browser uses for it (use the same
+# User-Agent as that browser, in the addon settings), or you can set the address of a FlareSolverr (a program that opens the page
+# with a real browser; it runs on your PC or server) in the addon settings.
+#
 # Only use it with content you have the right to watch or download.
 
 addon "Torrents"
@@ -12,6 +17,8 @@ description "Search the websites you add for torrents and play them while they d
 
 setting sites is text, hidden
 setting words is text, hidden
+setting agent is text, label "Browser identification (User-Agent)", default "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+setting solver is text, label "Address of a FlareSolverr (to get past Cloudflare), if you have one", default ""
 setting deep is yes or no, label "Look inside the result pages", default yes
 setting order is choice, label "Order of the results", default "Site order", choices "Site order", "Name", "Size"
 
@@ -24,7 +31,7 @@ page home:
         show button "Search" doing do_search info "Looks for torrents in the {length(list)} website(s) you added."
         show header "Your websites"
         for each site in list:
-            show folder "{site.name}" opening site_options with name is site.name info "{site.url}  (open it to remove it)"
+            show folder "{site.name}" opening site_options with name is site.name info "{site.url}  (open it to remove it or to set its browser cookie)"
     show button "Add a website" doing add_site info "Just the address of the website (example: https://example.org). The player finds out how its search works."
     show header "Options"
     show check "Look inside the result pages when the list has no magnet links" bound deep
@@ -43,24 +50,30 @@ page add_site:
     if not (address contains "\{q\}"):
         message "Looking for the search of {host_of(address)}..."
         try:
-            fetch text from address with header "User-Agent" is browser()
-            set found_form to search_form(result, address)
+            set home_page to page_get(address, "")
+            set found_form to search_form(home_page, address)
             if found_form is empty:
-                set found_form to search_hint(result, address)
+                set found_form to search_hint(home_page, address)
             if found_form is not empty:
                 set template to found_form
         on error:
-            fail "Could not open {address}: {error}"
+            fail "Could not open {address}: {error}{blocked_hint(error)}"
         if template is address:
             set template to learn_search(address)
     set list to site_list()
-    add {name: clean(host_of(address)), url: template} to list
+    add {name: clean(host_of(address)), url: template, cookie: ""} to list
     save_sites(list)
 
 page site_options with name:
     show header "{name}"
     show button "Remove this website" doing remove_site with name is name
+    show button "Browser cookie: {cookie_state(name)}" doing set_cookie_page with name is name info "If the website answers 403 (forbidden) here but works in your browser, copy the value of its Cookie header (browser developer tools > Network) and paste it here. Use the same User-Agent as that browser (addon settings)."
     show button "Back" doing nothing_here
+
+page set_cookie_page with name:
+    ask "Cookie of {name} (leave empty to remove it)" into value default ""
+    set_cookie(name, trim(value))
+    go to home
 
 page nothing_here:
     go to home
@@ -89,20 +102,20 @@ page results with query:
     for each site in list:
         message "Searching {site.name}..."
         set got to 0
+        set from_site to origin_of(site.url)
         for each target in search_targets(site.url):
             try:
                 set address to replace(target, "\{q\}", url_encode(query))
                 if target starts with "post:":
                     set bits to split(slice(target, 6, length(target)), "|")
                     set address to bits[1]
-                    fetch text from address with method "POST" with body replace(join(slice(bits, 2, length(bits)), "|"), "\{q\}", url_encode(query)) with header "Content-Type" is "application/x-www-form-urlencoded" with header "User-Agent" is browser()
+                    set page_text to page_post(address, replace(join(slice(bits, 2, length(bits)), "|"), "\{q\}", url_encode(query)), site.cookie)
                 otherwise:
-                    fetch text from address with header "User-Agent" is browser()
-                set page_text to result
+                    set page_text to page_get(address, site.cookie)
                 set before to length(found)
                 collect(found, page_text, address, site.name)
                 if deep and length(found) is before:
-                    look_inside(found, page_text, address, site.name, query)
+                    look_inside(found, page_text, address, site.name, query, site.cookie)
                 if length(found) is greater than before:
                     set got to 1
                     if target is not site.url:
@@ -110,7 +123,7 @@ page results with query:
                     exit loop
             on error:
                 if got is 0 and length(problems) is less than 3:
-                    add "{site.name}: {error}" to problems
+                    add "{site.name}: {error}{blocked_hint(error)}" to problems
         if got is 0 and length(problems) is 0:
             add "{site.name}: no results" to problems
     if length(found) is 0:
@@ -154,7 +167,7 @@ define first_hits(found, site):
     give back mine
 
 # some sites only show the magnet link inside each result's own page: open the first ones whose text matches
-define look_inside(found, page_text, base, site, query):
+define look_inside(found, page_text, base, site, query, cookie):
     set wanted to split(lower(query), " ")
     set opened to 0
     for each l in links(page_text, base):
@@ -167,10 +180,10 @@ define look_inside(found, page_text, base, site, query):
                 set ok to false
         if ok and length(label) is greater than 3:
             try:
-                fetch text from l.url with header "User-Agent" is browser()
+                set inner_page to page_get(l.url, cookie)
                 add 1 to opened
                 set before to length(found)
-                collect(found, result, l.url, site)
+                collect(found, inner_page, l.url, site)
             on error:
                 log "could not open {l.url}"
     give back 0
@@ -234,31 +247,116 @@ define remember(name, target):
     set changed to []
     for each s in list:
         if s.name is name:
-            add {name: s.name, url: target} to changed
+            add {name: s.name, url: target, cookie: s.cookie} to changed
         otherwise:
             add s to changed
     save_sites(changed)
     give back 0
 
+# the websites are kept as "name TAB address TAB cookie" separated by ;; (older versions kept "name|address")
 define site_list():
     set out to []
     if sites is empty:
         give back out
     for each part in split(sites, ";;"):
-        set bits to split(part, "|")
-        if length(bits) is at least 2:
-            add {name: bits[1], url: join(slice(bits, 2, length(bits)), "|")} to out
+        if part contains "\t":
+            set bits to split(part, "\t")
+            if length(bits) is at least 2:
+                add {name: bits[1], url: bits[2], cookie: default(bits[3], "")} to out
+        otherwise:
+            set bits to split(part, "|")
+            if length(bits) is at least 2:
+                add {name: bits[1], url: join(slice(bits, 2, length(bits)), "|"), cookie: ""} to out
     give back out
 
 define save_sites(list):
     set parts to []
     for each s in list:
-        add "{s.name}|{s.url}" to parts
+        add "{s.name}\t{s.url}\t{s.cookie}" to parts
     save sites as join(parts, ";;")
+    give back 0
+
+define cookie_state(name):
+    for each s in site_list():
+        if s.name is name and s.cookie is not empty:
+            give back "set"
+    give back "none"
+
+define set_cookie(name, value):
+    set changed to []
+    for each s in site_list():
+        if s.name is name:
+            add {name: s.name, url: s.url, cookie: replace(replace(value, "\t", " "), ";;", ";")} to changed
+        otherwise:
+            add s to changed
+    save_sites(changed)
     give back 0
 
 define clean(text):
     give back trim(replace(replace(text, "|", "/"), ";;", ";"))
 
+# what a browser sends, so that websites that check it do not refuse us (cookie: the one the user pasted for this website)
+define page_direct_get(url, cookie):
+    set from_site to "{origin_of(url)}/"
+    if cookie is empty:
+        fetch text from url with header "User-Agent" is browser() with header "Accept" is accept_header() with header "Accept-Language" is "es-ES,es;q=0.9,en;q=0.8" with header "Referer" is from_site with header "Upgrade-Insecure-Requests" is "1" with header "Sec-Fetch-Dest" is "document" with header "Sec-Fetch-Mode" is "navigate" with header "Sec-Fetch-Site" is "same-origin"
+    otherwise:
+        fetch text from url with header "User-Agent" is browser() with header "Accept" is accept_header() with header "Accept-Language" is "es-ES,es;q=0.9,en;q=0.8" with header "Referer" is from_site with header "Upgrade-Insecure-Requests" is "1" with header "Sec-Fetch-Dest" is "document" with header "Sec-Fetch-Mode" is "navigate" with header "Sec-Fetch-Site" is "same-origin" with header "Cookie" is cookie
+    give back result
+
+define page_direct_post(url, body, cookie):
+    set from_site to origin_of(url)
+    if cookie is empty:
+        fetch text from url with method "POST" with body body with header "Content-Type" is "application/x-www-form-urlencoded" with header "User-Agent" is browser() with header "Accept" is accept_header() with header "Accept-Language" is "es-ES,es;q=0.9,en;q=0.8" with header "Origin" is from_site with header "Referer" is "{from_site}/"
+    otherwise:
+        fetch text from url with method "POST" with body body with header "Content-Type" is "application/x-www-form-urlencoded" with header "User-Agent" is browser() with header "Accept" is accept_header() with header "Accept-Language" is "es-ES,es;q=0.9,en;q=0.8" with header "Origin" is from_site with header "Referer" is "{from_site}/" with header "Cookie" is cookie
+    give back result
+
+define page_get(url, cookie):
+    try:
+        give back page_direct_get(url, cookie)
+    on error:
+        if needs_solver(error):
+            give back via_solver(url, "")
+        fail error
+
+define page_post(url, body, cookie):
+    try:
+        give back page_direct_post(url, body, cookie)
+    on error:
+        if needs_solver(error):
+            give back via_solver(url, body)
+        fail error
+
+define accept_header():
+    give back "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8"
+
+# a hint when the website answers "forbidden" (403), "unauthorized" (401) or "unavailable" (503): usually a check against programs
+define blocked_hint(why):
+    if why contains "403" or why contains "401" or why contains "503":
+        give back " - the website refuses programs (Cloudflare?). Options: paste your browser cookie in the website's page of your list, or set the address of a FlareSolverr in the addon settings."
+    give back ""
+
+# the website refused: with a FlareSolverr (a program on your PC or server that opens the page with a real browser) the page can be got anyway
+define needs_solver(why):
+    give back solver is not empty and (why contains "403" or why contains "503" or why contains "429")
+
+define via_solver(url, body):
+    set cmd to "request.get"
+    if body is not empty:
+        set cmd to "request.post"
+    set base_address to trim(solver)
+    if not (base_address starts with "http"):
+        set base_address to "http://{base_address}"
+    while base_address ends with "/":
+        set base_address to slice(base_address, 1, length(base_address) - 1)
+    try:
+        fetch json from "{base_address}/v1" with body {cmd: cmd, url: url, postData: body, maxTimeout: 25000}
+    on error:
+        fail "The solver at {base_address} did not answer: {error}"
+    if result.status is not "ok":
+        fail "The solver could not open the page: {default(result.message, result.status)}"
+    give back result.solution.response
+
 define browser():
-    give back "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"
+    give back default(agent, "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36")
