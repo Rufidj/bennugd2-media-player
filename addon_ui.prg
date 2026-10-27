@@ -934,7 +934,7 @@ function ov_cancel_asked()
 begin
     if (!ov_cancel) return 0; end
     if (act_press[A_BACK]) return 1; end
-    if (touch_mode && act_press[A_OK] && abs(touch_x - SW / 2) < 140 && abs(touch_y - OV_BY) < 40) return 1; end
+    if (tap() && abs(touch_x - SW / 2) < 140 && abs(touch_y - OV_BY) < 40) return 1; end
     return 0;
 end
 

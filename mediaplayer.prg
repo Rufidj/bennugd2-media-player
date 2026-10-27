@@ -34,7 +34,7 @@ const
     S_VIDEO = 0; S_SHADE_BOT = 1; S_SHADE_TOP = 2; S_BTN = 3;          // 3..11
     S_FOCUS = 12; S_BAR_BG = 13; S_BAR_FG = 14; S_KNOB = 15;
     S_BROWSE_BG = 16; S_SEL = 17; S_ROWICON = 18;                      // 18..29
-    S_HEADER = 30; S_PREVIEW = 31; S_PANEL = 32; S_VIZ = 33; S_MSEL = 34; S_BG = 35; S_WAVE = 36; S_HICON = 39; S_OVDIM = 45; S_OVBOX = 46; S_OVBG = 47; S_OVFG = 48; S_OVBTN = 49; S_OVICO = 50; S_TABUL = 51; S_TABSEL = 52; S_IMG = 53; S_IMG2 = 54; S_IBG = 55; S_COUNT = 56;
+    S_HEADER = 30; S_PREVIEW = 31; S_PANEL = 32; S_VIZ = 33; S_MSEL = 34; S_BG = 35; S_WAVE = 36; S_HICON = 39; S_OVDIM = 45; S_OVBOX = 46; S_OVBG = 47; S_OVFG = 48; S_OVBTN = 49; S_OVICO = 50; S_TABUL = 51; S_TABSEL = 52; S_IMG = 53; S_IMG2 = 54; S_IBG = 55; S_CURSOR = 56; S_COUNT = 57;
     HINT_Y = 684;
     OV_TY = 290; OV_BARY = 350; OV_PY = 392; OV_BY = 452;              // ventana de progreso: titulo, barra, porcentaje y boton (en la rejilla de 1280x720)
     GK_MAX = 8192;
@@ -66,9 +66,10 @@ const
     MA_IMG_SLIDE = 48; MA_IMG_INT = 49; MA_IMG_TR = 50; MA_IMG_SHUF = 51; MA_IMG_ROT = 52; MA_IMG_INFO = 53; MA_IMG_CLOSE = 54; MA_TOR_FILE = 60; MA_FRECV = 55; MA_RS_YES = 56; MA_RS_NO = 57;
     // ajustes: tipo de fila y su identificador
     STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
+    ST_WINDOW = 26;
     ST_LANG = 1; ST_SKIN = 2; ST_PREVIEW = 3; ST_SEEK = 4; ST_VIZ = 5; ST_UNKNOWN = 6; ST_INSTALL = 7; ST_STOREURL = 8; ST_ACCOUNTS = 9;
     ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18; ST_HIDDEN = 19; ST_ALLFILES = 20; ST_TORKEEP = 21; ST_TORUP = 22; ST_TOREXTRA = 23; ST_TORDHT = 24; ST_RESUME = 25;
-    APP_VERSION = "1.1.0";
+    APP_VERSION = "1.1.1";
 end
 
 global
@@ -98,6 +99,21 @@ global
     int touch_mode;                 // 1 = se esta manejando con el dedo
     int touch_x, touch_y;           // ultima posicion del dedo
     int touch_age;                  // fotogramas desde el ultimo toque
+
+    // raton (PC): el motor oculta el cursor del sistema, asi que se dibuja uno propio; hace de dedo (clic = toque)
+    int ptr_x, ptr_y, ptr_rx = -1, ptr_ry = -1;      // posicion logica y real
+    int ptr_idle = 9999;                              // fotogramas sin mover ni pulsar
+    int ptr_moved, ptr_click, ptr_dbl, ptr_rclick, ptr_wheel, ptr_lprev, ptr_rprev;   // este fotograma: movido / clic / doble clic / clic derecho / rueda (+ arriba) / estado anterior de los botones
+    int ptr_drag;                                     // 1 = se arrastra la barra de progreso
+    int g_cursor;
+    int kb_typed, kt_prev, kt_hold, bs_hold;          // teclado fisico sobre el teclado en pantalla
+    int sel_ex[S_COUNT], sel_ey[S_COUNT], sel_ew[S_COUNT], sel_eh[S_COUNT], sel_ef[S_COUNT];   // selectores: posicion suavizada
+    int tul_x, tul_w, tul_f;                          // subrayado de la barra de secciones, suavizado
+    int spr_xr[S_COUNT];                              // desplazamiento extra en pixeles reales (las olas)
+    int wave_f; int wave_pos[3];                                  // posicion de las olas en 1/64 de pixel
+    int win_mode, win_full;                           // ajuste: 0 con marco, 1 sin marco, 2 pantalla completa; win_full = pantalla completa activada con F11
+    int vol_applied = -1, vol_vh;                     // volumen que tiene puesto el video que se ve
+    int mn_x0, mn_y0, mn_w;                           // ventana del menu (para el raton)
 
     // explorador
     string cur_dir;
@@ -197,6 +213,7 @@ global
     int sc_f[200], sc_a[200], sc_n;               // entrada guiada para pruebas (MP_SCRIPT)
     string last_sub_raw = "";                    // cache del subtitulo
     int shot_frame = 150;
+    int fp_last, fp_sum, fp_cnt, fp_max, fp_slow, f11_prev, pg_prev, hm_prev;
 end
 
 declare function string ext_of(string f) end
@@ -252,6 +269,43 @@ declare function string au_test_val(string env, string def) end
 declare function int open_accounts_menu() end
 declare function int open_account_menu(int i) end
 
+function int is_ps5()
+begin
+    return substr(cd(), 0, 5) == "/app0";
+end
+
+// banderas de la ventana segun el ajuste (con marco / sin marco / pantalla completa); F11 alterna la pantalla completa
+function int win_flags()
+private int f;
+begin
+    f = 0;
+    if (win_mode == 1) f |= MODE_FRAMELESS; end
+    if (win_full) f |= MODE_FULLSCREEN; end
+    return f;
+end
+
+function toggle_fullscreen()
+begin
+    win_full = !win_full;
+    screen.fullscreen = win_full;
+    set_mode(RW, RH, win_flags());
+    toast(win_full ? tr("t_fullscreen") : tr("t_windowed"));
+end
+
+// Solo pruebas (MP_FPSLOG=1): mide el tiempo entre fotogramas y lo escribe cada 120
+function fps_probe()
+private int t, d;
+begin
+    t = get_timer(); d = t - fp_last; fp_last = t;
+    if (frame_n < 30) return 0; end
+    fp_sum += d; fp_cnt++; if (d > fp_max) fp_max = d; end if (d > 25) fp_slow++; end
+    if (fp_cnt >= 120)
+        say("VIDEO frames=" + (vh ? video_frames(vh) : 0) + " pos_ms=" + (vh ? video_position(vh) : 0) + " ");
+        say("FPS media=" + (fp_sum * 10 / fp_cnt) + "/10ms max=" + fp_max + "ms lentos(>25ms)=" + fp_slow + "/120 fps_motor=" + frame_info.fps);
+        fp_sum = 0; fp_cnt = 0; fp_max = 0; fp_slow = 0;
+    end
+end
+
 // Entrada guiada para pruebas: MP_SCRIPT="fotograma:accion,fotograma:accion,..." (up down left right ok back subs pause seekb seekf mute audio)
 function load_script()
 private string sc, tok; int p, q, f, a;
@@ -298,7 +352,10 @@ private
     int i;
 begin
     soundsys_init();
-    set_mode(RW, RH);
+    storage_init();
+    cfg_load();
+    win_full = (win_mode == 2);
+    set_mode(RW, RH, win_flags());
     set_fps(60, 0);
 
     load_assets();
@@ -307,8 +364,6 @@ begin
     // en Android el mando en pantalla lo pone la app
     if (getenv("ANDROID_ROOT") != "") touch_mode = 1; end
 
-    storage_init();
-    cfg_load();
     rs_load();
     torrent_cache(store_dir != "" ? join_path(store_dir, "torrents") : join_path(cd(), "torrents")); tor_apply_settings(); tor_purge();
     lang_load(lang_cur);          // carga el idioma, abre sus fuentes TrueType y crea los textos
@@ -343,15 +398,17 @@ begin
 
     while (!wm_info.exit_status)
         frame_n++;
+        if (getenv("MP_FPSLOG") != "") fps_probe(); end                                                  // solo pruebas: tiempos entre fotogramas
         read_input();
         apply_script();
         // con la tecla ESC se sale; en Android el boton de atras del sistema
         // tambien es ESC, y ahi solo se sale cuando ya no hay donde volver
         if (act_press[A_BACK] && state == ST_BROWSE && key(_ESC) && !ov_on)
-            if (!touch_mode) exit(); end
-            if (cur_dir == home_dir && modal == M_NONE && addon_mode == 0 && store_mode == 0 && cur_list == "") exit(); end
+            if (cur_dir == home_dir && modal == M_NONE && addon_mode == 0 && store_mode == 0 && cur_list == "") exit(); end        // ESC solo cierra la aplicacion desde la pantalla de inicio (antes tambien cerraba la ventana de ajustes y los menus)
         end
 
+        if (key(_F11) && !f11_prev && getenv("ANDROID_ROOT") == "") toggle_fullscreen(); end
+        f11_prev = key(_F11);
         if (getenv("MP_ENTER") != "" && frame_n == 10) activate_entry(sel); end                       // solo pruebas
         if (getenv("MP_SEL2") != "" && frame_n == 12) sel = atoi(getenv("MP_SEL2")); end
         if (getenv("MP_ENTER2") != "" && frame_n == 40) sel = atoi(getenv("MP_ENTER2")); activate_entry(sel); end
@@ -362,6 +419,7 @@ begin
         end
         if (modal != M_NONE) update_modal(); elseif (state == ST_BROWSE) update_browser(); elseif (state == ST_IMAGE) update_image(); else update_player(); end
         layout_all();
+        draw_cursor();
         apply_texts();
 
         if (shot_path != "" && frame_n == shot_frame)
@@ -420,9 +478,25 @@ begin
     g_bg_ps = map_load("res/bg_ps.png"); hires(g_bg_ps);
     for (i = 0; i < 3; i++) g_wave[i] = map_load("res/wave" + i + ".png"); hires(g_wave[i]); end
     g_pill  = map_load("res/sel_pill.png"); hires(g_pill);
+    make_cursor();
     g_sym[0] = map_load("res/sym_cross.png"); g_sym[1] = map_load("res/sym_circle.png");
     g_sym[2] = map_load("res/sym_triangle.png"); g_sym[3] = map_load("res/sym_square.png");
     for (i = 0; i < 4; i++) center_set(0, g_sym[i], 36, 36); hires(g_sym[i]); end
+end
+
+// el cursor del raton (res/cursor.png, ya a resolucion real): el punto caliente es la punta de la flecha
+function make_cursor()
+begin
+    g_cursor = map_load("res/cursor.png");
+    hires(g_cursor);
+end
+
+// se dibuja encima de todo mientras se usa el raton (se esconde a los 4 s sin tocarlo)
+function draw_cursor()
+begin
+    if (touch_mode || ptr_idle > 240 || ptr_rx < 0) return 0; end
+    put(S_CURSOR, g_cursor, ptr_x, ptr_y + 11, 100, 255, -100);      // el centro del grafico queda 11 px a la derecha y 17 abajo de la punta
+    spr_xr[S_CURSOR] = 11;
 end
 
 // Visualizador: se dibuja en un mapa propio (map_clear + drawing_map + draw_*) que se muestra como un sprite
@@ -515,7 +589,7 @@ begin
     loop
         graph  = spr_graph[slot];
         gk = (graph > 0 && graph < GK_MAX) ? g_k[graph] : 150;      // 100 = imagen ya a resolucion real, 150 = hay que ampliarla x1.5
-        x      = spr_x[slot] * UIN / UID;
+        x      = spr_x[slot] * UIN / UID + spr_xr[slot];
         y      = spr_y[slot] * UIN / UID;
         size_y = spr_sizey[slot] * gk / 100;
         size_x = spr_sizex[slot] * gk / 100;
@@ -535,13 +609,10 @@ end
 // posicion en la que estuvo (puede que ya no haya ningun dedo cuando el juego
 // mira la tecla "aceptar").
 // Devuelve el numero de entrada que hay bajo el dedo, o -1 si no hay ninguna.
-function int touch_row()
-private int t_x, t_y, t_r, t_i;
+// Fila (o casilla de la cuadricula) que hay en un punto de la pantalla (coordenadas logicas), o -1
+function int pt_row(int t_x, int t_y)
+private int t_r, t_i;
 begin
-    if (!touch_mode) return -1; end
-    if (touch_age > 8) return -1; end;
-    t_x = touch_x;
-    t_y = touch_y;
     if (grid_mode == 1)                   // la cuadricula (la tienda, los addons)
         for (t_i = 0; t_i < ROWS; t_i++)
             if (abs(t_x - grid_cx(t_i)) < (GRID_X1 - GRID_X0) / GRID_COLS / 2 && abs(t_y - grid_cy(t_i)) < (GRID_Y1 - GRID_Y0) / GRID_ROWS / 2) return top_row + t_i; end
@@ -549,10 +620,24 @@ begin
         return -1;
     end
     t_r = (t_y - ROW_Y0) / ROW_H;          // la lista de archivos
+    if (t_y < ROW_Y0) return -1; end
     if (t_r < 0 || t_r >= ROWS) return -1; end
     if (t_r >= n_entries - top_row) return -1; end
-    if (t_x < 30 || t_x > 700) return -1; end
+    if (t_x < 30 || t_x > 730) return -1; end
     return top_row + t_r;
+end
+
+function int touch_row()
+begin
+    if (!touch_mode && !ptr_click) return -1; end
+    if (touch_mode && touch_age > 8) return -1; end
+    return pt_row(touch_x, touch_y);
+end
+
+// ¿ha habido un toque con el dedo o un clic del raton? (la posicion esta en touch_x / touch_y)
+function int tap()
+begin
+    return ptr_click || (touch_mode && act_press[A_OK] && touch_age <= 8);
 end
 
 function read_input()
@@ -568,6 +653,20 @@ begin
     end
     ax = joy_getaxis(JOY_AXIS_LEFTX); ay = joy_getaxis(JOY_AXIS_LEFTY);
 
+    // raton
+    ptr_moved = 0; ptr_click = 0; ptr_dbl = 0; ptr_rclick = 0; ptr_wheel = 0; ptr_idle++;
+    if (!touch_mode && mouse.x < 90000)
+        if (mouse.x != ptr_rx || mouse.y != ptr_ry) ptr_rx = mouse.x; ptr_ry = mouse.y; ptr_moved = 1; ptr_idle = 0; end
+        ptr_x = ptr_rx * UID / UIN; ptr_y = ptr_ry * UID / UIN;
+        if (mouse.left && !ptr_lprev) ptr_click = 1; ptr_idle = 0; if (mouse.left > 1) ptr_dbl = 1; end end
+        if (mouse.right && !ptr_rprev) ptr_rclick = 1; ptr_idle = 0; end
+        ptr_lprev = mouse.left; ptr_rprev = mouse.right;
+        ptr_wheel = mouse.wheelup - mouse.wheeldown;
+        if (ptr_wheel != 0) ptr_idle = 0; end
+        if (!mouse.left) ptr_drag = 0; end
+    end
+    if (ptr_click) touch_x = ptr_x; touch_y = ptr_y; touch_age = 0; end
+
     h[A_UP]    = key(_UP)    || joy_getbutton(JOY_BUTTON_DPAD_UP)    || ay < -16000;
     h[A_DOWN]  = key(_DOWN)  || joy_getbutton(JOY_BUTTON_DPAD_DOWN)  || ay >  16000;
     h[A_LEFT]  = key(_LEFT)  || joy_getbutton(JOY_BUTTON_DPAD_LEFT)  || ax < -16000;
@@ -580,6 +679,15 @@ begin
     h[A_SEEKF] = key(_P)|| joy_getbutton(JOY_BUTTON_RIGHTSHOULDER);
     h[A_AUDIO] = key(_A) || joy_getbutton(JOY_BUTTON_TOUCHPAD);
     h[A_MUTE]  = key(_M)     || joy_getbutton(JOY_BUTTON_X);
+    if (modal == M_KB)       // teclado en pantalla: las letras escriben, no son atajos
+        h[A_SUBS]  = joy_getbutton(JOY_BUTTON_Y);
+        h[A_PAUSE] = joy_getbutton(JOY_BUTTON_START);
+        h[A_SEEKB] = joy_getbutton(JOY_BUTTON_LEFTSHOULDER);
+        h[A_SEEKF] = joy_getbutton(JOY_BUTTON_RIGHTSHOULDER);
+        h[A_AUDIO] = joy_getbutton(JOY_BUTTON_TOUCHPAD);
+        h[A_MUTE]  = joy_getbutton(JOY_BUTTON_X);
+        h[A_BACK]  = key(_ESC) || joy_getbutton(JOY_BUTTON_B);
+    end
 
     // ultima posicion del dedo (el motor suelta el dedo un fotograma despues,
     // asi que puede que ya no haya ningun dedo cuando se mira la tecla)
@@ -620,6 +728,9 @@ begin
         end
         any_input = 1;
     end
+    // el raton: clic derecho = atras (en el reproductor, pausa)
+    if (ptr_rclick && !(state == ST_PLAY && modal == M_NONE)) act_press[A_BACK] = 1; end
+    if (ptr_moved || ptr_click || ptr_rclick || ptr_wheel != 0) any_input = 1; end
     // el stick/rueda tambien cuenta como "tocar el mando"
     if (abs(joy_getaxis(JOY_AXIS_RIGHTX)) > 12000 || abs(joy_getaxis(JOY_AXIS_RIGHTY)) > 12000) any_input = 1; end
 end
@@ -795,14 +906,16 @@ begin
     ts = cur_section();
     if (ts < 0) tab_focus = 0; return 0; end
     n = tab_count();
+    if (tab_focus && (ptr_moved || ptr_click) && ptr_y > 100 && pt_row(ptr_x, ptr_y) >= 0) tab_focus = 0; end      // el raton vuelve a la lista
     // L1 / R1: de casilla en casilla por toda la barra (al llegar a Ajustes se abre su ventana)
     if (act_press[A_SEEKB] || act_press[A_SEEKF])
         i = (tab_index(ts) + (act_press[A_SEEKF] ? 1 : n - 1)) % n;
         if (tab_id(i) == 5) settings_open(); else tab_goto(tab_id(i)); end
         return 1;
     end
+    // el raton se posa sobre una casilla: se le da el foco
     // un toque sobre una casilla
-    if (touch_mode && act_press[A_OK] && touch_age <= 8 && touch_y < 84)
+    if (tap() && touch_y < 84)
         for (i = 0; i < n; i++)
             if (touch_x >= tab_x[i] - 24 && touch_x <= tab_x[i] + tab_w[i] + 24)
                 if (tab_id(i) == 5) settings_open(); else tab_goto(tab_id(i)); end
@@ -847,8 +960,11 @@ begin
     cur = tab_focus ? tab_cur : tab_index(ts);
     for (i = 0; i < n; i++) txt_want[txt_tab[i]] = 8589934336 + (i == cur ? 255 : (tab_focus ? 210 : 150)); end
     k = tab_index(ts);
-    put(S_TABUL, g_white, tab_x[k] + tab_w[k] / 2, 76, 100, tab_focus && cur == k ? 0 : 255, -10);
-    spr_sizex[S_TABUL] = tab_w[k] * 100 / 8; spr_sizey[S_TABUL] = 4 * 100 / 8;
+    // el subrayado se desliza hasta la seccion actual (y se esconde si el foco esta en Ajustes, que es una ventana y no una seccion)
+    if (tul_f < frame_n - 1) tul_x = tab_x[k] + tab_w[k] / 2; tul_w = tab_w[k]; else tul_x = ease_to(tul_x, tab_x[k] + tab_w[k] / 2); tul_w = ease_to(tul_w, tab_w[k]); end
+    tul_f = frame_n;
+    put(S_TABUL, g_white, tul_x, 76, 100, (tab_focus && (cur == k || tab_id(cur) == 5)) ? 0 : 255, -10);
+    spr_sizex[S_TABUL] = tul_w * 100 / 8; spr_sizey[S_TABUL] = 4 * 100 / 8;
     if (tab_focus) put_sel(S_TABSEL, tab_x[cur] + tab_w[cur] / 2, 44, tab_w[cur] + 48, 52, -9); end
 end
 
@@ -889,6 +1005,27 @@ begin
             skip_headers(sel - old);
         end
 
+        // raton: pasar por encima selecciona, la rueda recorre la lista y un clic abre
+        if (ptr_moved)
+            r = pt_row(ptr_x, ptr_y);
+            if (r >= 0) sel = r; end
+        end
+        if (ptr_wheel != 0)
+            old = sel; sel -= ptr_wheel * (grid_mode == 1 ? GRID_COLS : 3);
+            if (sel < 0) sel = 0; end
+            if (sel >= n_entries) sel = n_entries - 1; end
+            if (grid_mode == 1)
+                if (sel < top_row) top_row = (sel / GRID_COLS) * GRID_COLS; end
+                if (sel >= top_row + ROWS) top_row = ((sel - ROWS) / GRID_COLS + 1) * GRID_COLS; end
+            else
+                if (sel < top_row) top_row = sel; end
+                if (sel >= top_row + ROWS) top_row = sel - ROWS + 1; end
+            end
+        end
+        if (ptr_click)
+            r = pt_row(ptr_x, ptr_y);
+            if (r >= 0) sel = r; activate_entry(sel); update_preview(); return 0; end
+        end
         if (act_press[A_OK])
             // si hay un dedo sobre una fila, se abre esa (el boton "aceptar" de
             // un mando no tiene donde estar, asi que manda el dedo)
@@ -1147,10 +1284,12 @@ private int k, ox;
 begin
     if (!skin) return 0; end
     put(S_BG, g_bg_ps, SW / 2, SH / 2, 100, 255, 30);
-    for (k = 0; k < 3; k++)
-        ox = (frame_n * (k + 1) / 4) % 1280;
-        put(S_WAVE + k, g_wave[k], 1280 - ox, SH / 2, 100, 255, 28 - k);
+    for (k = 0; k < 3; k++)                                // cada ola avanza en pasos de un pixel real en cada fotograma
+        if (wave_f != frame_n) wave_pos[k] = (wave_pos[k] + (k + 1) * 24) % (RW * 64); end
+        put(S_WAVE + k, g_wave[k], 1280, SH / 2, 100, 255, 28 - k);
+        spr_xr[S_WAVE + k] = -(wave_pos[k] / 64);
     end
+    wave_f = frame_n;
 end
 
 // Un numero corto a partir de la URL: sirve de nombre para el fichero de la cache
@@ -1237,7 +1376,17 @@ end
 
 // Selector: pastilla redondeada (PlayStation) o barra azul (clasico); w x h en pixeles
 function put_sel(int slot, int px, int py, int w, int h, int zz)
+private int dx, dy;
 begin
+    // el selector se desliza hasta su sitio (si hace falta un salto grande, o no se dibujaba en el fotograma anterior, se coloca de golpe)
+    if (sel_ef[slot] < frame_n - 1 || abs(px - sel_ex[slot]) > 560 || abs(py - sel_ey[slot]) > 420)
+        sel_ex[slot] = px; sel_ey[slot] = py; sel_ew[slot] = w; sel_eh[slot] = h;
+    else
+        sel_ex[slot] = ease_to(sel_ex[slot], px); sel_ey[slot] = ease_to(sel_ey[slot], py);
+        sel_ew[slot] = ease_to(sel_ew[slot], w);  sel_eh[slot] = ease_to(sel_eh[slot], h);
+    end
+    sel_ef[slot] = frame_n;
+    px = sel_ex[slot]; py = sel_ey[slot]; w = sel_ew[slot]; h = sel_eh[slot];
     if (skin)
         put(slot, g_pill, px, py, 100, 255, zz);
         spr_sizex[slot] = w * 100 / 704; spr_sizey[slot] = h * 100 / 48;
@@ -1245,6 +1394,18 @@ begin
         put(slot, g_sel, px, py, 100, 255, zz);
         spr_sizex[slot] = w * 100 / 8; spr_sizey[slot] = h * 100 / 8;
     end
+end
+
+// un paso de suavizado hacia el valor pedido (mueve el 38 % de lo que falta, al menos 1)
+function int ease_to(int cur, int target)
+private int d;
+begin
+    d = target - cur;
+    if (d == 0) return cur; end
+    if (abs(d) <= 1) return target; end
+    d = d * 38 / 100;
+    if (d == 0) d = target > cur ? 1 : -1; end
+    return cur + d;
 end
 
 // Barra de ayuda con los simbolos de botones de colores. ctx: 1 explorador, 2 menu, 3 teclado
@@ -1477,6 +1638,7 @@ begin
             if (k == "hidden") set_hidden = atoi(v); end
             if (k == "allfiles") set_allfiles = atoi(v); end
             if (k == "view") set_view = atoi(v); if (set_view < 0 || set_view > 2) set_view = 2; end end
+            if (k == "window") win_mode = atoi(v); if (win_mode < 0 || win_mode > 2) win_mode = 0; end end
         end
     end
     fclose(fh);
@@ -1497,6 +1659,7 @@ begin
     fputs(fh, "storeurl=" + set_store_url);
     fputs(fh, "view=" + set_view);
     fputs(fh, "resume=" + set_resume);
+    fputs(fh, "window=" + win_mode);
     fputs(fh, "torkeep=" + set_tor_keep);
     fputs(fh, "torextra=" + set_tor_extra);
     fputs(fh, "tordht=" + set_tor_dht);
@@ -1544,6 +1707,7 @@ begin
         case 0:                                                  // interfaz
             st_row(n, ST_LANG, STT_CHOICE, tr("st_lang"), tr("lang_name")); n++;
             st_row(n, ST_SKIN, STT_CHOICE, tr("st_skin"), skin ? tr("skin_ps") : tr("skin_classic")); n++;
+            if (getenv("ANDROID_ROOT") == "" && !is_ps5()) st_row(n, ST_WINDOW, STT_CHOICE, tr("st_window"), win_mode == 0 ? tr("st_win0") : (win_mode == 1 ? tr("st_win1") : tr("st_win2"))); n++; end
             st_row(n, ST_VIEW, STT_CHOICE, tr("st_view"), set_view == 0 ? tr("st_view_list") : (set_view == 1 ? tr("st_view_grid") : tr("st_view_auto"))); n++;
             st_row(n, ST_PREVIEW, STT_TOGGLE, tr("st_preview"), st_onoff(set_preview)); n++;
             st_row(n, ST_RESUME, STT_TOGGLE, tr("st_resume"), st_onoff(set_resume)); n++;
@@ -1598,6 +1762,7 @@ begin
             cfg_save();
         end
         case ST_SKIN: skin = !skin; cfg_save(); end
+        case ST_WINDOW: win_mode = (win_mode + 3 + d) % 3; cfg_save(); if ((win_mode == 2) != win_full) win_full = (win_mode == 2); screen.fullscreen = win_full; set_mode(RW, RH, win_flags()); end end
         case ST_RESUME: set_resume = !set_resume; cfg_save(); end
         case ST_TORKEEP: set_tor_keep = !set_tor_keep; cfg_save(); end
         case ST_TOREXTRA: set_tor_extra = !set_tor_extra; tor_apply_settings(); cfg_save(); end
@@ -1665,6 +1830,7 @@ end
 // control de la pantalla de ajustes (sin Kodi no se entenderia: izquierda = categorias, derecha = opciones)
 function update_settings()
 begin
+    if (ptr_moved || ptr_click || ptr_wheel != 0) st_pointer(); end
     // L1 / R1 cambian de categoria estando en cualquier columna
     if (act_press[A_SEEKB]) st_cat = (st_cat + 5) % 6; st_sel = 0; st_build(); return 0; end
     if (act_press[A_SEEKF]) st_cat = (st_cat + 1) % 6; st_sel = 0; st_build(); return 0; end
@@ -2144,7 +2310,7 @@ begin
     k -= 44;
     kb_spx[0] = (SW - k) / 2;
     for (r = 1; r < 6; r++) kb_spx[r] = kb_spx[r - 1] + kb_spw[r - 1] + 44; end
-    kb_r = 0; kb_c = 0; kb_shift = 0; kb_dirty = 1;
+    kb_r = 0; kb_c = 0; kb_shift = 0; kb_dirty = 1; kb_typed = 0; kt_prev = 0; kt_hold = 0; bs_hold = 0;
     // PS5: el teclado de la consola (si no esta disponible o falla, se usa este)
     if (!syskb_off && getenv("MP_KB_TEXT") == "")
         k = 0;
@@ -2352,10 +2518,103 @@ begin
     open_settings_menu(2);
 end
 
+// fila del menu bajo el raton: 0.., -1 = ninguna, -2 = fuera de la ventana (solo cuando el menu va sobre el explorador)
+function int menu_hit()
+private int r, x0, w, y0, h;
+begin
+    if (state == ST_BROWSE || state == ST_IMAGE)
+        x0 = mn_x0; w = mn_w; y0 = mn_y0 + 118; h = 112 + menu_n * 52;
+        if (ptr_x < mn_x0 || ptr_x > mn_x0 + mn_w || ptr_y < mn_y0 || ptr_y > mn_y0 + h) return -2; end
+    else
+        x0 = 80; w = 1120; y0 = 170;
+    end
+    if (ptr_x < x0 || ptr_x > x0 + w || ptr_y < y0 - 26) return -1; end
+    r = (ptr_y - (y0 - 26)) / 52;
+    if (r < 0 || r >= menu_n) return -1; end
+    return r;
+end
+
+// teclado fisico sobre el teclado en pantalla: lo que se teclea se escribe
+function kb_add(int c)
+begin
+    if (len(kb_text) < 220) kb_text += chr(c); kb_typed = 1; kb_dirty = 1; end
+end
+
+function kb_physical()
+private int c;
+begin
+    c = keyboard.ascii;
+    if (c >= 32 && c < 127)
+        if (c != kt_prev)
+            kt_prev = c; kt_hold = 0; kb_add(c);
+        else
+            kt_hold++;
+            if (kt_hold > 24 && (kt_hold % 3) == 0) kb_add(c); end
+        end
+    else
+        kt_prev = 0; kt_hold = 0;
+    end
+    if (key(_BACKSPACE))
+        bs_hold++;
+        if (bs_hold == 1 || (bs_hold > 24 && (bs_hold % 3) == 0)) kb_backspace(); kb_typed = 1; end
+    else
+        bs_hold = 0;
+    end
+end
+
+// el raton sobre el teclado en pantalla: pasar selecciona la tecla, un clic la pulsa
+function kb_pointer()
+private int r, c, i, hit;
+begin
+    hit = 0; r = -1; c = -1;
+    for (i = 0; i < 5; i++)
+        if (abs(ptr_y - (250 + 56 * i)) < 26 && ptr_x >= 422 && ptr_x < 422 + 467) r = i; c = (ptr_x - 422) * 10 / 467; if (c > 9) c = 9; end hit = 1; end
+    end
+    if (abs(ptr_y - (250 + 5 * 56)) < 26)
+        for (i = 0; i < 6; i++)
+            if (ptr_x >= kb_spx[i] - 14 && ptr_x <= kb_spx[i] + kb_spw[i] + 14) r = 5; c = i; hit = 1; end
+        end
+    end
+    if (!hit) return 0; end
+    kb_r = r; kb_c = c;
+    if (ptr_click) kb_press(); end
+end
+
+// el raton en la ventana de ajustes
+function st_pointer()
+private int i;
+begin
+    if (ptr_click && (ptr_x < 70 || ptr_x > SW - 70 || ptr_y < 56 || ptr_y > SH - 56)) modal = M_NONE; return 0; end
+    if (ptr_x >= 70 && ptr_x < 400 && ptr_y >= 160)                         // categorias
+        i = (ptr_y - 160) / 60;
+        if (i >= 0 && i < 6)
+            if ((ptr_moved || ptr_click) && i != st_cat) st_cat = i; st_sel = 0; st_build(); end
+            if (ptr_moved || ptr_click) st_col = 0; end
+            if (ptr_click && st_n > 0) st_col = 1; end
+        end
+    elseif (ptr_x >= 400 && ptr_y >= 164)                                   // opciones
+        i = (ptr_y - 164) / 52;
+        if (i >= 0 && i < st_n)
+            if (ptr_moved || ptr_click) st_col = 1; st_sel = i; end
+            if (ptr_click) st_activate(); end
+        end
+    end
+    if (ptr_wheel != 0 && st_col == 1 && st_n > 0) st_sel = (st_sel + st_n - (ptr_wheel > 0 ? 1 : -1)) % st_n; end
+end
+
 function update_modal()
 private int st, ok, i;
 begin
     if (modal == M_MENU)
+        if (ptr_moved || ptr_click || ptr_wheel != 0)                 // raton
+            i = menu_hit();
+            if (ptr_moved && i >= 0) menu_sel = i; end
+            if (ptr_wheel != 0 && menu_n > 0) menu_sel = (menu_sel + menu_n - (ptr_wheel > 0 ? 1 : 0) + (ptr_wheel < 0 ? 1 : 0)) % menu_n; end
+            if (ptr_click)
+                if (i >= 0) menu_sel = i; menu_run(menu_act[menu_sel]); return 0; end
+                if (i == -2) modal = M_NONE; return 0; end
+            end
+        end
         if (act_press[A_UP])   menu_sel = (menu_sel + menu_n - 1) % menu_n; end
         if (act_press[A_DOWN]) menu_sel = (menu_sel + 1) % menu_n; end
         if (act_press[A_OK])   menu_run(menu_act[menu_sel]); end
@@ -2378,6 +2637,8 @@ begin
             modal = M_NONE;
         end
     elseif (modal == M_KB)
+        kb_physical();
+        if (ptr_moved || ptr_click) kb_pointer(); end
         if (act_press[A_UP])
             if (kb_r == 5) kb_c = kb_c * 10 / 6; if (kb_c > 9) kb_c = 9; end end
             kb_r = (kb_r + 5) % 6;
@@ -2390,7 +2651,7 @@ begin
         end
         if (act_press[A_LEFT])  kb_c = (kb_c + (kb_r == 5 ? 5 : 9)) % (kb_r == 5 ? 6 : 10); end
         if (act_press[A_RIGHT]) kb_c = (kb_c + 1) % (kb_r == 5 ? 6 : 10); end
-        if (act_press[A_OK])     kb_press(); end
+        if (act_press[A_OK])     if (kb_typed && key(_ENTER)) kb_accept(); else kb_press(); end end
         if (act_press[A_MUTE])   kb_backspace(); end
         if (act_press[A_SUBS])   if (len(kb_text) < 220) kb_text += " "; kb_dirty = 1; end end
         if (act_press[A_SEEKB])  kb_shift = !kb_shift; kb_dirty = 1; end
@@ -2426,6 +2687,7 @@ begin
     if (w > 1100) w = 1100; end
     h = 112 + menu_n * 52;
     x0 = (SW - w) / 2; y0 = (SH - h) / 2;
+    mn_x0 = x0; mn_y0 = y0; mn_w = w;
     put(S_OVDIM, g_ovdim, SW / 2, SH / 2, 100, 255, -21);
     spr_sizex[S_OVDIM] = SW / 8 * 100; spr_sizey[S_OVDIM] = SH / 8 * 100;
     put(S_OVBOX, g_ovbox, SW / 2, SH / 2, 100, 255, -22);
@@ -2645,6 +2907,27 @@ begin
     video_seek(vh, p - hls_base);
 end
 
+// salta a una posicion absoluta (ms)
+function seek_to(int p)
+begin
+    if (p < 0) p = 0; end
+    if (vdur() > 0 && p > vdur() - 500) p = vdur() - 500; end
+    if (hls_url != "") hls_seek_to = p; hls_seek_t = get_timer(); return 0; end
+    video_seek(vh, p - hls_base);
+end
+
+// boton del reproductor que hay bajo un punto (coordenadas logicas), o -1
+function int btn_at(int px, int py)
+private int i, bx;
+begin
+    if (abs(py - (SH - 72)) > 36) return -1; end
+    for (i = 0; i < B_COUNT; i++)
+        if (i <= B_NEXT) bx = SW / 2 - 250 + i * 100; else bx = SW - 290 + (i - B_SUBS) * 90; end
+        if (abs(px - bx) < 40) return i; end
+    end
+    return -1;
+end
+
 function toggle_pause()
 begin
     if (video_is_playing(vh)) video_pause(vh, 1); else video_pause(vh, 0); end
@@ -2680,7 +2963,7 @@ begin
 end
 
 function update_player()
-private int shown, hs;
+private int shown, hs, k, d;
 begin
     if (!vh) state = ST_BROWSE; return 0; end
     if (tor_playing) tor_watch(); end
@@ -2701,7 +2984,43 @@ begin
 
     shown = overlay_a > 40;   // los iconos estan "tocables" mientras se ven
 
+    // el volumen se mantiene en el video que se ve (si se abre otro, p. ej. al reanudar un directo, se vuelve a poner)
+    if (vh != vol_vh || vol_applied != (muted ? 0 : vol * 128 / 100))
+        vol_vh = vh; vol_applied = muted ? 0 : vol * 128 / 100; video_volume(vh, vol_applied);
+    end
+
+    // raton: rueda = volumen, clic = boton / barra / pausa, doble clic = pantalla completa, clic derecho = pausa
+    if (ptr_wheel != 0) set_volume(vol + 5 * (ptr_wheel > 0 ? 1 : -1)); end
+    if (ptr_rclick) toggle_pause(); end
+    if (ptr_click)
+        if (shown && btn_at(ptr_x, ptr_y) >= 0)
+            focus = btn_at(ptr_x, ptr_y); press_button(focus);
+        elseif (shown && abs(ptr_y - (SH - 135)) < 24 && ptr_x >= 60 && ptr_x <= 1220 && vdur() > 0)
+            ptr_drag = 1; seek_to(vdur() * (ptr_x - 60) / 1160);
+        elseif (ptr_dbl)
+            toggle_fullscreen(); toggle_pause();            // el primer clic del doble ya habia puesto pausa: se deshace
+        else
+            toggle_pause();
+        end
+    end
+    if (ptr_drag && ptr_moved && vdur() > 0 && (frame_n % 4) == 0) seek_to(vdur() * (ptr_x < 60 ? 0 : (ptr_x > 1220 ? 1160 : ptr_x - 60)) / 1160); end
+
     if (any_input && !(act_hold[A_UP] && !shown && 0)) overlay_t = 0; end
+
+    // teclado: izquierda / derecha saltan siempre (con Mayus x6, y se acelera si se mantiene pulsado); Av Pag / Re Pag saltan un minuto
+    k = 0;
+    if (act_press[A_LEFT] && key(_LEFT)) k = -1; end
+    if (act_press[A_RIGHT] && key(_RIGHT)) k = 1; end
+    if (k != 0)
+        d = seek_ms() * (key(_L_SHIFT) || key(_R_SHIFT) ? 6 : 1) * (1 + (act_rep[k < 0 ? A_LEFT : A_RIGHT] > 150 ? 2 : (act_rep[k < 0 ? A_LEFT : A_RIGHT] > 70 ? 1 : 0)));
+        seek_rel(k * d); toast((k < 0 ? "-" : "+") + (d / 1000) + " s");
+        act_press[A_LEFT] = 0; act_press[A_RIGHT] = 0;
+    end
+    if (key(_PGUP) && !pg_prev) seek_rel(-60000); toast("-60 s"); end
+    if (key(_PGDN) && !pg_prev) seek_rel(60000); toast("+60 s"); end
+    pg_prev = key(_PGUP) || key(_PGDN);
+    if (key(_HOME) && !hm_prev) seek_to(0); end
+    hm_prev = key(_HOME);
 
     // atajos que funcionan siempre
     if (act_press[A_SEEKB]) seek_rel(-seek_ms()); toast("-" + seek_txt()); end
@@ -3005,6 +3324,7 @@ begin
         txt_want[txt_title] = 8589934336 + (a);
     end
     if (toast_t > 0) txt_want[txt_toast] = 8589934336 + (toast_t > 30 ? 255 : toast_t * 255 / 30); end
+    if (muted && !music_mode) put(S_ROWICON, g_icon[9], SW - 56, 56, 60, 220, -6); end      // aviso permanente de que esta en silencio
 
     // subtitulos (por encima de los iconos cuando estos se ven)
     if (sub_sel >= 0 && vh)

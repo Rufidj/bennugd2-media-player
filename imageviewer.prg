@@ -324,9 +324,10 @@ begin
         if (img_slide) img_slide = 0; img_kb = 0; toast(tr("t_img_slide_off")); else close_image(); end
         return 0;
     end
-    if (act_press[A_OK] || act_press[A_MUTE])
-        if (touch_mode && act_press[A_OK] && touch_x < SW / 4) img_go(-1, 0); return 0; end
-        if (touch_mode && act_press[A_OK] && touch_x > SW * 3 / 4) img_go(1, 0); return 0; end
+    if (ptr_wheel != 0 && img_zoom == 0) img_go(ptr_wheel > 0 ? -1 : 1, 0); return 0; end
+    if (act_press[A_OK] || act_press[A_MUTE] || ptr_click)
+        if (tap() && touch_x < SW / 4) img_go(-1, 0); return 0; end
+        if (tap() && touch_x > SW * 3 / 4) img_go(1, 0); return 0; end
         open_image_menu(0); return 0;
     end
     if (act_press[A_PAUSE])

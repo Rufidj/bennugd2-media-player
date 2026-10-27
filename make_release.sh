@@ -79,6 +79,8 @@ Requirements (Ubuntu 24.04 / Debian 13 style package names):
 Built on Ubuntu 24.04 (glibc 2.39). Needs an OpenGL 3.x capable desktop session.
 Controls: arrows move, Enter = open, Esc/Backspace = back, M = options/mute, S = subtitles,
           Space = pause, N / P = -10 s / +10 s, A = next audio track.
+Mouse: click = open / press, wheel = scroll or volume, double click = full screen, right click = back (pause while playing).
+Keys while playing: Left / Right skip, Page Up / Down = 1 min, Up / Down volume, M mute, F11 full screen.
 Addons: copy a folder with a main.addon file into  $MP_STORE/addons/  (tutorial: ADDONS.md / ADDONS.es.md),
         or install them from the built-in Store (Internet Archive, PeerTube, Plex, Radio Browser, SomaFM, YouTube).
 The Store also offers free TV and radio channel lists (M3U) to download into  $MP_STORE/listas/  (tutorial: ADDONS.md).
@@ -148,7 +150,9 @@ Everything needed is in this folder (FFmpeg 8.1 LGPL build with Windows TLS for 
 Needs a graphics driver with OpenGL 3.x. Windows 10 or later.
 
 Controls: arrows move, Enter = open, Esc/Backspace = back, M = options/mute, S = subtitles,
-          Space = pause, N / P = -10 s / +10 s, A = next audio track. A gamepad works too.
+          Space = pause, N / P = -10 s / +10 s, A = next audio track.
+Mouse: click = open / press, wheel = scroll or volume, double click = full screen, right click = back (pause while playing).
+Keys while playing: Left / Right skip, Page Up / Down = 1 min, Up / Down volume, M mute, F11 full screen. A gamepad works too.
 Addons: copy a folder with a main.addon file into  %MP_STORE%\addons\  (tutorial: ADDONS.md / ADDONS.es.md),
         or install them from the built-in Store (Internet Archive, PeerTube, Plex, Radio Browser, SomaFM, YouTube).
 The Store also offers free TV and radio channel lists (M3U) to download into  %MP_STORE%\listas\  (tutorial: ADDONS.md).
