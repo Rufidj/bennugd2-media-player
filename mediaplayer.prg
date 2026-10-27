@@ -51,22 +51,23 @@ const
 
     ST_BROWSE = 0; ST_PLAY = 1; ST_IMAGE = 2;
     K_FILE = 0; K_DIR = 1; K_LIST = 2; K_URL = 3; K_MYLISTS = 4; K_ADDONS = 5; K_ADDON = 6; K_AFOLDER = 7; K_STORE = 8; K_SITEM = 9; K_DOWNLOADS = 10;
-    K_XCAT = 12; K_XSTR = 13; K_XSER = 14;   // entradas de una pantalla de Xtream (categoría, canal, serie)
+    K_XCAT = 12; K_XSTR = 13; K_XSER = 14; K_AWIDGET = 15;   // elemento de un addon que no abre nada: boton, casilla, selector, campo de texto o cabecera
+      // entradas de una pantalla de Xtream (categoría, canal, serie)
     // tienda de addons: repositorio oficial del reproductor (se puede apuntar a otro con MP_STORE_URL)
     STORE_URL = "https://raw.githubusercontent.com/Rufidj/bennugd2-media-player/main/addons";
     M_NONE = 0; M_MENU = 1; M_KB = 2; M_CREDITS = 3; M_SYSKB = 4; M_SETTINGS = 5;                             // pantallas modales (menu / teclado)
     KB_NEWLIST = 1; KB_RENAME_LIST = 2; KB_URL = 3; KB_NEW_TITLE = 4; KB_ENTRY_TITLE = 5; KB_LOGO = 6; KB_ADDON = 7; KB_ASET = 8;
-    KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11; KB_AUTH_SERVER = 12; KB_ADDON_URL = 14; KB_STORE_URL = 15; KB_FRENAME = 16; KB_NEWDIR = 17;
+    KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11; KB_AUTH_SERVER = 12; KB_ADDON_URL = 14; KB_STORE_URL = 15; KB_FRENAME = 16; KB_NEWDIR = 17; KB_WIDGET = 18;
     MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
     MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_ASET = 300; MA_PICK = 100;
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
     MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27; MA_DOWNLOAD = 29; MA_DELETE_DL = 30; MA_DELETE_DL_YES = 31; MA_DL_VIDEO = 32; MA_DL_AUDIO = 33; MA_DL_FMT = 400; MA_UNK_YES = 34; MA_CACHE_YES = 35; MA_ST_BACK = 36;
     MA_FILES = 37; MA_FCOPY = 38; MA_FMOVE = 39; MA_FPASTE = 40; MA_FRENAME = 41; MA_FDEL = 42; MA_FDEL_YES = 43; MA_FNEWDIR = 44; MA_FMARK = 45; MA_FMARKALL = 46; MA_FPROPS = 47;
-    MA_IMG_SLIDE = 48; MA_IMG_INT = 49; MA_IMG_TR = 50; MA_IMG_SHUF = 51; MA_IMG_ROT = 52; MA_IMG_INFO = 53; MA_IMG_CLOSE = 54;
+    MA_IMG_SLIDE = 48; MA_IMG_INT = 49; MA_IMG_TR = 50; MA_IMG_SHUF = 51; MA_IMG_ROT = 52; MA_IMG_INFO = 53; MA_IMG_CLOSE = 54; MA_TOR_FILE = 60;
     // ajustes: tipo de fila y su identificador
     STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
     ST_LANG = 1; ST_SKIN = 2; ST_PREVIEW = 3; ST_SEEK = 4; ST_VIZ = 5; ST_UNKNOWN = 6; ST_INSTALL = 7; ST_STOREURL = 8; ST_ACCOUNTS = 9;
-    ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18; ST_HIDDEN = 19; ST_ALLFILES = 20;
+    ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18; ST_HIDDEN = 19; ST_ALLFILES = 20; ST_TORKEEP = 21; ST_TORUP = 22;
     APP_VERSION = "1.2";
 end
 
@@ -287,6 +288,7 @@ include "xtream.prg";
 include "addon_ui.prg";
 include "fileops.prg";
 include "imageviewer.prg";
+include "torrentplay.prg";
 
 process main()
 private
@@ -305,6 +307,7 @@ begin
 
     storage_init();
     cfg_load();
+    torrent_cache(store_dir != "" ? join_path(store_dir, "torrents") : join_path(cd(), "torrents")); tor_apply_settings(); tor_purge();
     lang_load(lang_cur);          // carga el idioma, abre sus fuentes TrueType y crea los textos
     load_script();
     cur_dir = getenv("MEDIA_DIR");
@@ -324,6 +327,7 @@ begin
     end
     if (getenv("MP_SELECT") != "") sel = atoi(getenv("MP_SELECT")); if (sel >= n_entries) sel = n_entries - 1; end end   // solo pruebas
     if (getenv("MP_XT_ENTER") != "") xt_enter(getenv("MP_XT_ENTER")); end   // solo pruebas
+    if (getenv("MP_ADDON") != "") addon_open(getenv("MP_ADDON")); end        // solo pruebas: abre un addon (carpeta)
     if (getenv("MP_VIZ") != "") viz_mode = atoi(getenv("MP_VIZ")); end   // solo pruebas
     say("MediaPlayer: carpeta " + cur_dir + ", " + n_entries + " entradas");
 
@@ -639,7 +643,7 @@ begin
             if (nm != "." && nm != ".." && (set_hidden || substr(nm, 0, 1) != "."))
                 d = fileinfo.directory;
                 if (!d && (lcase(ext_of(nm)) == "m3u" || lcase(ext_of(nm)) == "m3u8")) d = K_LIST; end
-                if (d || set_allfiles || is_video(nm) || is_audio(nm) || is_image(nm))
+                if (d || set_allfiles || is_video(nm) || is_audio(nm) || is_image(nm) || lcase(ext_of(nm)) == "torrent")
                     entries[n_entries] = nm; entry_dir[n_entries] = d; entry_size[n_entries] = fileinfo.size; entry_logo[n_entries] = ""; n_entries++;
                 end
             end
@@ -851,6 +855,7 @@ begin
     if (xt_job) xt_step(); return 0; end                          // Xtream: cargando categorías o canales
     if (store_job == 1) store_step(); return 0; end                // instalando: no se atiende al mando
     if (fo_job == 1) fo_step(); return 0; end                      // copiando, moviendo o borrando: solo se puede cancelar
+    if (tor_job > 0) tor_step(); return 0; end                    // preparando un torrent: solo se puede cancelar
     if (dl_job == 1) dl_step(); return 0; end                      // descargando un video: solo se puede cancelar
     if (store_load) store_fetch(); return 0; end                   // la tienda se pide en el fotograma siguiente (primero addons y después listas)
     if (act_press[A_MUTE]) if (store_mode == 1) open_store_menu(); else open_context_menu(); end return 0; end
@@ -876,6 +881,7 @@ begin
             if (sel >= n_entries) sel = (old == n_entries - 1 && act_press[A_DOWN]) ? 0 : n_entries - 1; end
             if (sel < top_row) top_row = sel; end
             if (sel >= top_row + ROWS) top_row = sel - ROWS + 1; end
+            skip_headers(sel - old);
         end
 
         if (act_press[A_OK])
@@ -966,6 +972,10 @@ begin
                         wrap_text(entry_info[sel], 420, 4);                               // addon
                     end
                     for (k = 0; k < wrap_n; k++) s_info[2 + k] = wrap_l[k]; end
+                end
+                case K_AWIDGET:
+                    wrap_text(entry_info[sel], 420, 5);
+                    for (k = 0; k < wrap_n; k++) s_info[1 + k] = wrap_l[k]; end
                 end
                 case K_AFOLDER:
                     s_info[1] = tr("s_folder");
@@ -1074,6 +1084,8 @@ begin
         if (addon_mode > 0 && entry_aargs[i] != "") load_path = addon_signed_playlist(entry_url[i], entry_aargs[i]); if (load_path == "") load_wait = 0; s_toast = ""; toast_t = 0; end end
     elseif (is_image(entries[i]))
         open_image(i);
+    elseif (is_torrent_src(entries[i]))
+        start_video(entry_path(i));
     elseif (!is_video(entries[i]) && !is_audio(entries[i]))
         toast(tr("t_notmedia"));
     else
@@ -1101,6 +1113,8 @@ begin
         addon_open(entry_url[i]);
     elseif (entry_dir[i] == K_AFOLDER)
         addon_goto(entry_url[i], entry_aargs[i]);
+    elseif (entry_dir[i] == K_AWIDGET)
+        addon_widget(i);
     elseif (entry_dir[i] == K_LIST)
         cur_list = join_path(cur_dir, entries[i]); read_list();
     elseif (entry_dir[i] == K_XCAT)
@@ -1447,6 +1461,8 @@ begin
             if (k == "unk") set_unknown = atoi(v) ? 1 : 0; end
             if (k == "dlfmt") set_dlfmt = atoi(v); if (set_dlfmt < 0 || set_dlfmt > 3) set_dlfmt = 0; end end
             if (k == "storeurl") set_store_url = v; end
+            if (k == "torkeep") set_tor_keep = atoi(v); end
+            if (k == "torup") set_tor_up = atoi(v); if (set_tor_up < 0 || set_tor_up > 3) set_tor_up = 0; end end
             if (k == "imgint") set_img_int = atoi(v); if (set_img_int < 0 || set_img_int > 5) set_img_int = 1; end end
             if (k == "imgtr") set_img_tr = atoi(v); if (set_img_tr < 0 || set_img_tr > 4) set_img_tr = 3; end end
             if (k == "imgshuf") set_img_shuf = atoi(v); end
@@ -1472,6 +1488,8 @@ begin
     fputs(fh, "dlfmt=" + set_dlfmt);
     fputs(fh, "storeurl=" + set_store_url);
     fputs(fh, "view=" + set_view);
+    fputs(fh, "torkeep=" + set_tor_keep);
+    fputs(fh, "torup=" + set_tor_up);
     fputs(fh, "imgint=" + set_img_int);
     fputs(fh, "imgtr=" + set_img_tr);
     fputs(fh, "imgshuf=" + set_img_shuf);
@@ -1533,6 +1551,8 @@ begin
         case 3:                                                  // descargas
             st_row(n, ST_DLFMT, STT_CHOICE, tr("st_dlfmt"), set_dlfmt == 1 ? tr("st_dl_video") : (set_dlfmt == 2 ? tr("st_dl_audio") : (set_dlfmt == 3 ? tr("st_dl_mp3") : tr("st_dl_ask")))); n++;
             st_row(n, ST_DOWNDIR, STT_INFO, tr("st_downdir"), fit_text(downloads_dir, 400)); n++;
+            st_row(n, ST_TORKEEP, STT_TOGGLE, tr("st_torkeep"), st_onoff(set_tor_keep)); n++;
+            st_row(n, ST_TORUP, STT_CHOICE, tr("st_torup"), set_tor_up == 0 ? tr("st_up_off") : tor_up_kb(set_tor_up) + " KB/s"); n++;
             if (store_dir != "") st_row(n, ST_OPENDL, STT_ACTION, tr("st_openfolder"), ""); n++; end
         end
         case 4:                                                  // almacenamiento
@@ -1564,6 +1584,8 @@ begin
             cfg_save();
         end
         case ST_SKIN: skin = !skin; cfg_save(); end
+        case ST_TORKEEP: set_tor_keep = !set_tor_keep; cfg_save(); end
+        case ST_TORUP: set_tor_up = (set_tor_up + 4 + d) % 4; tor_apply_settings(); cfg_save(); end
         case ST_HIDDEN: set_hidden = !set_hidden; cfg_save(); end
         case ST_ALLFILES: set_allfiles = !set_allfiles; cfg_save(); end
         case ST_VIEW: set_view = (set_view + 3 + d) % 3; cfg_save(); if (xt_screen == 0 && (addon_mode > 0 || store_mode == 1)) auto_grid(); end end
@@ -2051,6 +2073,7 @@ begin
             open_accounts_menu();
         end
         default:
+            if (act >= MA_TOR_FILE && act < MA_TOR_FILE + 9) tor_use_file(tor_pick[act - MA_TOR_FILE]); end
             if (act >= MA_ASET && act < MA_ASET + 24) addon_edit_setting(act - MA_ASET); end
             if (act >= MA_DL_FMT && act < MA_DL_FMT + 5) dl_start(dl_pick, 10 + act - MA_DL_FMT); end
             if (act >= MA_PICK && act < MA_PICK + 9)
@@ -2192,6 +2215,9 @@ begin
             nm = safe_name(kb_text);
             if (nm == "") return 0; end
             fmove(op_path, join_path(parent_of(op_path), nm + ".m3u")); toast(tr("t_renamed")); read_dir();
+        end
+        case KB_WIDGET:
+            host_setting_set(wid_name, kb_text); addon_refresh();
         end
         case KB_FRENAME:
             nm = safe_name(kb_text);
@@ -2454,6 +2480,7 @@ end
 function start_video(string path)
 private int i;
 begin
+    if (is_torrent_src(path)) tor_begin(path); return 0; end                  // un magnet o un .torrent: se prepara aparte y luego se abre su archivo
     http_trace("start_video: close_preview");
     close_preview(); pv_idx = -1;
     http_trace("start_video: video_close");
@@ -2502,6 +2529,7 @@ end
 
 function stop_video()
 begin
+    if (tor_playing) tor_cleanup(); end
     if (vh) video_close(vh); end
     vh = 0;
     spr_graph[S_VIDEO] = 0;
@@ -2812,11 +2840,12 @@ begin
                 switch (entry_dir[rowi])
                     case K_DIR, K_MYLISTS, K_AFOLDER, K_DOWNLOADS: g = g_icon[10]; end
                     case K_ADDONS, K_ADDON: g = g_icon[16]; end
+                    case K_AWIDGET: g = entry_akind[rowi] == 4 ? g_icon[0] : (entry_akind[rowi] == 8 ? 0 : g_icon[16]); end
                     case K_STORE: g = g_icon[14]; end
                     case K_SITEM: if (entry_skind[rowi] == 1) g = entry_siver[rowi] != "" ? g_icon[11] : g_icon[14]; else g = entry_siver[rowi] != "" ? g_icon[16] : g_icon[14]; end end
                     case K_LIST: g = g_icon[14]; end
                     case K_URL: g = (addon_mode == 2 && entry_akind[rowi] == 1) ? g_icon[11] : ((addon_mode == 2 && entry_akind[rowi] >= 2) ? g_icon[15] : g_icon[14]); end
-                    default: g = is_audio(entries[rowi]) ? g_icon[15] : (is_image(entries[rowi]) ? g_icon[17] : g_icon[11]); end
+                    default: g = is_audio(entries[rowi]) ? g_icon[15] : (is_image(entries[rowi]) ? g_icon[17] : (lcase(ext_of(entries[rowi])) == "torrent" ? g_icon[14] : g_icon[11])); end
                 end
                 if (entries[rowi] == "..") g = g_icon[12]; end
                 if (grid_mode == 1)
@@ -2940,7 +2969,7 @@ begin
         put(S_KNOB, g_knob, 60 + pct * 1160 / 1000, SH - 135, 100, a, -10);
 
         if (pos / 1000 != last_sec || dur != last_dur)
-            if (dur > 0) s_time = fmt_time(pos) + " / " + fmt_time(dur); else s_time = fmt_time(pos) + "  (en directo)"; end
+            if (dur > 0) s_time = fmt_time(pos) + " / " + fmt_time(dur) + tor_stats(); else s_time = fmt_time(pos) + "  (en directo)"; end
             last_sec = pos / 1000; last_dur = dur;
         end
         txt_want[txt_time] = 8589934336 + (a);

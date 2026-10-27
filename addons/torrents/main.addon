@@ -1,0 +1,171 @@
+# Torrents addon for the BennuGD2 Media Player
+# You add the websites (this addon does not come with any): for each one you give a name and the address of its search
+# page. Search looks for magnet links and .torrent files in them, and what you pick is played while it downloads.
+#
+# Only use it with content you have the right to watch or download.
+
+addon "Torrents"
+id torrents
+version 0.1
+author "BennuGD2 Media Player"
+description "Search the websites you add for torrents and play them while they download (magnet links and .torrent files)."
+
+setting sites is text, hidden
+setting words is text, hidden
+setting deep is yes or no, label "Look inside the result pages", default yes
+setting order is choice, label "Order of the results", default "Site order", choices "Site order", "Name", "Size"
+
+# ---- the first page
+page home:
+    set list to site_list()
+    if length(list) is 0:
+        show header "Add a website to be able to search"
+    otherwise:
+        show button "Search" doing do_search info "Looks for torrents in the {length(list)} website(s) you added."
+        show header "Your websites"
+        for each site in list:
+            show button "{site.name}" doing site_options with name is site.name info "{site.url}  (press to remove it)"
+    show button "Add a website" doing add_site info "A name and the address of its search page, with \{q\} where the search words go. Example: https://example.org/search/\{q\}"
+    show header "Options"
+    show check "Look inside the result pages when the list has no magnet links" bound deep
+    show choice "Order of the results" bound order
+    show button "Play a magnet link or the address of a .torrent" doing open_link
+
+# ---- websites
+page add_site:
+    ask "Name of the website" into site_name
+    if trim(site_name) is empty:
+        stop
+    ask "Search address. Write \{q\} where the search words go (example: https://example.org/search/\{q\})" into template default "https://"
+    if not (template contains "\{q\}"):
+        fail "The address must contain \{q\} (the place where the search words go)."
+    if not (template starts with "http"):
+        fail "The address must start with http:// or https://"
+    set list to site_list()
+    add {name: clean(site_name), url: trim(template)} to list
+    save_sites(list)
+
+page site_options with name:
+    show header "{name}"
+    show button "Remove this website" doing remove_site with name is name
+    show button "Back" doing nothing_here
+
+page nothing_here:
+    go to home
+
+page remove_site with name:
+    set list to site_list()
+    set kept to []
+    for each site in list:
+        if site.name is not name:
+            add site to kept
+    save_sites(kept)
+    go to home
+
+# ---- searching
+page do_search:
+    ask "Search" into query default words
+    if trim(query) is empty:
+        stop
+    save words as trim(query)
+    go to results with query is trim(query)
+
+page results with query:
+    set list to site_list()
+    set found to []
+    set problems to []
+    for each site in list:
+        message "Searching {site.name}..."
+        try:
+            fetch text from replace(site.url, "\{q\}", url_encode(query)) with header "User-Agent" is browser()
+            set page_text to result
+            set base to replace(site.url, "\{q\}", url_encode(query))
+            collect(found, page_text, base, site.name)
+            if deep and length(first_hits(found, site.name)) is 0:
+                look_inside(found, page_text, base, site.name, query)
+        on error:
+            add "{site.name}: {error}" to problems
+    if length(found) is 0:
+        if length(problems) is greater than 0:
+            fail "Nothing found. {join(problems, ' / ')}"
+        fail "Nothing found for '{query}'."
+    if order is "Name":
+        set found to sort(found, "title")
+    otherwise if order is "Size":
+        set found to reverse(sort(found, "size"))
+    for each hit in found limit 400:
+        set extra to hit.site
+        if hit.size is greater than 0:
+            set extra to "{hit.site}  {format_size(hit.size)}"
+        show video hit.title playing hit.url info extra
+
+page open_link:
+    ask "Magnet link or address of a .torrent" into link default "magnet:?"
+    if trim(link) is empty:
+        stop
+    go to play_link with link is trim(link)
+
+page play_link with link:
+    show video "Play" playing link info "{link}"
+
+# ---- helpers
+# adds the magnet links and .torrent links of a page to the list `found`
+define collect(found, page_text, base, site):
+    for each m in magnets(page_text):
+        add {title: html_decode(m.name), url: m.magnet, size: m.size, site: site} to found
+    for each l in links(page_text, base):
+        if lower(l.url) contains ".torrent":
+            add {title: default(l.text, l.url), url: l.url, size: 0, site: site} to found
+    give back 0
+
+define first_hits(found, site):
+    set mine to []
+    for each f in found:
+        if f.site is site:
+            add f to mine
+    give back mine
+
+# some sites only show the magnet link inside each result's own page: open the first ones whose text matches
+define look_inside(found, page_text, base, site, query):
+    set wanted to split(lower(query), " ")
+    set opened to 0
+    for each l in links(page_text, base):
+        if opened is at least 8:
+            exit loop
+        set label to lower(l.text)
+        set ok to true
+        for each w in wanted:
+            if length(w) is greater than 1 and not (label contains w):
+                set ok to false
+        if ok and length(label) is greater than 3:
+            try:
+                fetch text from l.url with header "User-Agent" is browser()
+                add 1 to opened
+                set before to length(found)
+                collect(found, result, l.url, site)
+            on error:
+                log "could not open {l.url}"
+    give back 0
+
+define site_list():
+    set out to []
+    if sites is empty:
+        give back out
+    for each part in split(sites, ";;"):
+        set bits to split(part, "|")
+        if length(bits) is at least 2:
+            add {name: bits[1], url: join(slice(bits, 2, length(bits)), "|")} to out
+    give back out
+
+define save_sites(list):
+    set parts to []
+    for each s in list:
+        add "{s.name}|{s.url}" to parts
+    save sites as join(parts, ";;")
+    give back 0
+
+define clean(text):
+    give back trim(replace(replace(text, "|", "/"), ";;", ";"))
+
+define browser():
+    give back "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0 Safari/537.36"

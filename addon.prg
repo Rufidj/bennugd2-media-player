@@ -657,7 +657,7 @@ const
     CM_CONTAINS = 10; CM_STARTS = 11; CM_ENDS = 12;
     // sentencias
     SK_SET = 0; SK_ADD = 1; SK_IF = 2; SK_FOR = 3; SK_WHILE = 4; SK_REPEAT = 5; SK_STOP = 6; SK_SKIP = 7; SK_EXIT = 8; SK_FETCH = 9; SK_TRY = 10;
-    SK_FAIL = 11; SK_SHOW = 12; SK_ASK = 13; SK_MESSAGE = 14; SK_WAIT = 15; SK_SAVE = 16; SK_LOG = 17; SK_GIVE = 18; SK_CALL = 19; SK_CLEAR = 20;
+    SK_FAIL = 11; SK_SHOW = 12; SK_ASK = 13; SK_MESSAGE = 14; SK_WAIT = 15; SK_SAVE = 16; SK_LOG = 17; SK_GIVE = 18; SK_CALL = 19; SK_CLEAR = 20; SK_GOTO = 21;
     FL_NORMAL = 0; FL_STOP = 1; FL_SKIP = 2; FL_EXIT = 3; FL_RETURN = 4;
 end
 
@@ -678,7 +678,8 @@ global
     string ad_pg_name[AD_CAPPG]; int ad_pg_body[AD_CAPPG]; int ad_pg_np[AD_CAPPG]; string ad_pg_par[AD_CAPPG * 12]; int ad_pg_func[AD_CAPPG]; int ad_npg;
     // cabecera del addon
     string ad_i_name = "", ad_i_id = "", ad_i_ver = "", ad_i_author = "", ad_i_desc = "";
-    string ad_st_name[24]; string ad_st_label[24]; string ad_st_type[24]; string ad_st_def[24]; string ad_st_choices[24]; int ad_nst;
+    string ad_st_name[24]; string ad_st_label[24]; string ad_st_type[24]; string ad_st_def[24]; string ad_st_choices[24]; int ad_st_hidden[24]; int ad_nst;
+    string ad_goto_page = "", ad_goto_args = "";      // "go to PAGE": la pagina a la que hay que ir cuando termina la actual
 end
 
 declare function string ad_tv() end
@@ -816,7 +817,7 @@ end
 
 function ad_is_reserved(string w)
 begin
-    return find(" set add to from into if otherwise for each in while repeat times stop skip exit loop fetch try on fail show ask message wait save as log give back clear true false nothing and or not is contains starts ends than greater less least most empty limit opening playing logo info year duration with header subtitles default secret ", " " + w + " ") >= 0;
+    return find(" set add to from into if otherwise for each in while repeat times stop skip exit loop fetch try on fail show ask message wait save as log give back clear true false nothing and or not is contains starts ends than greater less least most empty limit opening playing logo info year duration with header subtitles default secret doing bound go ", " " + w + " ") >= 0;
 end
 
 function string ad_need_name(string what)
@@ -1012,6 +1013,20 @@ begin
 end
 
 // Carga las traducciones del addon para el idioma del reproductor (si no hay fichero, el addon se ve en su idioma original)
+// en un fichero de traduccion \{ y \} son llaves que se escriben tal cual (igual que en los textos del addon)
+function string ad_tr_braces(string t)
+private string r; int i;
+begin
+    if (find(t, "\\") < 0) return t; end
+    r = ""; i = 0;
+    while (i < len(t))
+        if (substr(t, i, 1) == "\\" && i + 1 < len(t) && substr(t, i + 1, 1) == "{") r += chr(1); i += 2;
+        elseif (substr(t, i, 1) == "\\" && i + 1 < len(t) && substr(t, i + 1, 1) == "}") r += chr(2); i += 2;
+        else r += substr(t, i, 1); i++; end
+    end
+    return r;
+end
+
 function ad_tr_load(string path)
 private int fh, p, i; string dir, ln;
 begin
@@ -1028,7 +1043,7 @@ begin
         while (len(ln) > 0 && (substr(ln, len(ln) - 1, 1) == chr(10) || substr(ln, len(ln) - 1, 1) == chr(13))) ln = substr(ln, 0, len(ln) - 1); end
         p = find(ln, " => ");
         if (p > 0 && substr(ln, 0, 1) != "#")
-            ad_tr_k[ad_tr_n] = substr(ln, 0, p); ad_tr_v[ad_tr_n] = substr(ln, p + 4); ad_tr_n++;
+            ad_tr_k[ad_tr_n] = ad_tr_braces(substr(ln, 0, p)); ad_tr_v[ad_tr_n] = ad_tr_braces(substr(ln, p + 4)); ad_tr_n++;
         end
     end
     fclose(fh);
@@ -1153,6 +1168,15 @@ begin
         ad_ct++; s = ad_new_stmt(SK_WHILE); ad_se[s * 8] = ad_parse_or(); ad_needs(":", "at the end of the 'while' line"); ad_need_end();
     elseif (w == "repeat")
         ad_ct++; s = ad_new_stmt(SK_REPEAT); ad_se[s * 8] = ad_parse_or(); ad_needw("times", "after the number"); ad_needs(":", "at the end of the 'repeat' line"); ad_need_end();
+    elseif (w == "go")
+        ad_ct++; ad_needw("to", "after 'go'"); s = ad_new_stmt(SK_GOTO); ad_sname[s] = ad_need_name("the name of a page");
+        lastarg = 0;
+        while (ad_perr == "" && ad_isw("with"))
+            ad_ct++; a = ad_new_arg(); ad_ar_name[a] = ad_need_name("the name of a value to pass to the page"); ad_needw("is", "after the name"); ad_ar_e[a] = ad_parse_or();
+            if (ad_sargs[s] == 0) ad_sargs[s] = a; else ad_ar_next[lastarg] = a; end
+            lastarg = a;
+        end
+        ad_need_end();
     elseif (w == "stop") ad_ct++; s = ad_new_stmt(SK_STOP); ad_need_end();
     elseif (w == "skip") ad_ct++; s = ad_new_stmt(SK_SKIP); ad_need_end();
     elseif (w == "exit") ad_ct++; ad_needw("loop", "after 'exit'"); s = ad_new_stmt(SK_EXIT); ad_need_end();
@@ -1174,11 +1198,14 @@ begin
     elseif (w == "show")
         ad_ct++; s = ad_new_stmt(SK_SHOW);
         if (ad_accw("folder")) ad_smode[s] = 0; elseif (ad_accw("video")) ad_smode[s] = 1; elseif (ad_accw("audio")) ad_smode[s] = 2; elseif (ad_accw("radio")) ad_smode[s] = 3;
-        else ad_perror("after 'show' I expected folder, video, audio or radio but found " + ad_describe()); return 0; end
+        elseif (ad_accw("button")) ad_smode[s] = 4; elseif (ad_accw("check")) ad_smode[s] = 5; elseif (ad_accw("choice")) ad_smode[s] = 6; elseif (ad_accw("input")) ad_smode[s] = 7; elseif (ad_accw("header")) ad_smode[s] = 8;
+        else ad_perror("after 'show' I expected folder, video, audio, radio, button, check, choice, input or header but found " + ad_describe()); return 0; end
         ad_se[s * 8] = ad_parse_or();
         lastarg = 0; lasthdr = 0;
         while (ad_perr == "")
             if (ad_accw("opening")) ad_sname[s] = ad_need_name("the name of a page");
+            elseif (ad_accw("doing")) ad_sname[s] = ad_need_name("the name of a page");
+            elseif (ad_accw("bound")) ad_sname[s] = ad_need_name("the name of a setting");
             elseif (ad_accw("playing")) ad_se[s * 8 + 1] = ad_parse_or();
             elseif (ad_accw("logo")) ad_se[s * 8 + 2] = ad_parse_or();
             elseif (ad_accw("info")) ad_se[s * 8 + 3] = ad_parse_or();
@@ -1200,7 +1227,9 @@ begin
         end
         ad_need_end();
         if (ad_perr == "" && ad_smode[s] == 0 && ad_sname[s] == "") ad_perror("a folder needs 'opening PAGE' to say which page it opens"); end
-        if (ad_perr == "" && ad_smode[s] != 0 && ad_se[s * 8 + 1] == 0) ad_perror("this item needs 'playing ADDRESS' to say what to play"); end
+        if (ad_perr == "" && ad_smode[s] >= 1 && ad_smode[s] <= 3 && ad_se[s * 8 + 1] == 0) ad_perror("this item needs 'playing ADDRESS' to say what to play"); end
+        if (ad_perr == "" && ad_smode[s] == 4 && ad_sname[s] == "") ad_perror("a button needs 'doing PAGE' to say which page it runs"); end
+        if (ad_perr == "" && ad_smode[s] >= 5 && ad_smode[s] <= 7 && ad_sname[s] == "") ad_perror("this item needs 'bound NAME' with the name of the setting it changes"); end
     elseif (w == "ask")
         ad_ct++; s = ad_new_stmt(SK_ASK); ad_se[s * 8] = ad_parse_or(); ad_needw("into", "after the question"); ad_sname[s] = ad_need_name("a name for the answer");
         while (ad_perr == "")
@@ -1219,7 +1248,7 @@ begin
         ad_perror("'" + w + "' must come right after an 'if' / 'try' block, at the same indentation"); return 0;
     else
         s = ad_new_stmt(SK_CALL); ad_se[s * 8] = ad_parse_or();
-        if (ad_perr == "" && ad_xk[ad_se[s * 8]] != XK_CALL) ad_perror("I do not know the command '" + w + "'. Commands are: set, add, if, for each, while, repeat, fetch, try, show, ask, message, wait, save, log, fail, stop"); end
+        if (ad_perr == "" && ad_xk[ad_se[s * 8]] != XK_CALL) ad_perror("I do not know the command '" + w + "'. Commands are: set, add, if, for each, while, repeat, fetch, try, show, go to, ask, message, wait, save, log, fail, stop"); end
         ad_need_end();
     end
     return s;
@@ -1326,7 +1355,7 @@ begin
             if (ad_nst >= 24) ad_perror("an addon can have at most 24 settings"); break; end
             k = ad_nst; ad_nst++;
             if (ad_tk_t[ad_ct] != TK_WORD) ad_perror("after 'setting' I expected the name of the setting"); break; end
-            ad_st_name[k] = ad_tk_s[ad_ct]; ad_st_label[k] = ad_tk_s[ad_ct]; ad_st_def[k] = ""; ad_st_choices[k] = ""; ad_ct++;
+            ad_st_name[k] = ad_tk_s[ad_ct]; ad_st_label[k] = ad_tk_s[ad_ct]; ad_st_def[k] = ""; ad_st_choices[k] = ""; ad_st_hidden[k] = 0; ad_ct++;
             ad_needw("is", "after the setting name");
             if (ad_accw("secret")) ad_needw("text", "after 'secret'"); ad_st_type[k] = "secret";
             elseif (ad_accw("text")) ad_st_type[k] = "text";
@@ -1349,7 +1378,8 @@ begin
                         if (ad_iss(",") && ad_tk_t[ad_ct + 1] == TK_STR) ad_ct++; continue; end
                         break;
                     end
-                else ad_perror("after the comma I expected label, default or choices"); end
+                elseif (ad_accw("hidden")) ad_st_hidden[k] = 1;
+                else ad_perror("after the comma I expected label, default, choices or hidden"); end
             end
             ad_need_end();
             if (ad_perr == "" && ad_st_type[k] == "choice" && ad_st_choices[k] == "") ad_perror("a 'choice' setting needs 'choices \"a\", \"b\"...'"); end
@@ -1445,6 +1475,7 @@ global
     int    ad_lv0[48]; int ad_lv1[48];
     // lo que muestra la página en curso
     int    ad_nit;
+    int    ad_it_flag[AD_MAXIT];
     int    ad_it_kind[AD_MAXIT]; string ad_it_title[AD_MAXIT]; string ad_it_page[AD_MAXIT]; string ad_it_args[AD_MAXIT]; string ad_it_url[AD_MAXIT];
     string ad_it_logo[AD_MAXIT]; string ad_it_info[AD_MAXIT]; int ad_it_year[AD_MAXIT]; int ad_it_dur[AD_MAXIT]; string ad_it_sub[AD_MAXIT]; string ad_it_hdr[AD_MAXIT];
     int    host_cancelled;          // lo pone host_ask: 1 si el usuario cancela
@@ -1808,6 +1839,208 @@ begin
     return "" + n;
 end
 
+// una lista de resultados no pasa de 3000 elementos
+function int ad_list_len_guard(int l)
+begin
+    return ad_vc[l] < 3000;
+end
+
+// ---- ayudas para leer paginas HTML (webs): magnets(texto), links(texto, base), html_text(texto), html_decode(texto), find_all(texto, patron)
+function string ad_utf8_chr(int cp)
+begin
+    if (cp < 128) return chr(cp); end
+    if (cp < 2048) return chr(192 | (cp >> 6)) + chr(128 | (cp & 63)); end
+    if (cp < 65536) return chr(224 | (cp >> 12)) + chr(128 | ((cp >> 6) & 63)) + chr(128 | (cp & 63)); end
+    return chr(240 | (cp >> 18)) + chr(128 | ((cp >> 12) & 63)) + chr(128 | ((cp >> 6) & 63)) + chr(128 | (cp & 63));
+end
+
+// &amp; &lt; &gt; &quot; &#39; &#x27; &nbsp; ...
+function string ad_html_decode(string s)
+private string r, ent; int p, q, c, cp, k;
+begin
+    if (find(s, "&") < 0) return s; end
+    r = ""; p = 0;
+    while (p < len(s))
+        q = find(s, "&", p);
+        if (q < 0) r += substr(s, p); break; end
+        r += substr(s, p, q - p);
+        c = find(s, ";", q);
+        if (c < 0 || c - q > 10) r += "&"; p = q + 1; continue; end
+        ent = substr(s, q + 1, c - q - 1);
+        if (ent == "amp") r += "&";
+        elseif (ent == "lt") r += "<";
+        elseif (ent == "gt") r += ">";
+        elseif (ent == "quot") r += chr(34);
+        elseif (ent == "apos") r += "'";
+        elseif (ent == "nbsp") r += " ";
+        elseif (substr(ent, 0, 1) == "#" && len(ent) > 1)
+            cp = 0;
+            if (substr(ent, 1, 1) == "x" || substr(ent, 1, 1) == "X")
+                for (k = 2; k < len(ent); k++) cp = cp * 16 + ad_hexval(asc(substr(ent, k, 1))); end
+            else
+                cp = atoi(substr(ent, 1));
+            end
+            if (cp > 0) r += ad_utf8_chr(cp); end
+        else
+            r += "&" + ent + ";";
+        end
+        p = c + 1;
+    end
+    return r;
+end
+
+function string ad_url_decode(string s)
+private string r; int i, c;
+begin
+    r = ""; i = 0;
+    while (i < len(s))
+        c = asc(substr(s, i, 1));
+        if (c == 37 && i + 2 < len(s) + 0 && ad_hexval(asc(substr(s, i + 1, 1))) >= 0 && ad_hexval(asc(substr(s, i + 2, 1))) >= 0)
+            r += chr(ad_hexval(asc(substr(s, i + 1, 1))) * 16 + ad_hexval(asc(substr(s, i + 2, 1)))); i += 3;
+        elseif (c == 43) r += " "; i++;
+        else r += chr(c); i++; end
+    end
+    return r;
+end
+
+function string ad_collapse(string s)
+private string r; int i, c, sp;
+begin
+    r = ""; sp = 1;
+    for (i = 0; i < len(s); i++)
+        c = asc(substr(s, i, 1));
+        if (c == 32 || c == 9 || c == 10 || c == 13) if (!sp) r += " "; sp = 1; end
+        else r += chr(c); sp = 0; end
+    end
+    if (len(r) > 0 && substr(r, len(r) - 1, 1) == " ") r = substr(r, 0, len(r) - 1); end
+    return r;
+end
+
+// quita las etiquetas (y el contenido de script y style)
+function string ad_strip_tags(string s)
+private string r, lo; int p, q, c;
+begin
+    r = ""; p = 0; lo = lcase(s);
+    while (p < len(s))
+        q = find(s, "<", p);
+        if (q < 0) r += substr(s, p); break; end
+        r += substr(s, p, q - p);
+        if (substr(lo, q, 7) == "<script" || substr(lo, q, 6) == "<style")
+            c = find(lo, substr(lo, q, 7) == "<script" ? "</script>" : "</style>", q);
+            if (c < 0) break; end
+            c = find(s, ">", c); if (c < 0) break; end
+            r += " "; p = c + 1; continue;
+        end
+        c = find(s, ">", q);
+        if (c < 0) break; end
+        r += " "; p = c + 1;
+    end
+    return r;
+end
+
+function string ad_html_text(string s)
+begin
+    return ad_collapse(ad_html_decode(ad_strip_tags(s)));
+end
+
+// direccion completa de un enlace de una pagina
+function string ad_abs_url(string base, string h)
+private int p, q; string origin, dir;
+begin
+    if (substr(h, 0, 7) == "http://" || substr(h, 0, 8) == "https://" || substr(h, 0, 7) == "magnet:") return h; end
+    p = find(base, "://");
+    if (p < 0) return h; end
+    if (substr(h, 0, 2) == "//") return substr(base, 0, p) + ":" + h; end
+    q = find(base, "/", p + 3);
+    origin = q < 0 ? base : substr(base, 0, q);
+    if (substr(h, 0, 1) == "/") return origin + h; end
+    q = find(base, "?"); dir = q < 0 ? base : substr(base, 0, q);
+    q = len(dir) - 1;
+    while (q > p + 3 && substr(dir, q, 1) != "/") q--; end
+    if (q <= p + 3) return origin + "/" + h; end
+    return substr(dir, 0, q + 1) + h;
+end
+
+// enlaces magnet de un texto: lista de {name, magnet}
+function int ad_magnets(string t)
+private int r, p, e, m, k, c; string mg, nm, hash, seen, dn;
+begin
+    r = ad_list(); seen = "|"; p = 0;
+    while (ad_list_len_guard(r))
+        p = find(t, "magnet:?", p);
+        if (p < 0) break; end
+        e = p + 8;
+        while (e < len(t))
+            c = asc(substr(t, e, 1));
+            if (c == 34 || c == 39 || c == 60 || c == 62 || c == 32 || c == 9 || c == 10 || c == 13 || c == 92) break; end
+            e++;
+        end
+        mg = ad_html_decode(substr(t, p, e - p));
+        p = e;
+        k = find(lcase(mg), "xt=urn:btih:");
+        if (k < 0) continue; end
+        hash = lcase(substr(mg, k + 12, 40));
+        if (find(seen, "|" + hash + "|") >= 0) continue; end
+        seen += hash + "|";
+        nm = hash;
+        k = find(mg, "dn=");
+        if (k >= 0)
+            dn = substr(mg, k + 3); c = find(dn, "&"); if (c >= 0) dn = substr(dn, 0, c); end
+            nm = ad_url_decode(dn);
+        end
+        k = find(mg, "xl="); c = 0;
+        if (k >= 0) dn = substr(mg, k + 3); if (find(dn, "&") >= 0) dn = substr(dn, 0, find(dn, "&")); end c = atoi(dn); end
+        m = ad_map(); ad_map_set(m, "name", ad_str(nm)); ad_map_set(m, "magnet", ad_str(mg)); ad_map_set(m, "size", ad_num(c)); ad_list_add(r, m);
+    end
+    return r;
+end
+
+// enlaces <a href> de una pagina: lista de {url, text}
+function int ad_links(string t, string base)
+private int r, p, q, c, m, close; string lo, tag, ltag, href, q1, inner;
+begin
+    r = ad_list(); lo = lcase(t); p = 0;
+    while (ad_list_len_guard(r))
+        p = find(lo, "<a ", p);
+        if (p < 0) break; end
+        q = find(t, ">", p);
+        if (q < 0) break; end
+        tag = substr(t, p, q - p); ltag = substr(lo, p, q - p);
+        close = find(lo, "</a>", q);
+        inner = close < 0 ? "" : substr(t, q + 1, close - q - 1);
+        p = q + 1;
+        c = find(ltag, "href=");
+        if (c < 0) continue; end
+        q1 = substr(tag, c + 5, 1); href = "";
+        if (q1 == chr(34) || q1 == "'")
+            close = find(tag, q1, c + 6); href = close < 0 ? "" : substr(tag, c + 6, close - c - 6);
+        else
+            href = substr(tag, c + 5); close = find(href, " "); if (close >= 0) href = substr(href, 0, close); end
+        end
+        href = ad_html_decode(href);
+        if (href == "" || substr(href, 0, 1) == "#" || substr(lcase(href), 0, 11) == "javascript:") continue; end
+        m = ad_map(); ad_map_set(m, "url", ad_str(ad_abs_url(base, href))); ad_map_set(m, "text", ad_str(ad_html_text(inner))); ad_list_add(r, m);
+    end
+    return r;
+end
+
+// todas las coincidencias de una expresion regular: el primer grupo (o la coincidencia entera) de cada una
+function int ad_find_all(string t, string pat)
+private int r, pos, n; string rest, g;
+begin
+    r = ad_list(); rest = t; n = 0;
+    while (n < 5000 && ad_list_len_guard(r))
+        pos = regex(pat, rest);
+        if (pos < 0) break; end
+        g = regex_reg[1] != "" ? regex_reg[1] : regex_reg[0];
+        ad_list_add(r, ad_str(g)); n++;
+        pos += len(regex_reg[0]) > 0 ? len(regex_reg[0]) : 1;
+        if (pos >= len(rest)) break; end
+        rest = substr(rest, pos);
+    end
+    return r;
+end
+
 function ad_call_builtin(int e)
 private string f, s, t, u; int argc, i, n, r, c, ln_no, a0, a1, a2, a3, v, p; double d, d2;
 begin
@@ -1859,6 +2092,12 @@ begin
         ad_str_to_buf(ad_text(a0)); v = ad_json_parse();
         if (v < 0) return 0; end
         return v;
+    elseif (f == "magnets") return ad_magnets(ad_text(a0));
+    elseif (f == "links") return ad_links(ad_text(a0), argc > 1 ? ad_text(a1) : "");
+    elseif (f == "html_text") return ad_str(ad_html_text(ad_text(a0)));
+    elseif (f == "html_decode") return ad_str(ad_html_decode(ad_text(a0)));
+    elseif (f == "find_all") return ad_find_all(ad_text(a0), ad_text(a1));
+    elseif (f == "format_size") return ad_str(fmt_size((int)ad_to_num(a0, ln_no, "format_size()")));
     elseif (f == "url_encode") return ad_str(ad_urlenc(ad_text(a0)));
     elseif (f == "base64") return ad_str(ad_b64(ad_text(a0)));
     elseif (f == "now") return ad_num(time());
@@ -2051,10 +2290,16 @@ private int it, a, args, v; string t;
 begin
     if (ad_nit >= AD_MAXIT) ad_rt_error(ad_sl[s], "a page can show at most " + AD_MAXIT + " items"); return 0; end
     it = ad_nit; ad_nit++;
-    ad_it_kind[it] = ad_smode[s];
+    ad_it_kind[it] = ad_smode[s]; ad_it_flag[it] = 0;
     ad_it_title[it] = ad_text(ad_eval(ad_se[s * 8])); ad_it_page[it] = ""; ad_it_args[it] = ""; ad_it_url[it] = ""; ad_it_logo[it] = ""; ad_it_info[it] = ""; ad_it_year[it] = 0; ad_it_dur[it] = 0; ad_it_sub[it] = ""; ad_it_hdr[it] = "";
     if (ad_err != "") ad_nit--; return 0; end
-    if (ad_sname[s] != "")
+    if (ad_smode[s] >= 5 && ad_smode[s] <= 7)                         // check / choice / input: a setting that the user changes from the list
+        v = ad_find_setting(ad_sname[s]);
+        if (v < 0) ad_rt_error(ad_sl[s], "there is no setting called '" + ad_sname[s] + "' (add a 'setting' line for it)"); ad_nit--; return 0; end
+        ad_it_url[it] = ad_sname[s]; ad_it_flag[it] = v;
+        if (ad_smode[s] == 5 && ad_st_type[v] != "yesno") ad_rt_error(ad_sl[s], "a check needs a 'yes or no' setting"); ad_nit--; return 0; end
+        if (ad_smode[s] == 6 && ad_st_type[v] != "choice") ad_rt_error(ad_sl[s], "a choice needs a 'choice' setting"); ad_nit--; return 0; end
+    elseif (ad_sname[s] != "")
         ad_it_page[it] = ad_sname[s];
         v = -1;
         for (a = 0; a < ad_npg; a++) if (ad_pg_name[a] == ad_sname[s] && !ad_pg_func[a]) v = a; end end
@@ -2078,7 +2323,7 @@ begin
 end
 
 function ad_exec_stmt(int s)
-private int v, l, lim, count, i, fl, cnt, k, ex, hdrs, body, bd; string url, hdr, method, res; double d;
+private int v, l, lim, count, i, fl, cnt, k, ex, hdrs, body, bd, a, mp; string url, hdr, method, res; double d;
 begin
     if (ad_err != "") return FL_NORMAL; end
     ad_steps++;
@@ -2171,6 +2416,18 @@ begin
             ad_sc_set(ad_sname[s], ad_str(res)); return FL_NORMAL;
         end
         case SK_SHOW: ad_add_item(s); return FL_NORMAL; end
+        case SK_GOTO:
+            v = -1;
+            for (k = 0; k < ad_npg; k++) if (ad_pg_name[k] == ad_sname[s] && !ad_pg_func[k]) v = k; end end
+            if (v < 0) ad_rt_error(ad_sl[s], "there is no page called '" + ad_sname[s] + "'"); return FL_NORMAL; end
+            mp = ad_map(); a = ad_sargs[s];
+            while (a != 0)
+                ad_map_set(mp, ad_ar_name[a], ad_eval(ad_ar_e[a])); if (ad_err != "") return FL_NORMAL; end
+                a = ad_ar_next[a];
+            end
+            ad_goto_page = ad_sname[s]; ad_goto_args = ad_json_text(mp);
+            return FL_STOP;
+        end
         case SK_FETCH:
             url = ad_text(ad_eval(ad_se[s * 8])); if (ad_err != "") return FL_NORMAL; end
             hdr = ad_hdr_text(ad_shdrs[s]); if (ad_err != "") return FL_NORMAL; end
@@ -2235,7 +2492,7 @@ function ad_run_page(string page, string argjson)
 private int pg, i, v, a, k;
 begin
     ad_values_reset();
-    ad_err = ""; ad_cancelled = 0; ad_nit = 0; ad_steps = 0; ad_depth = 0; ad_give = 0;
+    ad_err = ""; ad_cancelled = 0; ad_nit = 0; ad_steps = 0; ad_depth = 0; ad_give = 0; ad_goto_page = ""; ad_goto_args = "";
     ad_sc_top = 0; ad_sc_base = 0; ad_buf_len = 0;
     pg = -1;
     for (i = 0; i < ad_npg; i++) if (ad_pg_name[i] == page && !ad_pg_func[i]) pg = i; end end

@@ -80,6 +80,43 @@ page movies with genre, title:
 
 Arguments pass as JSON, so numbers, text, lists and records all survive.
 
+## Buttons, checks, choices and text fields
+
+Besides folders and playable items, a page can show controls. They work like a settings screen: the page is run again after each change, and the cursor stays where it was.
+
+```
+show header "Options"                                  # a title; the cursor skips it
+show button "Add a website" doing add_site             # runs the page add_site, then shows this page again
+show check  "Look inside pages" bound deep             # [x] / [ ]  (a "yes or no" setting)
+show choice "Order" bound order                        # shows the value; OK goes to the next one (a "choice" setting)
+show input  "Name" bound name                          # OK opens the keyboard (a text, number or secret setting)
+```
+
+`bound NAME` is the name of one of the addon's own `setting` lines, so the value is saved like any other setting. Add `hidden` to a setting that only these controls use, so it does not appear in the settings menu: `setting sites is text, hidden`.
+
+A `doing` page runs like any other page, but what it shows is ignored. When it ends, the page that was on screen is shown again with the new values. To go somewhere else instead, end it with:
+
+```
+go to results with query is q          # opens that page (arguments as in "opening")
+```
+
+## Torrents
+
+A video can be a **magnet link** or the address (or file) of a **.torrent**: `show video "Title" playing "magnet:?xt=urn:btih:..."`. The player finds the files of the torrent, asks which one to watch if there are several, and plays it while it downloads (the progress and the connected peers are shown). What was downloaded is deleted afterwards unless *Settings > Downloads > Keep what torrents download* is on; uploading to others is off unless a limit is chosen there. Only content you have the right to watch should be played.
+
+## Reading web pages
+
+`fetch text from URL` gives the page as text. These functions help to pick things out of it:
+
+| Function | Result |
+|---|---|
+| `magnets(text)` | the magnet links in the text, as a list of `{name, magnet, size}` |
+| `links(text, base)` | the `<a href>` links, as a list of `{url, text}`; relative addresses are completed with `base` |
+| `html_text(text)` | the text without tags, with `&amp;` and friends decoded |
+| `html_decode(text)` | only decodes `&amp; &lt; &#39;...` |
+| `find_all(text, regex)` | the first group (or the whole match) of every match of a regular expression |
+| `format_size(bytes)` | `1.4 GB` |
+
 ## Values
 
 Numbers `3`, `2.5`; text `"hi {name}"` (anything in `{}` is evaluated; single quotes work too, handy inside `{}`); lists `[1, 2, 3]` (**numbered from 1**); records `{title: "x", year: 2000}`; `true`/`false`; `nothing`. Fields: `item.title`, `list[1]`, `item["any key"]`.

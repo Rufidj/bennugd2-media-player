@@ -1,0 +1,1416 @@
+From e2144283fd9b140875ef3edf82d5345ae770162a Mon Sep 17 00:00:00 2001
+From: Rufidj <divaio19@gmail.com>
+Date: Tue, 27 Oct 2026 09:44:18 +0100
+Subject: [PATCH] libmod_video: motor BitTorrent para streaming (magnet y
+ .torrent, trackers HTTP/HTTPS/UDP, ut_metadata, SHA-1 propio, piezas en orden
+ de reproduccion, cache dispersa, servidor HTTP local con Range) y funciones
+ TORRENT_*
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ modules/libmod_video/libmod_video.c         |   38 +
+ modules/libmod_video/libmod_video.h         |   20 +
+ modules/libmod_video/libmod_video_exports.h |   20 +
+ modules/libmod_video/torrent.c              | 1208 +++++++++++++++++++
+ modules/libmod_video/torrent.h              |   53 +
+ 5 files changed, 1339 insertions(+)
+ create mode 100644 modules/libmod_video/torrent.c
+ create mode 100644 modules/libmod_video/torrent.h
+
+diff --git a/modules/libmod_video/libmod_video.c b/modules/libmod_video/libmod_video.c
+index 9f29b96b..9dabb943 100644
+--- a/modules/libmod_video/libmod_video.c
++++ b/modules/libmod_video/libmod_video.c
+@@ -53,6 +53,7 @@
+ #include <libswresample/swresample.h>
+ 
+ #include "libmod_video.h"
++#include "torrent.h"
+ #include "libmod_video_hwdec.h"
+ #include <time.h>
+ #include <pthread.h>
+@@ -1777,6 +1778,7 @@ void __bgdexport( libmod_video, module_initialize )() {
+ }
+ 
+ void __bgdexport( libmod_video, module_finalize )() {
++    torrent_shutdown();
+     for ( int i = 1; i <= MAX_VIDEOS; i++ ) if ( g_vid[i].used ) vid_free( &g_vid[i] );
+     zombie_tick( 1 );
+     zimg_tick( 1 );
+@@ -2470,4 +2472,40 @@ int64_t libmod_video_http_error( INSTANCE * my, int64_t * params ) {
+     return str;
+ }
+ 
++/* ---- BitTorrent (see torrent.h): the files of a torrent are served on a local address that VIDEO_OPEN can play ---- */
++static char g_tor_cache[900] = "";
++static int tor_ready( void ) {
++    if ( torrent_init( g_tor_cache[0] ? g_tor_cache : "torrent_cache" ) != 0 ) return 0;
++    return 1;
++}
++static int64_t tor_str( const char * t ) { int64_t str = string_new( t ? t : "" ); string_use( str ); return str; }
++
++/* TORRENT_CACHE(folder): where the downloaded data is kept (call before the first TORRENT_ADD) */
++int64_t libmod_video_torrent_cache( INSTANCE * my, int64_t * params ) {
++    snprintf( g_tor_cache, sizeof g_tor_cache, "%s", string_get( params[0] ) ); string_discard( params[0] ); return 0;
++}
++int64_t libmod_video_torrent_add( INSTANCE * my, int64_t * params ) {
++    int h; if ( !tor_ready() ) { string_discard( params[0] ); return -3; }
++    h = torrent_add( string_get( params[0] ) ); string_discard( params[0] ); return h;
++}
++int64_t libmod_video_torrent_remove( INSTANCE * my, int64_t * params ) { torrent_remove( ( int ) params[0], ( int ) params[1] ); return 0; }
++int64_t libmod_video_torrent_state( INSTANCE * my, int64_t * params ) { return torrent_state( ( int ) params[0] ); }
++int64_t libmod_video_torrent_error( INSTANCE * my, int64_t * params ) { return tor_str( torrent_error( ( int ) params[0] ) ); }
++int64_t libmod_video_torrent_name( INSTANCE * my, int64_t * params ) { return tor_str( torrent_name( ( int ) params[0] ) ); }
++int64_t libmod_video_torrent_files( INSTANCE * my, int64_t * params ) { return torrent_file_count( ( int ) params[0] ); }
++int64_t libmod_video_torrent_file_name( INSTANCE * my, int64_t * params ) { return tor_str( torrent_file_name( ( int ) params[0], ( int ) params[1] ) ); }
++int64_t libmod_video_torrent_file_size( INSTANCE * my, int64_t * params ) { return torrent_file_size( ( int ) params[0], ( int ) params[1] ); }
++int64_t libmod_video_torrent_main( INSTANCE * my, int64_t * params ) { return torrent_main_file( ( int ) params[0] ); }
++int64_t libmod_video_torrent_select( INSTANCE * my, int64_t * params ) { return torrent_select( ( int ) params[0], ( int ) params[1] ); }
++int64_t libmod_video_torrent_url( INSTANCE * my, int64_t * params ) {
++    char u[1200]; if ( torrent_url( ( int ) params[0], ( int ) params[1], u, sizeof u ) != 0 ) u[0] = 0; return tor_str( u );
++}
++int64_t libmod_video_torrent_peers( INSTANCE * my, int64_t * params ) { return torrent_peers( ( int ) params[0] ); }
++int64_t libmod_video_torrent_rate( INSTANCE * my, int64_t * params ) { return torrent_down_rate( ( int ) params[0] ); }
++int64_t libmod_video_torrent_percent( INSTANCE * my, int64_t * params ) { return torrent_file_percent( ( int ) params[0] ); }
++int64_t libmod_video_torrent_buffered( INSTANCE * my, int64_t * params ) { return torrent_buffered( ( int ) params[0] ); }
++int64_t libmod_video_torrent_ready( INSTANCE * my, int64_t * params ) { return torrent_start_percent( ( int ) params[0] ); }
++int64_t libmod_video_torrent_downloaded( INSTANCE * my, int64_t * params ) { return torrent_downloaded( ( int ) params[0] ); }
++int64_t libmod_video_torrent_upload_limit( INSTANCE * my, int64_t * params ) { torrent_set_upload_limit( ( int ) params[0] ); return 0; }
++
+ #include "libmod_video_exports.h"
+diff --git a/modules/libmod_video/libmod_video.h b/modules/libmod_video/libmod_video.h
+index 0c53e0ba..45b06911 100644
+--- a/modules/libmod_video/libmod_video.h
++++ b/modules/libmod_video/libmod_video.h
+@@ -109,4 +109,24 @@ extern int64_t libmod_video_http_write( INSTANCE * my, int64_t * params );
+ extern int64_t libmod_video_http_trace( INSTANCE * my, int64_t * params );
+ extern int64_t libmod_video_audio_select( INSTANCE * my, int64_t * params );
+ 
++extern int64_t libmod_video_torrent_cache( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_add( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_remove( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_state( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_error( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_name( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_files( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_file_name( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_file_size( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_main( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_select( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_url( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_peers( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_rate( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_percent( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_buffered( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_ready( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_downloaded( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_torrent_upload_limit( INSTANCE * my, int64_t * params );
++
+ #endif
+diff --git a/modules/libmod_video/libmod_video_exports.h b/modules/libmod_video/libmod_video_exports.h
+index fc403721..82c6cc2d 100644
+--- a/modules/libmod_video/libmod_video_exports.h
++++ b/modules/libmod_video/libmod_video_exports.h
+@@ -64,6 +64,26 @@ DLSYSFUNCS __bgdexport( libmod_video, functions_exports )[] = {
+     FUNC( "HTTP_TRACE"           , "S"  , TYPE_INT   , libmod_video_http_trace     ),
+     FUNC( "HTTP_ERROR"           , ""   , TYPE_STRING, libmod_video_http_error     ),
+ 
++    FUNC( "TORRENT_CACHE"        , "S"  , TYPE_INT   , libmod_video_torrent_cache  ),
++    FUNC( "TORRENT_ADD"          , "S"  , TYPE_INT   , libmod_video_torrent_add    ),
++    FUNC( "TORRENT_REMOVE"       , "II" , TYPE_INT   , libmod_video_torrent_remove ),
++    FUNC( "TORRENT_STATE"        , "I"  , TYPE_INT   , libmod_video_torrent_state  ),
++    FUNC( "TORRENT_ERROR"        , "I"  , TYPE_STRING, libmod_video_torrent_error  ),
++    FUNC( "TORRENT_NAME"         , "I"  , TYPE_STRING, libmod_video_torrent_name   ),
++    FUNC( "TORRENT_FILES"        , "I"  , TYPE_INT   , libmod_video_torrent_files  ),
++    FUNC( "TORRENT_FILE_NAME"    , "II" , TYPE_STRING, libmod_video_torrent_file_name ),
++    FUNC( "TORRENT_FILE_SIZE"    , "II" , TYPE_INT   , libmod_video_torrent_file_size ),
++    FUNC( "TORRENT_MAIN"         , "I"  , TYPE_INT   , libmod_video_torrent_main   ),
++    FUNC( "TORRENT_SELECT"       , "II" , TYPE_INT   , libmod_video_torrent_select ),
++    FUNC( "TORRENT_URL"          , "II" , TYPE_STRING, libmod_video_torrent_url    ),
++    FUNC( "TORRENT_PEERS"        , "I"  , TYPE_INT   , libmod_video_torrent_peers  ),
++    FUNC( "TORRENT_RATE"         , "I"  , TYPE_INT   , libmod_video_torrent_rate   ),
++    FUNC( "TORRENT_PERCENT"      , "I"  , TYPE_INT   , libmod_video_torrent_percent ),
++    FUNC( "TORRENT_BUFFERED"     , "I"  , TYPE_INT   , libmod_video_torrent_buffered ),
++    FUNC( "TORRENT_READY"        , "I"  , TYPE_INT   , libmod_video_torrent_ready  ),
++    FUNC( "TORRENT_DOWNLOADED"   , "I"  , TYPE_INT   , libmod_video_torrent_downloaded ),
++    FUNC( "TORRENT_UPLOAD_LIMIT" , "I"  , TYPE_INT   , libmod_video_torrent_upload_limit ),
++
+     FUNC( 0                   , 0     , 0       , 0                        )
+ };
+ 
+diff --git a/modules/libmod_video/torrent.c b/modules/libmod_video/torrent.c
+new file mode 100644
+index 00000000..715aa68d
+--- /dev/null
++++ b/modules/libmod_video/torrent.c
+@@ -0,0 +1,1208 @@
++/*
++ *  torrent.c - BitTorrent client engine for streaming, see torrent.h
++ *
++ *  Threads: one "engine" thread owns every peer socket (poll loop); trackers are asked from short-lived threads;
++ *  a "server" thread accepts the local HTTP connections and each connection has its own thread. One mutex (g_mu)
++ *  protects all the shared state; the engine thread holds it except while it waits in poll().
++ */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdint.h>
++#include <errno.h>
++#include <time.h>
++#include <strings.h>
++#include <fcntl.h>
++#include <sys/stat.h>
++#include <SDL.h>
++#include <libavformat/avio.h>
++#include <libavutil/error.h>
++
++#ifdef _WIN32
++#include <winsock2.h>
++#include <ws2tcpip.h>
++#include <io.h>
++#define poll WSAPoll
++#define CLOSESOCK closesocket
++#define SOCKERR WSAGetLastError()
++#define E_INPROGRESS WSAEWOULDBLOCK
++typedef SOCKET sock_t;
++#define BAD_SOCK INVALID_SOCKET
++#else
++#include <unistd.h>
++#include <poll.h>
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <netinet/tcp.h>
++#include <arpa/inet.h>
++#include <netdb.h>
++#define CLOSESOCK close
++#define SOCKERR errno
++#define E_INPROGRESS EINPROGRESS
++typedef int sock_t;
++#define BAD_SOCK (-1)
++#endif
++
++#include "torrent.h"
++
++#ifndef MSG_NOSIGNAL
++#define MSG_NOSIGNAL 0
++#endif
++#ifdef _WIN32
++#define strcasecmp _stricmp
++#define CLOSEFD _close
++#else
++#define CLOSEFD close
++#endif
++
++#define T_MAX        4
++#define MAX_PEERS    48
++#define MAX_CAND     600
++#define BLOCK        16384
++#define PIPELINE     24
++#define MAX_TRK      24
++#define MAX_MSG      (1 << 20)
++#define AHEAD_BYTES  ( ( int64_t ) 192 << 20 )     /* how far past the play position we download */
++#define HEAD_BYTES   ( 3 << 20 )                   /* the start and the end of a file are needed by the containers */
++
++/* ------------------------------------------------------------------------------------------------ small helpers */
++static uint32_t now_ms( void ) {
++    struct timespec t; clock_gettime( CLOCK_MONOTONIC, &t );
++    return ( uint32_t ) ( t.tv_sec * 1000u + t.tv_nsec / 1000000u );
++}
++static void be32w( uint8_t * p, uint32_t v ) { p[0] = v >> 24; p[1] = v >> 16; p[2] = v >> 8; p[3] = v; }
++static uint32_t be32r( const uint8_t * p ) { return ( ( uint32_t ) p[0] << 24 ) | ( p[1] << 16 ) | ( p[2] << 8 ) | p[3]; }
++static void be64w( uint8_t * p, uint64_t v ) { be32w( p, ( uint32_t ) ( v >> 32 ) ); be32w( p + 4, ( uint32_t ) v ); }
++
++static int hexv( int c ) {
++    if ( c >= '0' && c <= '9' ) return c - '0';
++    if ( c >= 'a' && c <= 'f' ) return c - 'a' + 10;
++    if ( c >= 'A' && c <= 'F' ) return c - 'A' + 10;
++    return -1;
++}
++static void to_hex( const uint8_t * in, int n, char * out ) {
++    static const char d[] = "0123456789abcdef"; int i;
++    for ( i = 0; i < n; i++ ) { out[i * 2] = d[in[i] >> 4]; out[i * 2 + 1] = d[in[i] & 15]; }
++    out[n * 2] = 0;
++}
++static void url_decode( char * s ) {
++    char * w = s;
++    for ( ; *s; s++ ) {
++        if ( *s == '%' && hexv( s[1] ) >= 0 && hexv( s[2] ) >= 0 ) { *w++ = ( char ) ( hexv( s[1] ) * 16 + hexv( s[2] ) ); s += 2; }
++        else if ( *s == '+' ) *w++ = ' ';
++        else *w++ = *s;
++    }
++    *w = 0;
++}
++static int b32_decode( const char * s, uint8_t * out20 ) {          /* 32 base32 characters -> 20 bytes */
++    uint64_t acc = 0; int bits = 0, n = 0;
++    for ( ; *s && n < 20; s++ ) {
++        int v;
++        if ( *s >= 'A' && *s <= 'Z' ) v = *s - 'A'; else if ( *s >= 'a' && *s <= 'z' ) v = *s - 'a'; else if ( *s >= '2' && *s <= '7' ) v = *s - '2' + 26; else return 0;
++        acc = ( acc << 5 ) | v; bits += 5;
++        if ( bits >= 8 ) { bits -= 8; out20[n++] = ( uint8_t ) ( acc >> bits ); }
++    }
++    return n == 20;
++}
++
++/* ------------------------------------------------------------------------------------------------ SHA-1 */
++typedef struct { uint32_t h[5]; uint64_t len; uint8_t buf[64]; int n; } Sha1;
++#define ROL( x, k ) ( ( ( x ) << ( k ) ) | ( ( x ) >> ( 32 - ( k ) ) ) )
++static void sha1_block( Sha1 * s, const uint8_t * p ) {
++    uint32_t w[80], a, b, c, d, e, t; int i;
++    for ( i = 0; i < 16; i++ ) w[i] = be32r( p + i * 4 );
++    for ( i = 16; i < 80; i++ ) w[i] = ROL( w[i - 3] ^ w[i - 8] ^ w[i - 14] ^ w[i - 16], 1 );
++    a = s->h[0]; b = s->h[1]; c = s->h[2]; d = s->h[3]; e = s->h[4];
++    for ( i = 0; i < 80; i++ ) {
++        uint32_t f, k;
++        if ( i < 20 ) { f = ( b & c ) | ( ~b & d ); k = 0x5A827999; }
++        else if ( i < 40 ) { f = b ^ c ^ d; k = 0x6ED9EBA1; }
++        else if ( i < 60 ) { f = ( b & c ) | ( b & d ) | ( c & d ); k = 0x8F1BBCDC; }
++        else { f = b ^ c ^ d; k = 0xCA62C1D6; }
++        t = ROL( a, 5 ) + f + e + k + w[i]; e = d; d = c; c = ROL( b, 30 ); b = a; a = t;
++    }
++    s->h[0] += a; s->h[1] += b; s->h[2] += c; s->h[3] += d; s->h[4] += e;
++}
++static void sha1_init( Sha1 * s ) {
++    s->h[0] = 0x67452301; s->h[1] = 0xEFCDAB89; s->h[2] = 0x98BADCFE; s->h[3] = 0x10325476; s->h[4] = 0xC3D2E1F0; s->len = 0; s->n = 0;
++}
++static void sha1_update( Sha1 * s, const uint8_t * p, size_t n ) {
++    s->len += n;
++    while ( n ) {
++        size_t k = 64 - s->n; if ( k > n ) k = n;
++        memcpy( s->buf + s->n, p, k ); s->n += ( int ) k; p += k; n -= k;
++        if ( s->n == 64 ) { sha1_block( s, s->buf ); s->n = 0; }
++    }
++}
++static void sha1_final( Sha1 * s, uint8_t out[20] ) {
++    uint64_t bits = s->len * 8; uint8_t pad = 0x80, z = 0, lenb[8]; int i;
++    sha1_update( s, &pad, 1 );
++    while ( s->n != 56 ) sha1_update( s, &z, 1 );
++    be64w( lenb, bits ); sha1_update( s, lenb, 8 );
++    for ( i = 0; i < 5; i++ ) be32w( out + i * 4, s->h[i] );
++}
++
++/* ------------------------------------------------------------------------------------------------ bencode */
++typedef struct BNode {
++    int t;                                   /* 'i' integer, 's' string, 'l' list, 'd' dictionary */
++    int64_t i;                               /* integer value */
++    const uint8_t * s; size_t n;             /* string bytes */
++    struct BNode * k; int nk;                /* list items / dictionary key,value,key,value... */
++    const uint8_t * raw; size_t rawn;        /* the exact bytes this node was parsed from */
++} BNode;
++
++static const uint8_t * bparse( const uint8_t * p, const uint8_t * end, BNode * o, int depth ) {
++    memset( o, 0, sizeof *o ); o->raw = p;
++    if ( p >= end || depth > 24 ) return NULL;
++    if ( *p == 'i' ) {
++        int neg = 0; int64_t v = 0; p++;
++        if ( p < end && *p == '-' ) { neg = 1; p++; }
++        while ( p < end && *p >= '0' && *p <= '9' ) { v = v * 10 + ( *p - '0' ); p++; }
++        if ( p >= end || *p != 'e' ) return NULL;
++        o->t = 'i'; o->i = neg ? -v : v; p++;
++    } else if ( *p >= '0' && *p <= '9' ) {
++        size_t n = 0;
++        while ( p < end && *p >= '0' && *p <= '9' ) { n = n * 10 + ( *p - '0' ); p++; if ( n > ( 1u << 30 ) ) return NULL; }
++        if ( p >= end || *p != ':' ) return NULL;
++        p++;
++        if ( n > ( size_t ) ( end - p ) ) return NULL;
++        o->t = 's'; o->s = p; o->n = n; p += n;
++    } else if ( *p == 'l' || *p == 'd' ) {
++        int cap = 0;
++        o->t = *p; p++;
++        while ( p < end && *p != 'e' ) {
++            if ( o->nk >= cap ) {
++                BNode * nk;
++                cap = cap ? cap * 2 : 8; nk = ( BNode * ) realloc( o->k, cap * sizeof( BNode ) );
++                if ( !nk ) return NULL;
++                o->k = nk;
++            }
++            p = bparse( p, end, &o->k[o->nk], depth + 1 );
++            if ( !p ) { o->nk++; return NULL; }
++            o->nk++;
++        }
++        if ( p >= end ) return NULL;
++        p++;
++    } else return NULL;
++    o->rawn = ( size_t ) ( p - o->raw );
++    return p;
++}
++static void bfree( BNode * o ) {
++    int i;
++    for ( i = 0; i < o->nk; i++ ) bfree( &o->k[i] );
++    free( o->k ); o->k = NULL; o->nk = 0;
++}
++static BNode * bget( BNode * d, const char * key ) {
++    int i; size_t n = strlen( key );
++    if ( !d || d->t != 'd' ) return NULL;
++    for ( i = 0; i + 1 < d->nk; i += 2 )
++        if ( d->k[i].t == 's' && d->k[i].n == n && !memcmp( d->k[i].s, key, n ) ) return &d->k[i + 1];
++    return NULL;
++}
++
++/* ------------------------------------------------------------------------------------------------ model */
++typedef struct { char * path; int64_t len, off; } TFile;
++
++typedef struct Peer {
++    sock_t sock; uint32_t ip; uint16_t port; int st;         /* 0 connecting, 1 handshake, 2 active, -1 closed */
++    uint8_t * rbuf; size_t rlen, rcap;
++    uint8_t * sbuf; size_t slen, soff, scap;
++    int choked, am_interested, peer_interested, am_choking;   /* choked = the peer chokes us */
++    uint8_t * bits; size_t bits_len;
++    int ext_md, md_size;
++    int nreq; int rp[PIPELINE], rb[PIPELINE]; uint32_t rt[PIPELINE];
++    uint32_t t_conn, t_rx, t_tx; int cand;
++} Peer;
++
++typedef struct { uint32_t ip; uint16_t port; uint32_t next_ms; int used; int connected; } Cand;
++
++typedef struct Torrent Torrent;
++typedef struct { Torrent * t; int idx; unsigned gen; } TrkArg;
++
++struct Torrent {
++    int used, dying; unsigned gen; int h;
++    uint8_t ih[20]; char name[256]; char err[200]; int state;
++    char * trk[MAX_TRK]; int ntrk; int trk_busy[MAX_TRK]; uint32_t trk_next[MAX_TRK];
++    /* metadata */
++    uint8_t * md; int md_size; uint8_t * md_have; int md_pieces; uint32_t * md_req; int md_got;
++    int64_t plen, total; int npieces, bpp; uint8_t * hashes;
++    TFile * files; int nfiles; int sel; int fp0, fp1; int64_t sel_off, sel_len;
++    /* progress */
++    uint8_t * have; uint8_t * mark; uint8_t * bst; uint32_t * btime;         /* piece done; block state 0 none 1 requested 2 received */
++    int nhave; int * order; int norder;
++    int fd; char path[1024]; int existing; int recheck;
++    int64_t reader_abs; uint32_t reader_ms;
++    int64_t downloaded, uploaded; int down_rate, up_rate; int64_t last_dl, last_ul; uint32_t last_stat;
++    int up_tokens;
++    Peer * peers[MAX_PEERS]; Cand cand[MAX_CAND]; int ncand;
++    uint32_t last_tick, last_announce, t_start; int hashfails;
++    char src[2048]; int loading;
++};
++
++static SDL_mutex * g_mu; static SDL_cond * g_cv;
++static Torrent g_t[T_MAX];
++static int g_run, g_up_limit;
++static char g_cache[900];
++static SDL_Thread * g_eng_th, * g_srv_th;
++static sock_t g_lsock = BAD_SOCK; static int g_port;
++static uint8_t g_pid[20];
++static unsigned g_gen_counter;
++
++#define DBG( ... ) do { if ( getenv( "TORRENT_DEBUG" ) ) { fprintf( stderr, "[torrent] " __VA_ARGS__ ); fputc( 10, stderr ); } } while ( 0 )
++#define LOCK() SDL_LockMutex( g_mu )
++#define UNLOCK() SDL_UnlockMutex( g_mu )
++
++static void set_err( Torrent * t, const char * m ) { snprintf( t->err, sizeof t->err, "%s", m ); t->state = 2; SDL_CondBroadcast( g_cv ); }
++
++static int piece_len( const Torrent * t, int p ) {
++    int64_t start = ( int64_t ) p * t->plen, rest = t->total - start;
++    return ( int ) ( rest < t->plen ? rest : t->plen );
++}
++static int piece_blocks( const Torrent * t, int p ) { return ( piece_len( t, p ) + BLOCK - 1 ) / BLOCK; }
++
++/* ------------------------------------------------------------------------------------------------ file i/o */
++static int64_t fpread( int fd, void * b, size_t n, int64_t off ) {
++#ifdef _WIN32
++    static SDL_mutex * m; int64_t r; if ( !m ) m = SDL_CreateMutex();
++    SDL_LockMutex( m ); _lseeki64( fd, off, SEEK_SET ); r = _read( fd, b, ( unsigned ) n ); SDL_UnlockMutex( m ); return r;
++#else
++    return pread( fd, b, n, ( off_t ) off );
++#endif
++}
++static int64_t fpwrite( int fd, const void * b, size_t n, int64_t off ) {
++#ifdef _WIN32
++    static SDL_mutex * m; int64_t r; if ( !m ) m = SDL_CreateMutex();
++    SDL_LockMutex( m ); _lseeki64( fd, off, SEEK_SET ); r = _write( fd, b, ( unsigned ) n ); SDL_UnlockMutex( m ); return r;
++#else
++    return pwrite( fd, b, n, ( off_t ) off );
++#endif
++}
++
++/* ------------------------------------------------------------------------------------------------ http (through FFmpeg, so https works) */
++typedef struct { double deadline; } HttpDl;
++static int http_irq( void * o ) {
++    struct timespec t; clock_gettime( CLOCK_MONOTONIC, &t );
++    return ( ( HttpDl * ) o )->deadline < t.tv_sec + t.tv_nsec / 1e9;
++}
++static int http_get( const char * url, uint8_t ** out, size_t * outn, size_t maxn, int timeout_s ) {
++    AVIOContext * io = NULL; AVDictionary * o = NULL; AVIOInterruptCB cb; HttpDl hd; struct timespec t;
++    size_t cap = 32768, n = 0; uint8_t * buf; int r;
++    clock_gettime( CLOCK_MONOTONIC, &t ); hd.deadline = t.tv_sec + t.tv_nsec / 1e9 + timeout_s;
++    cb.callback = http_irq; cb.opaque = &hd;
++    av_dict_set( &o, "user_agent", "BennuGD2-MediaPlayer/1.0", 0 );
++    av_dict_set( &o, "rw_timeout", "12000000", 0 );
++    r = avio_open2( &io, url, AVIO_FLAG_READ, &cb, &o );
++    av_dict_free( &o );
++    if ( r < 0 ) return -1;
++    buf = ( uint8_t * ) malloc( cap );
++    while ( buf ) {
++        int k;
++        if ( n + 16384 > cap ) {
++            uint8_t * nb;
++            if ( cap >= maxn ) break;
++            cap *= 2; nb = ( uint8_t * ) realloc( buf, cap );
++            if ( !nb ) { free( buf ); buf = NULL; break; }
++            buf = nb;
++        }
++        k = avio_read( io, buf + n, 16384 );
++        if ( k <= 0 ) break;
++        n += ( size_t ) k;
++    }
++    avio_closep( &io );
++    if ( !buf || !n ) { free( buf ); return -1; }
++    *out = buf; *outn = n;
++    return 0;
++}
++
++/* ------------------------------------------------------------------------------------------------ metadata ("info" dictionary) */
++static const char * video_exts[] = { "mp4", "mkv", "avi", "webm", "mov", "m4v", "mpg", "mpeg", "ts", "wmv", "flv", "ogv", "mp3", "flac", "m4a", "ogg", "opus", "wav", NULL };
++static int is_media_name( const char * nm ) {
++    const char * e = strrchr( nm, '.' ); int i;
++    if ( !e ) return 0;
++    for ( i = 0; video_exts[i]; i++ ) if ( !strcasecmp( e + 1, video_exts[i] ) ) return 1;
++    return 0;
++}
++
++static void select_range( Torrent * t, int fi ) {
++    t->sel = fi; t->sel_off = t->files[fi].off; t->sel_len = t->files[fi].len;
++    t->fp0 = ( int ) ( t->sel_off / t->plen );
++    t->fp1 = t->sel_len > 0 ? ( int ) ( ( t->sel_off + t->sel_len - 1 ) / t->plen ) : t->fp0;
++}
++
++/* Fills the torrent from an "info" dictionary (bytes). Called with the lock held. */
++static int set_info( Torrent * t, const uint8_t * info, size_t n ) {
++    BNode d; BNode * v; int i, best = -1; int64_t bestlen = -1, off = 0;
++    if ( !bparse( info, info + n, &d, 0 ) || d.t != 'd' ) { bfree( &d ); set_err( t, "bad torrent metadata" ); return 0; }
++    v = bget( &d, "piece length" );
++    if ( !v || v->t != 'i' || v->i <= 0 || v->i > ( 64 << 20 ) ) { bfree( &d ); set_err( t, "bad piece length" ); return 0; }
++    t->plen = v->i;
++    v = bget( &d, "pieces" );
++    if ( !v || v->t != 's' || v->n % 20 || !v->n ) { bfree( &d ); set_err( t, "bad piece list" ); return 0; }
++    t->npieces = ( int ) ( v->n / 20 );
++    t->hashes = ( uint8_t * ) malloc( v->n ); memcpy( t->hashes, v->s, v->n );
++    v = bget( &d, "name" );
++    if ( v && v->t == 's' ) { size_t k = v->n < sizeof t->name - 1 ? v->n : sizeof t->name - 1; memcpy( t->name, v->s, k ); t->name[k] = 0; }
++    v = bget( &d, "length" );
++    if ( v && v->t == 'i' ) {
++        t->nfiles = 1; t->files = ( TFile * ) calloc( 1, sizeof( TFile ) );
++        t->files[0].path = strdup( t->name[0] ? t->name : "file" ); t->files[0].len = v->i; t->files[0].off = 0; t->total = v->i;
++    } else {
++        v = bget( &d, "files" );
++        if ( !v || v->t != 'l' || !v->nk ) { bfree( &d ); set_err( t, "torrent has no files" ); return 0; }
++        t->nfiles = v->nk; t->files = ( TFile * ) calloc( v->nk, sizeof( TFile ) );
++        for ( i = 0; i < v->nk; i++ ) {
++            BNode * f = &v->k[i], * len = bget( f, "length" ), * path = bget( f, "path" ); char nm[512] = ""; int j;
++            if ( !len || len->t != 'i' || !path || path->t != 'l' ) continue;
++            for ( j = 0; j < path->nk; j++ ) {
++                if ( path->k[j].t != 's' ) continue;
++                if ( j ) strncat( nm, "/", sizeof nm - strlen( nm ) - 1 );
++                { size_t room = sizeof nm - strlen( nm ) - 1, k = path->k[j].n < room ? path->k[j].n : room; strncat( nm, ( const char * ) path->k[j].s, k ); }
++            }
++            t->files[i].path = strdup( nm ); t->files[i].len = len->i; t->files[i].off = off; off += len->i;
++        }
++        t->total = off;
++    }
++    bfree( &d );
++    if ( t->total <= 0 || ( t->total + t->plen - 1 ) / t->plen != t->npieces ) { set_err( t, "inconsistent torrent" ); return 0; }
++    t->bpp = ( int ) ( ( t->plen + BLOCK - 1 ) / BLOCK );
++    if ( ( int64_t ) t->npieces * t->bpp > 60000000 ) { set_err( t, "torrent too large" ); return 0; }
++    t->have = ( uint8_t * ) calloc( t->npieces, 1 );
++    t->mark = ( uint8_t * ) calloc( t->npieces, 1 );
++    t->bst = ( uint8_t * ) calloc( ( size_t ) t->npieces * t->bpp, 1 );
++    t->btime = ( uint32_t * ) calloc( ( size_t ) t->npieces * t->bpp, sizeof( uint32_t ) );
++    t->order = ( int * ) malloc( 1024 * sizeof( int ) );
++    for ( i = 0; i < t->nfiles; i++ )                                    /* default file: the biggest media file, else the biggest */
++        if ( is_media_name( t->files[i].path ) && t->files[i].len > bestlen ) { best = i; bestlen = t->files[i].len; }
++    if ( best < 0 ) for ( i = 0; i < t->nfiles; i++ ) if ( t->files[i].len > bestlen ) { best = i; bestlen = t->files[i].len; }
++    select_range( t, best < 0 ? 0 : best );
++    /* the cache file (sparse) */
++    { char hx[41]; struct stat st; to_hex( t->ih, 20, hx ); snprintf( t->path, sizeof t->path, "%s/%s.dat", g_cache, hx );
++      t->existing = stat( t->path, &st ) == 0 && ( int64_t ) st.st_size == t->total;
++#ifdef _WIN32
++      t->fd = _open( t->path, _O_RDWR | _O_CREAT | _O_BINARY, 0666 );
++#else
++      t->fd = open( t->path, O_RDWR | O_CREAT, 0666 );
++#endif
++      if ( t->fd < 0 ) { set_err( t, "cannot write the cache" ); return 0; }
++      if ( !t->existing ) { if ( ftruncate( t->fd, ( off_t ) t->total ) != 0 ) { set_err( t, "not enough room for the cache" ); return 0; } }
++      t->recheck = t->existing ? t->fp0 : t->fp1 + 1; }
++    t->state = 1;
++    SDL_CondBroadcast( g_cv );
++    return 1;
++}
++
++/* ------------------------------------------------------------------------------------------------ pieces */
++static int has_piece( const Peer * p, int i ) { return ( size_t ) ( i >> 3 ) < p->bits_len && ( p->bits[i >> 3] & ( 0x80 >> ( i & 7 ) ) ); }
++
++static void send_raw( Peer * p, const uint8_t * d, size_t n ) {
++    if ( p->st < 0 ) return;
++    if ( p->soff && p->soff == p->slen ) { p->soff = p->slen = 0; }
++    if ( p->slen + n > p->scap ) {
++        size_t nc = p->scap ? p->scap : 4096; uint8_t * nb;
++        while ( nc < p->slen + n ) nc *= 2;
++        nb = ( uint8_t * ) realloc( p->sbuf, nc ); if ( !nb ) { p->st = -1; return; }
++        p->sbuf = nb; p->scap = nc;
++    }
++    memcpy( p->sbuf + p->slen, d, n ); p->slen += n;
++}
++static void send_msg( Peer * p, int id, const uint8_t * pl, size_t n ) {
++    uint8_t h[5]; be32w( h, ( uint32_t ) n + 1 ); h[4] = ( uint8_t ) id;
++    send_raw( p, h, 5 ); if ( n ) send_raw( p, pl, n );
++}
++
++static void piece_done_check( Torrent * t, int pi ) {
++    int b, nb = piece_blocks( t, pi ), len = piece_len( t, pi ); Sha1 s; uint8_t dig[20], * buf; int64_t done = 0, base = ( int64_t ) pi * t->plen; int i;
++    for ( b = 0; b < nb; b++ ) if ( t->bst[( size_t ) pi * t->bpp + b] != 2 ) return;
++    buf = ( uint8_t * ) malloc( 65536 ); if ( !buf ) return;
++    sha1_init( &s );
++    while ( done < len ) {
++        int64_t k = len - done < 65536 ? len - done : 65536;
++        if ( fpread( t->fd, buf, ( size_t ) k, base + done ) != k ) break;
++        sha1_update( &s, buf, ( size_t ) k ); done += k;
++    }
++    free( buf ); sha1_final( &s, dig );
++    if ( done == len && !memcmp( dig, t->hashes + ( size_t ) pi * 20, 20 ) ) {
++        t->have[pi] = 1; t->nhave++;
++        for ( i = 0; i < MAX_PEERS; i++ ) {
++            Peer * p = t->peers[i]; uint8_t m[4];
++            if ( p && p->st == 2 ) { be32w( m, ( uint32_t ) pi ); send_msg( p, 4, m, 4 ); }
++        }
++        SDL_CondBroadcast( g_cv );
++    } else {
++        t->hashfails++;
++        for ( b = 0; b < nb; b++ ) t->bst[( size_t ) pi * t->bpp + b] = 0;
++    }
++}
++
++/* the pieces we want, in the order we want them: the start and end of the file, then from the play position forward */
++static void build_order( Torrent * t ) {
++    int n = 0, rp, i, lim, hp, tp, e1;
++    int64_t reader = t->reader_abs < t->sel_off ? t->sel_off : t->reader_abs;
++    memset( t->mark, 0, t->npieces );
++#define ADD( pc ) do { int q = ( pc ); if ( q >= t->fp0 && q <= t->fp1 && !t->have[q] && !t->mark[q] && n < 1024 ) { t->mark[q] = 1; t->order[n++] = q; } } while ( 0 )
++    hp = ( int ) ( ( t->sel_off + HEAD_BYTES - 1 ) / t->plen ); tp = ( int ) ( ( t->sel_off + t->sel_len - HEAD_BYTES ) / t->plen );
++    if ( hp > t->fp1 ) hp = t->fp1;
++    if ( tp < t->fp0 ) tp = t->fp0;
++    if ( t->reader_ms == 0 || reader - t->sel_off < HEAD_BYTES ) { for ( i = t->fp0; i <= hp && n < 120; i++ ) ADD( i ); }
++    rp = ( int ) ( reader / t->plen ); if ( rp < t->fp0 ) rp = t->fp0;
++    lim = rp + ( int ) ( AHEAD_BYTES / t->plen ) + 1; if ( lim > t->fp1 ) lim = t->fp1;
++    e1 = rp + ( int ) ( ( 6 << 20 ) / t->plen ) + 1; if ( e1 > lim ) e1 = lim;
++    for ( i = rp; i <= e1 && n < 200; i++ ) ADD( i );                  /* what plays first */
++    for ( i = tp; i <= t->fp1 && n < 300; i++ ) ADD( i );              /* the end of the file: mp4 keeps its index there */
++    for ( i = rp; i <= lim && n < 1000; i++ ) ADD( i );                /* then everything ahead */
++    for ( i = t->fp0; i <= hp && n < 1010; i++ ) ADD( i );
++#undef ADD
++    t->norder = n;
++}
++
++static void request_more( Torrent * t, Peer * p ) {
++    int oi, b, nb, pi; uint32_t now = now_ms();
++    if ( p->st != 2 || p->choked || t->state != 1 ) return;
++    for ( oi = 0; oi < t->norder && p->nreq < PIPELINE; oi++ ) {
++        pi = t->order[oi];
++        if ( t->have[pi] || !has_piece( p, pi ) ) continue;
++        nb = piece_blocks( t, pi );
++        for ( b = 0; b < nb && p->nreq < PIPELINE; b++ ) {
++            size_t bi = ( size_t ) pi * t->bpp + b; int k, mine = 0;
++            if ( t->bst[bi] == 2 ) continue;
++            if ( t->bst[bi] == 1 && now - t->btime[bi] < 9000 ) continue;       /* someone asked recently: wait (after that, ask again) */
++            for ( k = 0; k < p->nreq; k++ ) if ( p->rp[k] == pi && p->rb[k] == b ) { mine = 1; break; }
++            if ( mine ) continue;
++            { uint8_t m[12]; int len = BLOCK; if ( b == nb - 1 ) len = piece_len( t, pi ) - b * BLOCK;
++              be32w( m, ( uint32_t ) pi ); be32w( m + 4, ( uint32_t ) b * BLOCK ); be32w( m + 8, ( uint32_t ) len );
++              send_msg( p, 6, m, 12 ); }
++            t->bst[bi] = 1; t->btime[bi] = now;
++            p->rp[p->nreq] = pi; p->rb[p->nreq] = b; p->rt[p->nreq] = now; p->nreq++;
++        }
++    }
++}
++
++static void drop_requests( Torrent * t, Peer * p ) {
++    int k;
++    for ( k = 0; k < p->nreq; k++ ) {
++        size_t bi = ( size_t ) p->rp[k] * t->bpp + p->rb[k];
++        if ( t->state == 1 && t->bst[bi] == 1 ) t->bst[bi] = 0;
++    }
++    p->nreq = 0;
++}
++
++/* ------------------------------------------------------------------------------------------------ peers */
++static void peer_close( Torrent * t, Peer * p ) {
++    if ( p->st == 2 || p->st == 1 || p->st == 0 ) drop_requests( t, p );
++    if ( p->sock != BAD_SOCK ) CLOSESOCK( p->sock );
++    p->sock = BAD_SOCK; p->st = -1;
++    if ( p->cand >= 0 && p->cand < MAX_CAND ) { t->cand[p->cand].connected = 0; t->cand[p->cand].next_ms = now_ms() + 45000; }
++}
++
++static void peer_free( Torrent * t, int i ) {
++    Peer * p = t->peers[i];
++    if ( !p ) return;
++    if ( p->st >= 0 ) peer_close( t, p );
++    free( p->rbuf ); free( p->sbuf ); free( p->bits ); free( p );
++    t->peers[i] = NULL;
++}
++
++static void send_ext_handshake( Torrent * t, Peer * p ) {
++    char d[200]; uint8_t m[220]; int n;
++    n = snprintf( d, sizeof d, "d1:md11:ut_metadatai2ee1:pi%de1:v14:BennuGD2 Playere", g_port );
++    (void) t;
++    m[0] = 0; memcpy( m + 1, d, n );
++    send_msg( p, 20, m, n + 1 );
++}
++
++static void ask_metadata( Torrent * t, Peer * p ) {
++    int i; uint32_t now = now_ms();
++    if ( !p->ext_md || !t->md || t->md_got >= t->md_pieces || p->md_size <= 0 ) return;
++    for ( i = 0; i < t->md_pieces; i++ ) {
++        if ( t->md_have[i] || now - t->md_req[i] < 4000 ) continue;
++        { char d[64]; uint8_t m[80]; int n = snprintf( d, sizeof d, "d8:msg_typei0e5:piecei%dee", i );
++          m[0] = ( uint8_t ) p->ext_md; memcpy( m + 1, d, n ); send_msg( p, 20, m, n + 1 ); }
++        t->md_req[i] = now;
++        break;
++    }
++}
++
++static void on_extended( Torrent * t, Peer * p, const uint8_t * d, size_t n ) {
++    BNode b; const uint8_t * e;
++    if ( n < 1 ) return;
++    if ( d[0] == 0 ) {                                                   /* extension handshake */
++        BNode * m; BNode * v;
++        e = bparse( d + 1, d + n, &b, 0 );
++        if ( e && b.t == 'd' ) {
++            m = bget( &b, "m" );
++            if ( m && m->t == 'd' ) { v = bget( m, "ut_metadata" ); if ( v && v->t == 'i' ) p->ext_md = ( int ) v->i; }
++            v = bget( &b, "metadata_size" ); if ( v && v->t == 'i' && v->i > 0 && v->i < ( 8 << 20 ) ) p->md_size = ( int ) v->i;
++            DBG( "ext handshake: ut_metadata=%d size=%d", p->ext_md, p->md_size );
++            if ( t->state == 0 && !t->md && p->md_size > 0 ) {            /* first peer that knows the size: prepare to receive it */
++                t->md_size = p->md_size; t->md = ( uint8_t * ) calloc( 1, t->md_size ); t->md_pieces = ( t->md_size + BLOCK - 1 ) / BLOCK;
++                t->md_have = ( uint8_t * ) calloc( t->md_pieces, 1 ); t->md_req = ( uint32_t * ) calloc( t->md_pieces, sizeof( uint32_t ) ); t->md_got = 0;
++            }
++            if ( t->state == 0 ) ask_metadata( t, p );
++        }
++        bfree( &b );
++    } else if ( d[0] == 2 ) {                                            /* ut_metadata message (our id is 2) */
++        BNode * mt, * pc;
++        e = bparse( d + 1, d + n, &b, 0 );
++        if ( e && b.t == 'd' ) {
++            mt = bget( &b, "msg_type" ); pc = bget( &b, "piece" );
++            if ( mt && pc && mt->t == 'i' && pc->t == 'i' && mt->i == 1 && t->md && t->state == 0 && pc->i >= 0 && pc->i < t->md_pieces && !t->md_have[pc->i] ) {
++                size_t len = n - 1 - ( size_t ) ( e - ( d + 1 ) ); int64_t off = pc->i * ( int64_t ) BLOCK;
++                if ( off + ( int64_t ) len <= t->md_size ) {
++                    memcpy( t->md + off, e, len ); t->md_have[pc->i] = 1; t->md_got++;
++                    if ( t->md_got >= t->md_pieces ) {
++                        Sha1 s; uint8_t dig[20]; sha1_init( &s ); sha1_update( &s, t->md, t->md_size ); sha1_final( &s, dig );
++                        if ( !memcmp( dig, t->ih, 20 ) ) set_info( t, t->md, t->md_size );
++                        else { memset( t->md_have, 0, t->md_pieces ); t->md_got = 0; }      /* corrupt: start again */
++                    }
++                }
++            } else if ( mt && mt->t == 'i' && mt->i == 0 && pc && pc->t == 'i' ) {       /* a peer asks us for the metadata: say we have none */
++                char r[64]; uint8_t m[80]; int k = snprintf( r, sizeof r, "d8:msg_typei2e5:piecei%lldee", ( long long ) pc->i );
++                m[0] = ( uint8_t ) ( p->ext_md ? p->ext_md : 1 ); memcpy( m + 1, r, k ); send_msg( p, 20, m, k + 1 );
++            }
++        }
++        bfree( &b );
++    }
++}
++
++static void on_message( Torrent * t, Peer * p, int id, const uint8_t * d, size_t n ) {
++    switch ( id ) {
++    case 0: p->choked = 1; drop_requests( t, p ); break;
++    case 1: p->choked = 0; break;
++    case 2: p->peer_interested = 1; break;
++    case 3: p->peer_interested = 0; break;
++    case 4:
++        if ( n >= 4 ) {
++            uint32_t i = be32r( d );
++            if ( i < 4000000 ) {
++                size_t need = ( i >> 3 ) + 1;
++                if ( need > p->bits_len ) { uint8_t * nb = ( uint8_t * ) realloc( p->bits, need ); if ( nb ) { memset( nb + p->bits_len, 0, need - p->bits_len ); p->bits = nb; p->bits_len = need; } }
++                if ( need <= p->bits_len ) p->bits[i >> 3] |= 0x80 >> ( i & 7 );
++            }
++        }
++        break;
++    case 5:
++        free( p->bits ); p->bits = ( uint8_t * ) malloc( n ? n : 1 ); if ( p->bits ) { memcpy( p->bits, d, n ); p->bits_len = n; } else p->bits_len = 0;
++        break;
++    case 6:                                                              /* a request: only if uploading is allowed */
++        if ( n >= 12 && g_up_limit > 0 && !p->am_choking && t->state == 1 ) {
++            uint32_t pi = be32r( d ), off = be32r( d + 4 ), len = be32r( d + 8 );
++            if ( pi < ( uint32_t ) t->npieces && t->have[pi] && len > 0 && len <= BLOCK && ( int64_t ) off + len <= piece_len( t, pi ) && t->up_tokens >= ( int ) len && p->slen - p->soff < ( 512 << 10 ) ) {
++                uint8_t * m = ( uint8_t * ) malloc( 13 + len );
++                if ( m ) {
++                    be32w( m, 9 + len ); m[4] = 7; be32w( m + 5, pi ); be32w( m + 9, off );
++                    if ( fpread( t->fd, m + 13, len, ( int64_t ) pi * t->plen + off ) == ( int64_t ) len ) { send_raw( p, m, 13 + len ); t->up_tokens -= ( int ) len; t->uploaded += len; }
++                    free( m );
++                }
++            }
++        }
++        break;
++    case 7:
++        if ( n > 8 && t->state == 1 ) {
++            uint32_t pi = be32r( d ), off = be32r( d + 4 ); size_t len = n - 8; int k, b;
++            if ( pi < ( uint32_t ) t->npieces && off % BLOCK == 0 && ( int64_t ) off + len <= piece_len( t, pi ) ) {
++                b = ( int ) ( off / BLOCK );
++                for ( k = 0; k < p->nreq; k++ ) if ( p->rp[k] == ( int ) pi && p->rb[k] == b ) { p->rp[k] = p->rp[p->nreq - 1]; p->rb[k] = p->rb[p->nreq - 1]; p->rt[k] = p->rt[p->nreq - 1]; p->nreq--; break; }
++                if ( t->bst[( size_t ) pi * t->bpp + b] != 2 && !t->have[pi] ) {
++                    if ( fpwrite( t->fd, d + 8, len, ( int64_t ) pi * t->plen + off ) == ( int64_t ) len ) {
++                        t->bst[( size_t ) pi * t->bpp + b] = 2; t->downloaded += ( int64_t ) len;
++                        piece_done_check( t, ( int ) pi );
++                    }
++                }
++            }
++        }
++        break;
++    case 20: DBG( "ext message %d (%zu bytes)", n ? d[0] : -1, n ); on_extended( t, p, d, n ); break;
++    default: break;
++    }
++}
++
++static void peer_input( Torrent * t, Peer * p ) {
++    for ( ;; ) {
++        if ( p->st == 1 ) {                                              /* handshake: 68 bytes */
++            if ( p->rlen < 68 ) return;
++            DBG( "handshake from peer, %zu bytes", p->rlen );
++            if ( p->rbuf[0] != 19 || memcmp( p->rbuf + 1, "BitTorrent protocol", 19 ) || memcmp( p->rbuf + 28, t->ih, 20 ) ) { peer_close( t, p ); return; }
++            { uint8_t ext = p->rbuf[25] & 0x10;
++              memmove( p->rbuf, p->rbuf + 68, p->rlen - 68 ); p->rlen -= 68; p->st = 2;
++              if ( ext ) send_ext_handshake( t, p ); }
++            if ( t->state == 1 ) { send_msg( p, 2, NULL, 0 ); p->am_interested = 1; }
++            continue;
++        }
++        if ( p->rlen < 4 ) return;
++        { uint32_t len = be32r( p->rbuf );
++          if ( len > MAX_MSG ) { peer_close( t, p ); return; }
++          if ( p->rlen < 4 + ( size_t ) len ) return;
++          if ( len > 0 ) on_message( t, p, p->rbuf[4], p->rbuf + 5, len - 1 );
++          if ( p->st < 0 ) return;
++          memmove( p->rbuf, p->rbuf + 4 + len, p->rlen - 4 - len ); p->rlen -= 4 + len; }
++    }
++}
++
++static void peer_connect( Torrent * t, int ci ) {
++    int i; Peer * p; struct sockaddr_in sa; sock_t s; int one = 1;
++    for ( i = 0; i < MAX_PEERS; i++ ) if ( !t->peers[i] ) break;
++    if ( i == MAX_PEERS ) return;
++    s = socket( AF_INET, SOCK_STREAM, 0 );
++    if ( s == BAD_SOCK ) return;
++#ifdef _WIN32
++    { u_long nb = 1; ioctlsocket( s, FIONBIO, &nb ); }
++#else
++    fcntl( s, F_SETFL, fcntl( s, F_GETFL, 0 ) | O_NONBLOCK );
++#endif
++    setsockopt( s, IPPROTO_TCP, TCP_NODELAY, ( const char * ) &one, sizeof one );
++    memset( &sa, 0, sizeof sa ); sa.sin_family = AF_INET; sa.sin_port = htons( t->cand[ci].port ); sa.sin_addr.s_addr = t->cand[ci].ip;
++    if ( connect( s, ( struct sockaddr * ) &sa, sizeof sa ) != 0 && SOCKERR != E_INPROGRESS ) { CLOSESOCK( s ); t->cand[ci].next_ms = now_ms() + 120000; return; }
++    p = ( Peer * ) calloc( 1, sizeof *p );
++    p->sock = s; p->st = 0; p->choked = 1; p->am_choking = 1; p->cand = ci; p->t_conn = p->t_rx = p->t_tx = now_ms();
++    t->peers[i] = p; t->cand[ci].connected = 1; t->cand[ci].next_ms = now_ms() + 300000;
++}
++
++static void add_candidate( Torrent * t, uint32_t ip, uint16_t port ) {
++    int i, free_i = -1;
++    if ( !port || !ip ) return;
++    for ( i = 0; i < t->ncand; i++ ) if ( t->cand[i].used && t->cand[i].ip == ip && t->cand[i].port == port ) return;
++    for ( i = 0; i < t->ncand; i++ ) if ( !t->cand[i].used ) { free_i = i; break; }
++    if ( free_i < 0 ) { if ( t->ncand >= MAX_CAND ) return; free_i = t->ncand++; }
++    t->cand[free_i].ip = ip; t->cand[free_i].port = port; t->cand[free_i].used = 1; t->cand[free_i].connected = 0; t->cand[free_i].next_ms = 0;
++}
++
++/* ------------------------------------------------------------------------------------------------ trackers */
++static void parse_peers( Torrent * t, BNode * peers ) {
++    if ( !peers ) return;
++    if ( peers->t == 's' ) {
++        size_t i;
++        for ( i = 0; i + 6 <= peers->n; i += 6 ) {
++            uint32_t ip; memcpy( &ip, peers->s + i, 4 );
++            add_candidate( t, ip, ( uint16_t ) ( ( peers->s[i + 4] << 8 ) | peers->s[i + 5] ) );
++        }
++    } else if ( peers->t == 'l' ) {
++        int i;
++        for ( i = 0; i < peers->nk; i++ ) {
++            BNode * ip = bget( &peers->k[i], "ip" ), * pt = bget( &peers->k[i], "port" ); char s[64]; struct in_addr a;
++            if ( !ip || !pt || ip->t != 's' || pt->t != 'i' || ip->n > 60 ) continue;
++            memcpy( s, ip->s, ip->n ); s[ip->n] = 0;
++            if ( inet_pton( AF_INET, s, &a ) == 1 ) add_candidate( t, a.s_addr, ( uint16_t ) pt->i );
++        }
++    }
++}
++
++static void url_escape_bytes( const uint8_t * in, int n, char * out ) {
++    int i; static const char d[] = "0123456789ABCDEF";
++    for ( i = 0; i < n; i++ ) { *out++ = '%'; *out++ = d[in[i] >> 4]; *out++ = d[in[i] & 15]; }
++    *out = 0;
++}
++
++static void announce_http( Torrent * t, const char * url, uint8_t ih[20], int64_t left ) {
++    char ihe[70], pie[70], full[2400]; uint8_t * body = NULL; size_t n = 0; BNode b; const char * sep = strchr( url, '?' ) ? "&" : "?";
++    url_escape_bytes( ih, 20, ihe ); url_escape_bytes( g_pid, 20, pie );
++    snprintf( full, sizeof full, "%s%sinfo_hash=%s&peer_id=%s&port=%d&uploaded=0&downloaded=0&left=%lld&compact=1&numwant=60", url, sep, ihe, pie, g_port, ( long long ) left );
++    if ( http_get( full, &body, &n, 1 << 20, 15 ) != 0 ) return;
++    if ( bparse( body, body + n, &b, 0 ) && b.t == 'd' ) {
++        BNode * peers = bget( &b, "peers" );
++        LOCK(); parse_peers( t, peers ); UNLOCK();
++    }
++    bfree( &b ); free( body );
++}
++
++static void announce_udp( Torrent * t, const char * url, uint8_t ih[20], int64_t left ) {
++    char host[256]; int port = 80, k; struct addrinfo hints, * res = NULL; sock_t s; const char * p = url + 6;     /* after udp:// */
++    char portstr[16]; uint8_t req[98], resp[2048]; uint32_t tid; int attempt;
++    k = 0; while ( *p && *p != ':' && *p != '/' && k < 255 ) host[k++] = *p++; host[k] = 0;
++    if ( *p == ':' ) port = atoi( p + 1 );
++    snprintf( portstr, sizeof portstr, "%d", port );
++    memset( &hints, 0, sizeof hints ); hints.ai_family = AF_INET; hints.ai_socktype = SOCK_DGRAM;
++    if ( getaddrinfo( host, portstr, &hints, &res ) != 0 || !res ) return;
++    s = socket( AF_INET, SOCK_DGRAM, 0 );
++    if ( s == BAD_SOCK ) { freeaddrinfo( res ); return; }
++    { struct timeval tv; tv.tv_sec = 5; tv.tv_usec = 0; setsockopt( s, SOL_SOCKET, SO_RCVTIMEO, ( const char * ) &tv, sizeof tv ); }
++    tid = ( uint32_t ) rand() ^ now_ms();
++    for ( attempt = 0; attempt < 2; attempt++ ) {
++        int r; uint64_t cid; uint32_t act;
++        be64w( req, 0x41727101980ULL ); be32w( req + 8, 0 ); be32w( req + 12, tid );
++        sendto( s, ( const char * ) req, 16, 0, res->ai_addr, ( int ) res->ai_addrlen );
++        r = ( int ) recv( s, ( char * ) resp, sizeof resp, 0 );
++        if ( r < 16 || be32r( resp ) != 0 || be32r( resp + 4 ) != tid ) continue;
++        cid = ( ( uint64_t ) be32r( resp + 8 ) << 32 ) | be32r( resp + 12 );
++        be64w( req, cid ); be32w( req + 8, 1 ); be32w( req + 12, tid + 1 ); memcpy( req + 16, ih, 20 ); memcpy( req + 36, g_pid, 20 );
++        be64w( req + 56, 0 ); be64w( req + 64, ( uint64_t ) left ); be64w( req + 72, 0 ); be32w( req + 80, 2 ); be32w( req + 84, 0 );
++        be32w( req + 88, ( uint32_t ) rand() ); be32w( req + 92, 60 ); req[96] = ( uint8_t ) ( g_port >> 8 ); req[97] = ( uint8_t ) g_port;
++        sendto( s, ( const char * ) req, 98, 0, res->ai_addr, ( int ) res->ai_addrlen );
++        r = ( int ) recv( s, ( char * ) resp, sizeof resp, 0 );
++        act = r >= 8 ? be32r( resp ) : 99;
++        if ( r >= 20 && act == 1 && be32r( resp + 4 ) == tid + 1 ) {
++            int i;
++            LOCK();
++            for ( i = 20; i + 6 <= r; i += 6 ) { uint32_t ip; memcpy( &ip, resp + i, 4 ); add_candidate( t, ip, ( uint16_t ) ( ( resp[i + 4] << 8 ) | resp[i + 5] ) ); }
++            UNLOCK();
++            break;
++        }
++    }
++    CLOSESOCK( s ); freeaddrinfo( res );
++}
++
++static int trk_thread( void * arg ) {
++    TrkArg a = * ( TrkArg * ) arg; char url[1100]; uint8_t ih[20]; int64_t left; Torrent * t = a.t;
++    free( arg );
++    LOCK();
++    if ( !t->used || t->gen != a.gen || t->dying ) { UNLOCK(); return 0; }
++    snprintf( url, sizeof url, "%s", t->trk[a.idx] ); memcpy( ih, t->ih, 20 );
++    left = t->state == 1 ? t->total - ( int64_t ) t->nhave * t->plen : 1; if ( left < 1 ) left = 1;
++    UNLOCK();
++    if ( !strncmp( url, "udp://", 6 ) ) announce_udp( t, url, ih, left );
++    else if ( !strncmp( url, "http://", 7 ) || !strncmp( url, "https://", 8 ) ) announce_http( t, url, ih, left );
++    LOCK();
++    if ( t->used && t->gen == a.gen ) { t->trk_busy[a.idx] = 0; t->trk_next[a.idx] = now_ms() + 180000; }
++    UNLOCK();
++    return 0;
++}
++
++static void start_announces( Torrent * t ) {
++    int i; uint32_t now = now_ms(); int active = 0;
++    for ( i = 0; i < t->ncand; i++ ) if ( t->cand[i].used && t->cand[i].connected ) active++;
++    for ( i = 0; i < t->ntrk; i++ ) {
++        if ( t->trk_busy[i] || ( int32_t ) ( now - t->trk_next[i] ) < 0 ) continue;
++        if ( !strncmp( t->trk[i], "udp://", 6 ) || !strncmp( t->trk[i], "http", 4 ) ) {
++            TrkArg * a = ( TrkArg * ) malloc( sizeof *a ); SDL_Thread * th;
++            a->t = t; a->idx = i; a->gen = t->gen; t->trk_busy[i] = 1; t->trk_next[i] = now + 30000;
++            th = SDL_CreateThread( trk_thread, "trk", a );
++            if ( th ) SDL_DetachThread( th ); else { free( a ); t->trk_busy[i] = 0; }
++        } else t->trk_next[i] = now + 3600000;                           /* wss:// and others: not supported */
++    }
++    ( void ) active;
++}
++
++/* ------------------------------------------------------------------------------------------------ per-torrent tick */
++static void add_tracker( Torrent * t, const char * u ) {
++    int i;
++    if ( !*u || t->ntrk >= MAX_TRK ) return;
++    for ( i = 0; i < t->ntrk; i++ ) if ( !strcmp( t->trk[i], u ) ) return;
++    t->trk[t->ntrk] = strdup( u ); t->trk_busy[t->ntrk] = 0; t->trk_next[t->ntrk] = 0; t->ntrk++;
++}
++
++static void torrent_free_data( Torrent * t, int del ) {
++    int i;
++    for ( i = 0; i < MAX_PEERS; i++ ) peer_free( t, i );
++    if ( t->fd > 0 ) { CLOSEFD( t->fd ); t->fd = 0; }
++    if ( del && t->path[0] ) remove( t->path );
++    for ( i = 0; i < t->ntrk; i++ ) free( t->trk[i] );
++    for ( i = 0; i < t->nfiles; i++ ) free( t->files[i].path );
++    free( t->files ); free( t->hashes ); free( t->have ); free( t->mark ); free( t->md_req ); free( t->bst ); free( t->btime ); free( t->order ); free( t->md ); free( t->md_have );
++    { unsigned g = t->gen; memset( t, 0, sizeof *t ); t->gen = g; }
++}
++
++static void tor_tick( Torrent * t ) {
++    uint32_t now = now_ms(); int i, active = 0, connecting = 0;
++    /* statistics once a second */
++    if ( now - t->last_stat >= 1000 ) {
++        t->down_rate = ( int ) ( t->downloaded - t->last_dl ); t->up_rate = ( int ) ( t->uploaded - t->last_ul );
++        t->last_dl = t->downloaded; t->last_ul = t->uploaded; t->last_stat = now;
++    }
++    t->up_tokens += g_up_limit / 4; if ( t->up_tokens > g_up_limit ) t->up_tokens = g_up_limit;
++    /* trackers, when we need more peers */
++    for ( i = 0; i < MAX_PEERS; i++ ) if ( t->peers[i] && t->peers[i]->st >= 0 ) { if ( t->peers[i]->st == 2 ) active++; else connecting++; }
++    if ( active + connecting < 10 || now - t->last_announce > 120000 ) { start_announces( t ); if ( now - t->last_announce > 120000 ) t->last_announce = now; }
++    /* peers */
++    for ( i = 0; i < MAX_PEERS; i++ ) {
++        Peer * p = t->peers[i];
++        if ( !p ) continue;
++        if ( p->st < 0 ) { peer_free( t, i ); continue; }
++        if ( p->st == 0 && now - p->t_conn > 8000 ) { peer_close( t, p ); continue; }
++        if ( p->st == 1 && now - p->t_conn > 15000 ) { peer_close( t, p ); continue; }
++        if ( p->st == 2 && now - p->t_rx > 90000 ) { peer_close( t, p ); continue; }
++        if ( p->st == 2 && p->nreq > 0 && now - p->rt[0] > 25000 ) {          /* the oldest request is not answered: this peer is of no use now */
++            drop_requests( t, p ); p->choked = 1; { uint8_t d = 0; (void) d; }
++        }
++        if ( p->st == 2 && now - p->t_tx > 60000 ) { uint8_t z[4] = { 0, 0, 0, 0 }; send_raw( p, z, 4 ); p->t_tx = now; }
++    }
++    if ( t->state == 0 ) {
++        for ( i = 0; i < MAX_PEERS; i++ ) if ( t->peers[i] && t->peers[i]->st == 2 ) ask_metadata( t, t->peers[i] );
++        if ( now - t->t_start > 150000 ) { set_err( t, "could not get the file list (no peers answered)" ); return; }
++    }
++    if ( t->state == 1 ) {
++        /* verify what an earlier run left on disk (a few pieces per tick) */
++        for ( i = 0; i < 8 && t->recheck <= t->fp1; i++, t->recheck++ ) {
++            int pi = t->recheck, nb = piece_blocks( t, pi ), b, len = piece_len( t, pi ); uint8_t * buf = ( uint8_t * ) malloc( len ); Sha1 s; uint8_t dig[20];
++            if ( !buf ) break;
++            if ( fpread( t->fd, buf, len, ( int64_t ) pi * t->plen ) == len ) {
++                sha1_init( &s ); sha1_update( &s, buf, len ); sha1_final( &s, dig );
++                if ( !memcmp( dig, t->hashes + ( size_t ) pi * 20, 20 ) ) { t->have[pi] = 1; t->nhave++; for ( b = 0; b < nb; b++ ) t->bst[( size_t ) pi * t->bpp + b] = 2; }
++            }
++            free( buf );
++        }
++        build_order( t );
++        for ( i = 0; i < MAX_PEERS; i++ ) {
++            Peer * p = t->peers[i];
++            if ( !p || p->st != 2 ) continue;
++            if ( !p->am_interested ) { send_msg( p, 2, NULL, 0 ); p->am_interested = 1; }
++            if ( g_up_limit > 0 && p->peer_interested && p->am_choking ) { send_msg( p, 1, NULL, 0 ); p->am_choking = 0; }
++            request_more( t, p );
++        }
++    }
++    /* connect to more peers */
++    if ( active + connecting < MAX_PEERS - 4 ) {
++        int tries = 0;
++        for ( i = 0; i < t->ncand && tries < 6; i++ ) {
++            if ( !t->cand[i].used || t->cand[i].connected || ( int32_t ) ( now - t->cand[i].next_ms ) < 0 ) continue;
++            peer_connect( t, i ); tries++;
++        }
++    }
++}
++
++/* ------------------------------------------------------------------------------------------------ engine thread */
++static void peer_flush( Torrent * t, Peer * p ) {
++    while ( p->soff < p->slen ) {
++        int n = ( int ) send( p->sock, ( const char * ) p->sbuf + p->soff, ( int ) ( p->slen - p->soff ), MSG_NOSIGNAL );
++        if ( n > 0 ) { p->soff += n; p->t_tx = now_ms(); continue; }
++        if ( n < 0 ) {
++#ifdef _WIN32
++            if ( SOCKERR == WSAEWOULDBLOCK ) return;
++#else
++            if ( errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR ) return;
++#endif
++        }
++        peer_close( t, p ); return;
++    }
++    p->soff = p->slen = 0;
++}
++
++static int engine_thread( void * arg ) {
++    struct pollfd fds[T_MAX * MAX_PEERS]; Torrent * ft[T_MAX * MAX_PEERS]; int fi[T_MAX * MAX_PEERS];
++    ( void ) arg;
++    LOCK();
++    while ( g_run ) {
++        int n = 0, i, j, r; uint32_t now;
++        for ( i = 0; i < T_MAX; i++ ) {
++            Torrent * t = &g_t[i];
++            if ( !t->used ) continue;
++            if ( t->dying ) { torrent_free_data( t, t->err[0] == 'D' ); continue; }
++            for ( j = 0; j < MAX_PEERS; j++ ) {
++                Peer * p = t->peers[j];
++                if ( !p || p->st < 0 ) continue;
++                fds[n].fd = p->sock; fds[n].revents = 0;
++                fds[n].events = POLLIN | ( ( p->st == 0 || p->soff < p->slen ) ? POLLOUT : 0 );
++                ft[n] = t; fi[n] = j; n++;
++            }
++        }
++        UNLOCK();
++        r = n ? poll( fds, n, 100 ) : ( SDL_Delay( 100 ), 0 );
++        LOCK();
++        if ( r > 0 ) {
++            for ( i = 0; i < n; i++ ) {
++                Torrent * t = ft[i]; Peer * p = t->peers[fi[i]];
++                if ( !t->used || !p || p->st < 0 || p->sock != fds[i].fd ) continue;
++                if ( fds[i].revents & ( POLLERR | POLLHUP | POLLNVAL ) && !( fds[i].revents & POLLIN ) ) { peer_close( t, p ); continue; }
++                if ( p->st == 0 && ( fds[i].revents & POLLOUT ) ) {
++                    int err = 0; socklen_t el = sizeof err;
++                    getsockopt( p->sock, SOL_SOCKET, SO_ERROR, ( char * ) &err, &el );
++                    if ( err ) { peer_close( t, p ); continue; }
++                    { uint8_t h[68]; h[0] = 19; memcpy( h + 1, "BitTorrent protocol", 19 ); memset( h + 20, 0, 8 ); h[25] = 0x10; memcpy( h + 28, t->ih, 20 ); memcpy( h + 48, g_pid, 20 );
++                      p->st = 1; p->t_conn = now_ms(); send_raw( p, h, 68 ); }
++                }
++                if ( p->st >= 1 && ( fds[i].revents & POLLIN ) ) {
++                    if ( p->rcap - p->rlen < 4096 ) {
++                        size_t nc = p->rcap ? p->rcap * 2 : 8192; uint8_t * nb = ( uint8_t * ) realloc( p->rbuf, nc );
++                        if ( !nb ) { peer_close( t, p ); continue; }
++                        p->rbuf = nb; p->rcap = nc;
++                    }
++                    { int k = ( int ) recv( p->sock, ( char * ) p->rbuf + p->rlen, ( int ) ( p->rcap - p->rlen ), 0 );
++                      if ( k > 0 ) { p->rlen += k; p->t_rx = now_ms(); peer_input( t, p ); }
++                      else if ( k == 0 ) { peer_close( t, p ); continue; }
++                      else {
++#ifdef _WIN32
++                          if ( SOCKERR != WSAEWOULDBLOCK ) { peer_close( t, p ); continue; }
++#else
++                          if ( errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR ) { peer_close( t, p ); continue; }
++#endif
++                      } }
++                }
++                if ( p->st >= 1 && p->soff < p->slen ) peer_flush( t, p );
++            }
++        }
++        now = now_ms();
++        for ( i = 0; i < T_MAX; i++ ) {
++            Torrent * t = &g_t[i];
++            if ( !t->used || t->dying || t->loading ) continue;
++            if ( now - t->last_tick >= 250 ) {
++                t->last_tick = now; tor_tick( t );
++                for ( j = 0; j < MAX_PEERS; j++ ) if ( t->peers[j] && t->peers[j]->st >= 1 && t->peers[j]->soff < t->peers[j]->slen ) peer_flush( t, t->peers[j] );
++            }
++        }
++    }
++    UNLOCK();
++    return 0;
++}
++
++/* ------------------------------------------------------------------------------------------------ adding torrents */
++static void parse_magnet( Torrent * t, const char * src ) {
++    char * s = strdup( src + 8 ), * tok, * save = NULL;
++    for ( tok = strtok_r( s, "&", &save ); tok; tok = strtok_r( NULL, "&", &save ) ) {
++        if ( !strncmp( tok, "xt=urn:btih:", 12 ) ) {
++            const char * h = tok + 12; size_t n = strlen( h ); int i;
++            if ( n == 40 ) { for ( i = 0; i < 20; i++ ) t->ih[i] = ( uint8_t ) ( hexv( h[i * 2] ) * 16 + hexv( h[i * 2 + 1] ) ); }
++            else if ( n == 32 ) b32_decode( h, t->ih );
++        } else if ( !strncmp( tok, "dn=", 3 ) ) { url_decode( tok + 3 ); snprintf( t->name, sizeof t->name, "%s", tok + 3 ); }
++        else if ( !strncmp( tok, "tr=", 3 ) ) { url_decode( tok + 3 ); add_tracker( t, tok + 3 ); }
++    }
++    free( s );
++}
++
++/* loads a .torrent (file or address) on its own thread, then the torrent becomes ready */
++static int loader_thread( void * arg ) {
++    int h = ( int ) ( intptr_t ) arg; Torrent * t = &g_t[h - 1]; uint8_t * data = NULL; size_t n = 0; char src[2048]; unsigned gen;
++    LOCK(); snprintf( src, sizeof src, "%s", t->src ); gen = t->gen; UNLOCK();
++    if ( !strncmp( src, "http://", 7 ) || !strncmp( src, "https://", 8 ) ) {
++        if ( http_get( src, &data, &n, 16 << 20, 30 ) != 0 ) data = NULL;
++    } else {
++        FILE * f = fopen( src, "rb" );
++        if ( f ) { fseek( f, 0, SEEK_END ); long sz = ftell( f ); fseek( f, 0, SEEK_SET ); if ( sz > 0 && sz < ( 16 << 20 ) ) { data = ( uint8_t * ) malloc( sz ); if ( data && fread( data, 1, sz, f ) == ( size_t ) sz ) n = sz; else { free( data ); data = NULL; } } fclose( f ); }
++    }
++    LOCK();
++    if ( !t->used || t->gen != gen || t->dying ) { UNLOCK(); free( data ); return 0; }
++    if ( data ) {
++        BNode b;
++        if ( bparse( data, data + n, &b, 0 ) && b.t == 'd' ) {
++            BNode * info = bget( &b, "info" ), * an = bget( &b, "announce" ), * al = bget( &b, "announce-list" );
++            if ( info && info->t == 'd' ) {
++                Sha1 s; sha1_init( &s ); sha1_update( &s, info->raw, info->rawn ); sha1_final( &s, t->ih );
++                if ( an && an->t == 's' && an->n < 1000 ) { char u[1024]; memcpy( u, an->s, an->n ); u[an->n] = 0; add_tracker( t, u ); }
++                if ( al && al->t == 'l' ) {
++                    int i, j;
++                    for ( i = 0; i < al->nk; i++ ) if ( al->k[i].t == 'l' ) for ( j = 0; j < al->k[i].nk; j++ ) {
++                        BNode * u = &al->k[i].k[j];
++                        if ( u->t == 's' && u->n < 1000 ) { char x[1024]; memcpy( x, u->s, u->n ); x[u->n] = 0; add_tracker( t, x ); }
++                    }
++                }
++                set_info( t, info->raw, info->rawn );
++            } else set_err( t, "not a torrent file" );
++        } else set_err( t, "not a torrent file" );
++        bfree( &b );
++    } else set_err( t, "could not read the torrent file" );
++    t->loading = 0;
++    UNLOCK();
++    free( data );
++    return 0;
++}
++
++int torrent_add( const char * src ) {
++    int i, h = -1; Torrent * t;
++    if ( !g_mu || !src || !*src ) return -2;
++    LOCK();
++    for ( i = 0; i < T_MAX; i++ ) if ( !g_t[i].used ) { h = i + 1; break; }
++    if ( h < 0 ) { UNLOCK(); return -1; }
++    t = &g_t[h - 1]; { unsigned g = t->gen; memset( t, 0, sizeof *t ); t->gen = g; }
++    t->used = 1; t->h = h; t->gen = ++g_gen_counter; t->state = 0; t->fd = 0; t->t_start = now_ms();
++    snprintf( t->src, sizeof t->src, "%s", src );
++    if ( !strncmp( src, "magnet:?", 8 ) ) {
++        parse_magnet( t, src );
++        { int z = 1; for ( i = 0; i < 20; i++ ) if ( t->ih[i] ) z = 0; if ( z ) { t->used = 0; UNLOCK(); return -2; } }
++        if ( !t->ntrk ) set_err( t, "this magnet link has no trackers (DHT is not supported yet)" );
++    } else {
++        SDL_Thread * th;
++        t->loading = 1;
++        th = SDL_CreateThread( loader_thread, "torload", ( void * ) ( intptr_t ) h );
++        if ( !th ) { t->used = 0; UNLOCK(); return -2; }
++        SDL_DetachThread( th );
++    }
++    UNLOCK();
++    return h;
++}
++
++void torrent_remove( int h, int delete_data ) {
++    Torrent * t;
++    if ( h < 1 || h > T_MAX ) return;
++    t = &g_t[h - 1];
++    LOCK();
++    if ( t->used ) { t->dying = 1; if ( delete_data ) snprintf( t->err, sizeof t->err, "D" ); }
++    UNLOCK();
++}
++
++/* ------------------------------------------------------------------------------------------------ queries */
++#define GET( h ) Torrent * t = ( ( h ) >= 1 && ( h ) <= T_MAX && g_t[( h ) - 1].used ) ? &g_t[( h ) - 1] : NULL
++int torrent_state( int h ) { GET( h ); int r = 2; if ( !t ) return 2; LOCK(); r = t->dying ? 2 : t->state; UNLOCK(); return r; }
++const char * torrent_error( int h ) { GET( h ); return t ? t->err : "no torrent"; }
++const char * torrent_name( int h ) { GET( h ); return t ? t->name : ""; }
++int torrent_file_count( int h ) { GET( h ); return t && t->state == 1 ? t->nfiles : 0; }
++const char * torrent_file_name( int h, int i ) { GET( h ); return t && t->state == 1 && i >= 0 && i < t->nfiles ? t->files[i].path : ""; }
++int64_t torrent_file_size( int h, int i ) { GET( h ); return t && t->state == 1 && i >= 0 && i < t->nfiles ? t->files[i].len : 0; }
++int torrent_main_file( int h ) {
++    GET( h ); int i, best = -1; int64_t bl = -1;
++    if ( !t || t->state != 1 ) return -1;
++    for ( i = 0; i < t->nfiles; i++ ) if ( is_media_name( t->files[i].path ) && t->files[i].len > bl ) { best = i; bl = t->files[i].len; }
++    return best;
++}
++int torrent_select( int h, int i ) {
++    GET( h );
++    if ( !t || t->state != 1 || i < 0 || i >= t->nfiles ) return -1;
++    LOCK(); select_range( t, i ); t->reader_ms = 0; t->reader_abs = t->sel_off; UNLOCK();
++    return 0;
++}
++int torrent_url( int h, int i, char * out, int outlen ) {
++    GET( h ); const char * nm, * sl;
++    if ( !t || t->state != 1 || i < 0 || i >= t->nfiles || g_port <= 0 ) return -1;
++    nm = t->files[i].path; sl = strrchr( nm, '/' ); if ( sl ) nm = sl + 1;
++    { int k = snprintf( out, outlen, "http://127.0.0.1:%d/%d/%d/", g_port, h, i ); const char * c;     /* the name goes percent-encoded */
++      for ( c = nm; *c && k < outlen - 4; c++ ) {
++          if ( ( *c >= '0' && *c <= '9' ) || ( *c >= 'a' && *c <= 'z' ) || ( *c >= 'A' && *c <= 'Z' ) || *c == '.' || *c == '-' || *c == '_' ) out[k++] = *c;
++          else k += snprintf( out + k, outlen - k, "%%%02X", ( unsigned char ) *c );
++      }
++      out[k] = 0; }
++    return 0;
++}
++int torrent_peers( int h ) { GET( h ); int i, n = 0; if ( !t ) return 0; LOCK(); for ( i = 0; i < MAX_PEERS; i++ ) if ( t->peers[i] && t->peers[i]->st == 2 ) n++; UNLOCK(); return n; }
++int torrent_down_rate( int h ) { GET( h ); return t ? t->down_rate : 0; }
++int torrent_up_rate( int h ) { GET( h ); return t ? t->up_rate : 0; }
++int64_t torrent_downloaded( int h ) { GET( h ); return t ? t->downloaded : 0; }
++int torrent_file_percent( int h ) {
++    GET( h ); int i, n = 0;
++    if ( !t || t->state != 1 ) return 0;
++    LOCK(); for ( i = t->fp0; i <= t->fp1; i++ ) if ( t->have[i] ) n++; i = ( int ) ( ( int64_t ) n * 100 / ( t->fp1 - t->fp0 + 1 ) ); UNLOCK();
++    return i;
++}
++int64_t torrent_buffered( int h ) {
++    GET( h ); int p; int64_t n = 0, abs;
++    if ( !t || t->state != 1 ) return 0;
++    LOCK();
++    abs = t->reader_abs < t->sel_off ? t->sel_off : t->reader_abs;
++    for ( p = ( int ) ( abs / t->plen ); p <= t->fp1 && t->have[p]; p++ ) n += t->plen;
++    n -= abs - ( int64_t ) ( abs / t->plen ) * t->plen;
++    UNLOCK();
++    return n < 0 ? 0 : n;
++}
++/* how much of what a player needs to start (the first and the last 3 MB of the file) is on disk, 0..100 */
++int torrent_start_percent( int h ) {
++    GET( h ); int i, hp, tp, have = 0, all = 0;
++    if ( !t || t->state != 1 ) return 0;
++    LOCK();
++    hp = ( int ) ( ( t->sel_off + HEAD_BYTES - 1 ) / t->plen ); tp = ( int ) ( ( t->sel_off + t->sel_len - HEAD_BYTES ) / t->plen );
++    if ( hp > t->fp1 ) hp = t->fp1;
++    if ( tp < t->fp0 ) tp = t->fp0;
++    for ( i = t->fp0; i <= hp; i++ ) { all++; if ( t->have[i] ) have++; }
++    if ( tp > hp ) for ( i = tp; i <= t->fp1; i++ ) { all++; if ( t->have[i] ) have++; }
++    UNLOCK();
++    return all ? have * 100 / all : 100;
++}
++void torrent_set_upload_limit( int b ) { g_up_limit = b < 0 ? 0 : b; }
++
++/* ------------------------------------------------------------------------------------------------ local http server */
++static const char * mime_of( const char * nm ) {
++    const char * e = strrchr( nm, '.' );
++    if ( !e ) return "application/octet-stream";
++    if ( !strcasecmp( e, ".mp4" ) || !strcasecmp( e, ".m4v" ) ) return "video/mp4";
++    if ( !strcasecmp( e, ".mkv" ) ) return "video/x-matroska";
++    if ( !strcasecmp( e, ".webm" ) ) return "video/webm";
++    if ( !strcasecmp( e, ".avi" ) ) return "video/x-msvideo";
++    if ( !strcasecmp( e, ".mp3" ) ) return "audio/mpeg";
++    if ( !strcasecmp( e, ".flac" ) ) return "audio/flac";
++    return "application/octet-stream";
++}
++
++static int send_all( sock_t s, const char * b, size_t n ) {
++    while ( n ) { int k = ( int ) send( s, b, ( int ) n, MSG_NOSIGNAL ); if ( k <= 0 ) return -1; b += k; n -= k; }
++    return 0;
++}
++
++static int conn_thread( void * arg ) {
++    sock_t c = ( sock_t ) ( intptr_t ) arg; char req[4096]; int n = 0, h, fi; long long a = 0, b = -1; char * p;
++    struct timeval tv; Torrent * t; TFile * f; int64_t size, pos, end, sent = 0, foff; uint8_t * buf; int partial, head; unsigned gen; char mime[64];
++    tv.tv_sec = 60; tv.tv_usec = 0; setsockopt( c, SOL_SOCKET, SO_SNDTIMEO, ( const char * ) &tv, sizeof tv );
++    while ( n < ( int ) sizeof req - 1 ) {
++        int k = ( int ) recv( c, req + n, sizeof req - 1 - n, 0 );
++        if ( k <= 0 ) { CLOSESOCK( c ); return 0; }
++        n += k; req[n] = 0;
++        if ( strstr( req, "\r\n\r\n" ) ) break;
++    }
++    head = !strncmp( req, "HEAD ", 5 );
++    if ( strncmp( req, "GET /", 5 ) && !head ) { send_all( c, "HTTP/1.1 405 Method Not Allowed\r\nConnection: close\r\n\r\n", 55 ); CLOSESOCK( c ); return 0; }
++    p = req + ( head ? 6 : 5 );
++    h = atoi( p ); p = strchr( p, '/' ); fi = p ? atoi( p + 1 ) : -1;
++    p = strstr( req, "\r\nRange:" ); if ( !p ) p = strstr( req, "\r\nrange:" );
++    partial = 0;
++    if ( p ) { p = strstr( p, "bytes=" ); if ( p ) { partial = 1; a = atoll( p + 6 ); p = strchr( p, '-' ); if ( p && p[1] >= '0' && p[1] <= '9' ) b = atoll( p + 1 ); } }
++    if ( h < 1 || h > T_MAX ) { send_all( c, "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n", 45 ); CLOSESOCK( c ); return 0; }
++    t = &g_t[h - 1];
++    LOCK();
++    if ( !t->used || t->dying || t->state != 1 || fi < 0 || fi >= t->nfiles ) { UNLOCK(); send_all( c, "HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n", 45 ); CLOSESOCK( c ); return 0; }
++    f = &t->files[fi]; size = f->len; foff = f->off; gen = t->gen; snprintf( mime, sizeof mime, "%s", mime_of( f->path ) );
++    if ( fi != t->sel ) { select_range( t, fi ); t->reader_ms = 0; }
++    UNLOCK();
++    if ( a >= size ) { send_all( c, "HTTP/1.1 416 Range Not Satisfiable\r\nConnection: close\r\n\r\n", 58 ); CLOSESOCK( c ); return 0; }
++    if ( b < 0 || b >= size ) b = size - 1;
++    pos = a; end = b + 1;
++    { char hd[400]; int k;
++      if ( partial ) k = snprintf( hd, sizeof hd, "HTTP/1.1 206 Partial Content\r\nContent-Type: %s\r\nAccept-Ranges: bytes\r\nContent-Range: bytes %lld-%lld/%lld\r\nContent-Length: %lld\r\nConnection: close\r\n\r\n", mime, ( long long ) pos, ( long long ) b, ( long long ) size, ( long long ) ( end - pos ) );
++      else k = snprintf( hd, sizeof hd, "HTTP/1.1 200 OK\r\nContent-Type: %s\r\nAccept-Ranges: bytes\r\nContent-Length: %lld\r\nConnection: close\r\n\r\n", mime, ( long long ) size );
++      if ( send_all( c, hd, k ) != 0 || head ) { CLOSESOCK( c ); return 0; } }
++    buf = ( uint8_t * ) malloc( 262144 );
++    while ( buf && pos < end ) {
++        int64_t abs = foff + pos, chunk = end - pos > 262144 ? 262144 : end - pos; int ready, p0, p1, i, stalled = 0, lasth;
++        LOCK();
++        for ( ;; ) {
++            if ( !t->used || t->gen != gen || t->dying || !g_run ) { ready = -1; break; }
++            t->reader_abs = abs; t->reader_ms = now_ms();
++            p0 = ( int ) ( abs / t->plen ); p1 = ( int ) ( ( abs + chunk - 1 ) / t->plen ); ready = 1;
++            for ( i = p0; i <= p1; i++ ) if ( !t->have[i] ) { ready = 0; break; }
++            if ( ready ) break;
++            lasth = t->nhave;
++            SDL_CondWaitTimeout( g_cv, g_mu, 500 );
++            if ( t->nhave == lasth ) { if ( ++stalled > 240 ) { ready = -1; break; } } else stalled = 0;        /* two minutes without a single new piece */
++        }
++        UNLOCK();
++        if ( ready != 1 ) break;
++        if ( fpread( t->fd, buf, ( size_t ) chunk, abs ) != chunk ) break;
++        if ( send_all( c, ( const char * ) buf, ( size_t ) chunk ) != 0 ) break;
++        pos += chunk; sent += chunk;
++    }
++    free( buf ); CLOSESOCK( c );
++    return 0;
++}
++
++static int server_thread( void * arg ) {
++    ( void ) arg;
++    while ( g_run ) {
++        struct pollfd pf; pf.fd = g_lsock; pf.events = POLLIN;
++        if ( poll( &pf, 1, 300 ) > 0 ) {
++            sock_t c = accept( g_lsock, NULL, NULL );
++            if ( c != BAD_SOCK ) { SDL_Thread * th = SDL_CreateThread( conn_thread, "torhttp", ( void * ) ( intptr_t ) c ); if ( th ) SDL_DetachThread( th ); else CLOSESOCK( c ); }
++        }
++    }
++    return 0;
++}
++
++/* ------------------------------------------------------------------------------------------------ init / shutdown */
++int torrent_init( const char * cache_dir ) {
++    struct sockaddr_in sa; socklen_t sl = sizeof sa; int i, one = 1;
++    if ( g_run ) return 0;
++#ifdef _WIN32
++    { WSADATA w; WSAStartup( MAKEWORD( 2, 2 ), &w ); }
++#endif
++    snprintf( g_cache, sizeof g_cache, "%s", cache_dir && *cache_dir ? cache_dir : "." );
++#ifdef _WIN32
++    _mkdir( g_cache );
++#else
++    mkdir( g_cache, 0777 );
++#endif
++    srand( ( unsigned ) time( NULL ) ^ now_ms() );
++    memcpy( g_pid, "-BM0100-", 8 ); for ( i = 8; i < 20; i++ ) g_pid[i] = ( uint8_t ) ( 'a' + rand() % 26 );
++    g_mu = SDL_CreateMutex(); g_cv = SDL_CreateCond();
++    g_lsock = socket( AF_INET, SOCK_STREAM, 0 );
++    if ( g_lsock == BAD_SOCK ) return -1;
++    setsockopt( g_lsock, SOL_SOCKET, SO_REUSEADDR, ( const char * ) &one, sizeof one );
++    memset( &sa, 0, sizeof sa ); sa.sin_family = AF_INET; sa.sin_addr.s_addr = htonl( INADDR_LOOPBACK ); sa.sin_port = 0;
++    if ( bind( g_lsock, ( struct sockaddr * ) &sa, sizeof sa ) != 0 || listen( g_lsock, 8 ) != 0 ) { CLOSESOCK( g_lsock ); g_lsock = BAD_SOCK; return -1; }
++    getsockname( g_lsock, ( struct sockaddr * ) &sa, &sl ); g_port = ntohs( sa.sin_port );
++    g_run = 1;
++    g_eng_th = SDL_CreateThread( engine_thread, "torengine", NULL );
++    g_srv_th = SDL_CreateThread( server_thread, "torserver", NULL );
++    return 0;
++}
++
++void torrent_shutdown( void ) {
++    int i;
++    if ( !g_run ) return;
++    g_run = 0;
++    LOCK(); SDL_CondBroadcast( g_cv ); UNLOCK();
++    SDL_WaitThread( g_eng_th, NULL ); SDL_WaitThread( g_srv_th, NULL );
++    for ( i = 0; i < T_MAX; i++ ) if ( g_t[i].used ) torrent_free_data( &g_t[i], 0 );
++    if ( g_lsock != BAD_SOCK ) CLOSESOCK( g_lsock );
++    g_lsock = BAD_SOCK; g_port = 0;
++}
+diff --git a/modules/libmod_video/torrent.h b/modules/libmod_video/torrent.h
+new file mode 100644
+index 00000000..9a7956fa
+--- /dev/null
++++ b/modules/libmod_video/torrent.h
+@@ -0,0 +1,53 @@
++/*
++ *  torrent.h - BitTorrent client engine for streaming (part of libmod_video)
++ *
++ *  A torrent (a .torrent file, an http(s) address of one, or a magnet: link) is downloaded in the background:
++ *  the pieces of the file being watched come first, in order, from the place being read. The files are served
++ *  on a local HTTP address (127.0.0.1) with Range support, so the video player opens them like any other
++ *  stream (the request waits until the pieces it needs have arrived).
++ *
++ *  Everything runs on its own threads; the functions below only take a lock for a moment and never block,
++ *  except torrent_stop (waits for the connections to close).
++ */
++#ifndef __TORRENT_H
++#define __TORRENT_H
++
++#include <stdint.h>
++
++/* cache_dir: where the downloaded data is kept (created if missing). Returns 0 or a negative error. */
++int      torrent_init( const char * cache_dir );
++void     torrent_shutdown( void );
++
++/* Starts a torrent. src: "magnet:?xt=...", a path to a .torrent, or an http(s) address of one.
++ * Returns a handle (>= 1), or a negative number (-1 no free slot, -2 bad source). */
++int      torrent_add( const char * src );
++void     torrent_remove( int h, int delete_data );
++
++/* 0 = looking for the file list (magnet) / reading the .torrent; 1 = ready; 2 = failed (see torrent_error) */
++int      torrent_state( int h );
++const char * torrent_error( int h );
++const char * torrent_name( int h );
++
++int      torrent_file_count( int h );
++const char * torrent_file_name( int h, int i );
++int64_t  torrent_file_size( int h, int i );
++/* index of the biggest video-looking file (what you would play), or -1 */
++int      torrent_main_file( int h );
++/* the file to download first (the rest is not downloaded) */
++int      torrent_select( int h, int i );
++/* local address that serves file i ("http://127.0.0.1:PORT/H/I/name"); written into out */
++int      torrent_url( int h, int i, char * out, int outlen );
++
++/* numbers for a progress display */
++int      torrent_peers( int h );                 /* connected peers */
++int      torrent_down_rate( int h );             /* bytes per second */
++int      torrent_up_rate( int h );
++int      torrent_file_percent( int h );          /* 0..100 of the selected file that is on disk */
++int64_t  torrent_buffered( int h );              /* bytes ready right after the position being played */
++int      torrent_start_percent( int h );         /* how much of what a player needs to open the file is ready, 0..100 */
++int64_t  torrent_downloaded( int h );            /* total bytes received */
++
++/* bytes per second the client may send to others (0 = never upload; 0 is the default) */
++void     torrent_set_upload_limit( int bytes_per_sec );
++
++#endif
+-- 
+2.43.0
+

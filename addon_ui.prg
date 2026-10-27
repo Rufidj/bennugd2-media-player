@@ -42,6 +42,7 @@ global
     int    ov_on, ov_pct, ov_cancel;    // visible / porcentaje 0-100 / con boton de cancelar
     string ov_title = "", s_ovt = "", s_ovp = "", s_ovh = "";
     int    txt_ovt, txt_ovp, txt_ovh;
+    string wid_name = "";                      // ajuste que edita el campo de texto abierto
     string store_seen[64]; int store_seen_n;   // carpetas ya listadas (el addon del usuario manda sobre el que trae el reproductor)
 end
 
@@ -246,6 +247,106 @@ begin
     lbl_ver = -1;
 end
 
+
+// ---------------------------------------------------------------- botones, casillas, selectores y campos de texto de un addon
+// el valor de un ajuste (el de su definicion si el usuario no lo ha tocado)
+function string addon_setting_text(int k)
+private string v;
+begin
+    v = host_setting_get(ad_st_name[k]);
+    if (v == chr(1)) v = ad_st_def[k]; end
+    return v;
+end
+
+// el texto de la fila: "[x] titulo", "titulo:  valor"...
+function string addon_widget_title(int i)
+private string v; int k;
+begin
+    k = ad_it_flag[i];
+    switch (ad_it_kind[i])
+        case 5:
+            v = addon_setting_text(k);
+            return ((v == "yes" || v == "true" || v == "1") ? "[x]  " : "[ ]  ") + ad_it_title[i];
+        end
+        case 6, 7:
+            v = addon_setting_text(k);
+            if (ad_st_type[k] == "secret") v = v == "" ? "-" : "*****"; elseif (v == "") v = "-"; end
+            return ad_it_title[i] + ":  " + fit_text(v, 300);
+        end
+        case 8: return ucase(ad_it_title[i]); end
+    end
+    return ad_it_title[i];
+end
+
+// las cabeceras no se pueden elegir: el cursor pasa de largo
+function skip_headers(int dir)
+private int k;
+begin
+    if (addon_mode != 2 || sel < 0 || sel >= n_entries) return 0; end
+    if (dir == 0) dir = 1; end
+    k = 0;
+    while (sel >= 0 && sel < n_entries && entry_dir[sel] == K_AWIDGET && entry_akind[sel] == 8 && k < n_entries)
+        sel += dir > 0 ? 1 : -1; k++;
+    end
+    if (sel >= n_entries) sel = n_entries - 1; skip_headers(-1); end
+    if (sel < 0) sel = 0; end
+    if (sel < top_row) top_row = sel; end
+    if (sel >= top_row + ROWS) top_row = sel - ROWS + 1; end
+end
+
+// vuelve a ejecutar la pagina que se ve (tras cambiar un valor), dejando el cursor donde estaba
+function int addon_refresh()
+private int s0, t0, rc;
+begin
+    s0 = sel; t0 = top_row;
+    rc = addon_run(as_page[as_depth - 1], as_args[as_depth - 1]);
+    if (rc != 0) return rc; end
+    addon_fill_entries();
+    sel = s0; top_row = t0;
+    if (sel >= n_entries) sel = n_entries - 1; end
+    if (sel < 0) sel = 0; end
+end
+
+// un boton: se ejecuta su pagina; si esta termina con "go to", se va a esa pagina; si no, se refresca la actual
+function addon_do(string page, string args)
+private int rc; string gp, ga;
+begin
+    rc = addon_run(page, args);
+    if (rc == 1) return 0; end
+    gp = ad_goto_page; ga = ad_goto_args;
+    if (rc == 0 && gp != "") addon_goto(gp, ga); return 0; end
+    addon_refresh();
+end
+
+function addon_widget(int i)
+private int k, n, j; string v, nx, ch[24], lbl;
+begin
+    k = entry_size[i];
+    switch (entry_akind[i])
+        case 4: addon_do(entry_url[i], entry_aargs[i]); end
+        case 5:
+            v = addon_setting_text(k);
+            host_setting_set(ad_st_name[k], (v == "yes" || v == "true" || v == "1") ? "no" : "yes");
+            addon_refresh();
+        end
+        case 6:
+            v = addon_setting_text(k); n = 0; lbl = ad_st_choices[k]; nx = "";
+            // el siguiente valor de la lista (separada por |)
+            j = find(lbl, "|"); while (j >= 0 && n < 23) ch[n] = substr(lbl, 0, j); lbl = substr(lbl, j + 1); n++; j = find(lbl, "|"); end
+            ch[n] = lbl; n++;
+            for (j = 0; j < n; j++) if (ch[j] == v) nx = ch[(j + 1) % n]; end end
+            if (nx == "") nx = ch[0]; end
+            host_setting_set(ad_st_name[k], nx);
+            addon_refresh();
+        end
+        case 7:
+            wid_name = ad_st_name[k];
+            kb_secret_next = ad_st_type[k] == "secret";
+            kb_open(ad_st_label[k], ad_st_type[k] == "secret" ? "" : addon_setting_text(k), KB_WIDGET);
+        end
+    end
+end
+
 // ---------------------------------------------------------------- ejecutar páginas y mostrar sus elementos
 function addon_fill_entries()
 private int i; string t;
@@ -260,7 +361,11 @@ begin
         if (ad_it_dur[i] > 0) t += (t != "" ? "  " : "") + fmt_time(ad_it_dur[i] * 1000); end
         entry_info[n_entries] = t;
         entry_akind[n_entries] = ad_it_kind[i]; entry_dur[n_entries] = ad_it_dur[i];
-        if (ad_it_kind[i] == 0)
+        if (ad_it_kind[i] >= 4)                                                    // boton, casilla, selector, campo de texto o cabecera
+            entry_dir[n_entries] = K_AWIDGET; entry_url[n_entries] = ad_it_kind[i] == 4 ? ad_it_page[i] : ad_it_url[i];
+            entry_aargs[n_entries] = ad_it_args[i]; entry_size[n_entries] = ad_it_flag[i];
+            entries[n_entries] = addon_widget_title(i);
+        elseif (ad_it_kind[i] == 0)
             entry_dir[n_entries] = K_AFOLDER; entry_url[n_entries] = ad_it_page[i]; entry_aargs[n_entries] = ad_it_args[i];
         else
             entry_dir[n_entries] = K_URL; entry_url[n_entries] = ad_it_url[i]; entry_aargs[n_entries] = ad_it_hdr[i];   // en un vídeo, aargs lleva las cabeceras
@@ -338,7 +443,7 @@ begin
     if (ad_nst == 0)
         menu_add(tr("m_addon_noset"), MA_CANCEL);
     else
-        for (k = 0; k < ad_nst && k < 9; k++) menu_add(fit_text(ad_st_label[k], 620) + ": " + aset_display(k), MA_ASET + k); end
+        for (k = 0; k < ad_nst && k < 9; k++) if (!ad_st_hidden[k]) menu_add(fit_text(ad_st_label[k], 620) + ": " + aset_display(k), MA_ASET + k); end end
     end
     menu_add(tr("m_back"), MA_CANCEL);
     menu_show(tr("mt_addon_settings") + " - " + ad_i_name);

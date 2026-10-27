@@ -80,6 +80,43 @@ page movies with genre, title:
 
 Los argumentos viajan como JSON: números, texto, listas y registros se conservan.
 
+## Botones, casillas, selectores y campos de texto
+
+Además de carpetas y elementos que se reproducen, una página puede mostrar controles. Funcionan como una pantalla de ajustes: la página se ejecuta otra vez tras cada cambio y el cursor se queda donde estaba.
+
+```
+show header "Opciones"                                 # un título; el cursor lo salta
+show button "Añadir web" doing add_site                # ejecuta la página add_site y vuelve a mostrar esta
+show check  "Mirar dentro de las páginas" bound deep   # [x] / [ ]  (un ajuste "yes or no")
+show choice "Orden" bound order                        # muestra el valor; OK pasa al siguiente (un ajuste "choice")
+show input  "Nombre" bound name                        # OK abre el teclado (un ajuste text, number o secret)
+```
+
+`bound NOMBRE` es el nombre de una línea `setting` del propio addon, así que el valor se guarda como cualquier otro ajuste. Añade `hidden` a un ajuste que solo usan estos controles para que no salga en el menú de ajustes: `setting sites is text, hidden`.
+
+Una página `doing` se ejecuta como cualquier otra, pero lo que muestra se ignora. Al terminar se vuelve a mostrar la página que estaba en pantalla con los valores nuevos. Para ir a otra página, termínala con:
+
+```
+go to results with query is q          # abre esa página (los argumentos, como en "opening")
+```
+
+## Torrents
+
+Un vídeo puede ser un **enlace magnet** o la dirección (o el archivo) de un **.torrent**: `show video "Título" playing "magnet:?xt=urn:btih:..."`. El reproductor busca los archivos del torrent, pregunta cuál ver si hay varios y lo reproduce mientras se descarga (se ven el progreso y los peers conectados). Lo descargado se borra después, salvo que *Ajustes > Descargas > Conservar lo descargado de los torrents* esté activado; la subida a otros está desactivada mientras no se elija un límite ahí. Reproduce solo contenido que tengas derecho a ver.
+
+## Leer páginas web
+
+`fetch text from URL` da la página como texto. Estas funciones ayudan a sacar cosas de ella:
+
+| Función | Resultado |
+|---|---|
+| `magnets(texto)` | los enlaces magnet del texto, como lista de `{name, magnet, size}` |
+| `links(texto, base)` | los enlaces `<a href>`, como lista de `{url, text}`; las direcciones relativas se completan con `base` |
+| `html_text(texto)` | el texto sin etiquetas y con `&amp;` y similares decodificados |
+| `html_decode(texto)` | solo decodifica `&amp; &lt; &#39;...` |
+| `find_all(texto, regex)` | el primer grupo (o toda la coincidencia) de cada coincidencia de una expresión regular |
+| `format_size(bytes)` | `1.4 GB` |
+
 ## Valores
 
 Números `3`, `2.5`; texto `"hola {nombre}"` (lo que va entre `{}` se evalúa; también valen comillas simples, útiles dentro de `{}`); listas `[1, 2, 3]` (**numeradas desde 1**); registros `{title: "x", year: 2000}`; `true`/`false`; `nothing`. Campos: `item.title`, `lista[1]`, `item["cualquier clave"]`.
