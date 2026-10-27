@@ -97,7 +97,7 @@ show input  "Nombre" bound name                        # OK abre el teclado (un 
 Una página `doing` se ejecuta como cualquier otra, pero lo que muestra se ignora. Al terminar se vuelve a mostrar la página que estaba en pantalla con los valores nuevos. Para ir a otra página, termínala con:
 
 ```
-go to results with query is q          # abre esa página (los argumentos, como en "opening")
+go to results with query is q          # abre esa página (los argumentos, como en "opening"); "go to home" empieza de nuevo desde la primera página
 ```
 
 ## Torrents
@@ -114,7 +114,7 @@ Un vídeo puede ser un **enlace magnet** o la dirección (o el archivo) de un **
 | `links(texto, base)` | los enlaces `<a href>`, como lista de `{url, text}`; las direcciones relativas se completan con `base` |
 | `html_text(texto)` | el texto sin etiquetas y con `&amp;` y similares decodificados |
 | `html_decode(texto)` | solo decodifica `&amp; &lt; &#39;...` |
-| `find_all(texto, regex)` | el primer grupo (o toda la coincidencia) de cada coincidencia de una expresión regular |
+| `find_all(texto, regex)` | el primer grupo (o toda la coincidencia) de cada coincidencia de una expresión regular (no distingue mayúsculas; en este motor `+` y `?` solo valen entre corchetes: escribe `[a-z][a-z]*` en vez de `[a-z]+`) |
 | `format_size(bytes)` | `1.4 GB` |
 | `search_form(texto, base)` | la dirección del formulario de búsqueda de la página con `{q}` donde van las palabras (`""` si no hay; un formulario que se envía por POST da `post:DIRECCIÓN|cuerpo`) |
 | `search_hint(texto, base)` | cuando la página no tiene un formulario legible (la búsqueda la hace JavaScript), una dirección de búsqueda deducida de las rutas que nombra la página (`/buscar/`, `/search/`...), con `{q}` al final |

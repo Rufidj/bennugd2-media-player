@@ -97,7 +97,7 @@ show input  "Name" bound name                          # OK opens the keyboard (
 A `doing` page runs like any other page, but what it shows is ignored. When it ends, the page that was on screen is shown again with the new values. To go somewhere else instead, end it with:
 
 ```
-go to results with query is q          # opens that page (arguments as in "opening")
+go to results with query is q          # opens that page (arguments as in "opening"); "go to home" starts again from the first page
 ```
 
 ## Torrents
@@ -114,7 +114,7 @@ A video can be a **magnet link** or the address (or file) of a **.torrent**: `sh
 | `links(text, base)` | the `<a href>` links, as a list of `{url, text}`; relative addresses are completed with `base` |
 | `html_text(text)` | the text without tags, with `&amp;` and friends decoded |
 | `html_decode(text)` | only decodes `&amp; &lt; &#39;...` |
-| `find_all(text, regex)` | the first group (or the whole match) of every match of a regular expression |
+| `find_all(text, regex)` | the first group (or the whole match) of every match of a regular expression (case does not matter; in this engine `+` and `?` only work inside brackets, so write `[a-z][a-z]*` instead of `[a-z]+`) |
 | `format_size(bytes)` | `1.4 GB` |
 | `search_form(text, base)` | the address of the page's search form with `{q}` where the words go (`""` if there is none; a form sent by POST gives `post:ADDRESS|body`) |
 | `search_hint(text, base)` | when the page has no readable form (JavaScript does the search), a search address guessed from the paths the page names (`/buscar/`, `/search/`...), with `{q}` at the end |

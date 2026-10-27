@@ -314,7 +314,10 @@ begin
     rc = addon_run(page, args);
     if (rc == 1) return 0; end
     gp = ad_goto_page; ga = ad_goto_args;
-    if (rc == 0 && gp != "") addon_goto(gp, ga); return 0; end
+    if (rc == 0 && gp != "")
+        if (gp == "home") as_depth = 0; end                       // "go to home" empieza de nuevo: no se apilan paginas
+        addon_goto(gp, ga); return 0;
+    end
     addon_refresh();
 end
 

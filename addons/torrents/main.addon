@@ -24,7 +24,7 @@ page home:
         show button "Search" doing do_search info "Looks for torrents in the {length(list)} website(s) you added."
         show header "Your websites"
         for each site in list:
-            show button "{site.name}" doing site_options with name is site.name info "{site.url}  (press to remove it)"
+            show folder "{site.name}" opening site_options with name is site.name info "{site.url}  (open it to remove it)"
     show button "Add a website" doing add_site info "Just the address of the website (example: https://example.org). The player finds out how its search works."
     show header "Options"
     show check "Look inside the result pages when the list has no magnet links" bound deep
@@ -51,6 +51,8 @@ page add_site:
                 set template to found_form
         on error:
             fail "Could not open {address}: {error}"
+        if template is address:
+            set template to learn_search(address)
     set list to site_list()
     add {name: clean(host_of(address)), url: template} to list
     save_sites(list)
@@ -193,6 +195,37 @@ define search_targets(url):
     add "{o}/?q=\{q\}" to out
     add "{o}/usearch/\{q\}/" to out
     give back out
+
+# Nothing was found by itself: the user can paste the address of a results page of that website (search any word there and copy the
+# address) and say which word it was; the rest of the address is then the pattern, whatever the path or the parameter are called
+define learn_search(address):
+    set sample_url to address
+    if address is origin_of(address) or address is "{origin_of(address)}/":
+        ask "The search of this website was not found. Search any word on it and paste here the address of the results page (leave empty to try the usual places)" into sample_url default ""
+        if trim(sample_url) is empty:
+            give back address
+    ask "Which word did you search for?" into sample_word default ""
+    if trim(sample_word) is empty:
+        give back address
+    set made to make_template(trim(sample_url), trim(sample_word))
+    if made is empty:
+        fail "That word is not in the address."
+    give back made
+
+# the address of a results page with the searched word replaced by \{q\} ("" if the word is not in it)
+define make_template(url, word):
+    if url contains word:
+        give back replace(url, word, "\{q\}")
+    set coded to url_encode(word)
+    if url contains coded:
+        give back replace(url, coded, "\{q\}")
+    set plus to replace(coded, "%20", "+")
+    if url contains plus:
+        give back replace(url, plus, "\{q\}")
+    set dashed to replace(lower(word), " ", "-")
+    if lower(url) contains dashed:
+        give back replace(lower(url), dashed, "\{q\}")
+    give back ""
 
 # keeps the address that worked for a website, so the next search goes straight to it
 define remember(name, target):

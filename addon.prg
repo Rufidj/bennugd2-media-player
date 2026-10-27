@@ -2084,6 +2084,15 @@ private string lo, kw[8], path; int i, p, st, en, c, k;
 begin
     kw[0] = "/buscar/"; kw[1] = "/search/"; kw[2] = "/busqueda/"; kw[3] = "/busca/"; kw[4] = "/find/"; kw[5] = "/resultados/"; kw[6] = "/s/"; kw[7] = "/query/";
     lo = lcase(t);
+    // 1) el codigo de la pagina une una ruta con lo que se escribe, se llame como se llame:  "/lo-que-sea/" + palabra   o   "/buscar?q=" + palabra
+    // (en este motor de expresiones el + y el ? solo valen entre corchetes: "x+" se escribe "xx*")
+    p = regex("[\"'](/[a-z0-9_.~-][a-z0-9_.~-]*/[a-z0-9_.~-][a-z0-9_.~-]*/)[\"'][ ]*[+]", t);
+    if (p >= 0 && regex_reg[1] != "") return ad_abs_url(base, regex_reg[1]) + "{q}"; end
+    p = regex("[\"'](/[a-z0-9_.~-][a-z0-9_.~-]*/)[\"'][ ]*[+]", t);
+    if (p >= 0 && regex_reg[1] != "") return ad_abs_url(base, regex_reg[1]) + "{q}"; end
+    p = regex("[\"'](/[a-z0-9_./~-]*[?][a-z0-9_][a-z0-9_]*=)[\"'][ ]*[+]", t);
+    if (p >= 0 && regex_reg[1] != "") return ad_abs_url(base, regex_reg[1]) + "{q}"; end
+    // 2) rutas que suelen usarse para buscar
     for (i = 0; i < 8; i++)
         p = find(lo, kw[i]);
         while (p >= 0)
