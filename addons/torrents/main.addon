@@ -189,6 +189,7 @@ define search_targets(url):
     add "{o}/busqueda/\{q\}" to out
     add "{o}/?s=\{q\}" to out
     add "{o}/buscar?q=\{q\}" to out
+    add "{o}/busqueda?q=\{q\}" to out
     add "{o}/search?q=\{q\}" to out
     add "{o}/search.php?q=\{q\}" to out
     add "{o}/index.php?search=\{q\}" to out
