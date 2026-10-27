@@ -141,6 +141,8 @@ global
     int    n_entries;
     int    sel, top_row;
     string row_label[ROWS];
+    string row_full[ROWS]; int row_over[ROWS], row_pmax[ROWS];       // textos largos de la lista: completo, si no caben y cuantos caracteres hay que desplazarlos
+    int mq_t, mq_sel = -1, mq_top = -1, mq_ver = -1, mq_tf;           // desplazamiento de los textos largos
     int    txt_row[ROWS];             // textos de las filas en modo lista
     int    txt_cell[ROWS];            // textos de las casillas en modo cuadricula (se crean una sola vez: crear y borrar textos cada vez agotaba los 128 identificadores)
     int    txt_path, txt_hint, txt_empty;
@@ -239,6 +241,7 @@ declare function string fmt_size(int b) end
 declare function string cut_text(string t, int n) end
 declare function string fit_text(string t, int maxw) end
 declare function read_dir() end
+declare function reselect(int i) end
 declare function toast(string t) end
 declare function string tail_fit(string t, int maxw) end
 declare function string utf8_chop(string t) end
@@ -1012,17 +1015,17 @@ begin
             r = pt_row(ptr_x, ptr_y);
             if (r >= 0) sel = r; end
         end
-        if (ptr_wheel != 0)
-            old = sel; sel -= ptr_wheel * (grid_mode == 1 ? GRID_COLS : 3);
-            if (sel < 0) sel = 0; end
+        if (ptr_wheel != 0)                                   // la rueda desplaza la lista; la seleccion pasa a la fila que queda bajo el raton
+            top_row -= ptr_wheel * (grid_mode == 1 ? GRID_COLS : 3);
+            r = grid_mode == 1 ? ((n_entries - ROWS + GRID_COLS - 1) / GRID_COLS) * GRID_COLS : n_entries - ROWS;
+            if (r < 0) r = 0; end
+            if (top_row > r) top_row = r; end
+            if (top_row < 0) top_row = 0; end
+            r = pt_row(ptr_x, ptr_y);
+            if (r >= 0) sel = r; end
+            if (sel < top_row) sel = top_row; end
+            if (sel >= top_row + ROWS) sel = top_row + ROWS - 1; end
             if (sel >= n_entries) sel = n_entries - 1; end
-            if (grid_mode == 1)
-                if (sel < top_row) top_row = (sel / GRID_COLS) * GRID_COLS; end
-                if (sel >= top_row + ROWS) top_row = ((sel - ROWS) / GRID_COLS + 1) * GRID_COLS; end
-            else
-                if (sel < top_row) top_row = sel; end
-                if (sel >= top_row + ROWS) top_row = sel - ROWS + 1; end
-            end
         end
         if (ptr_click)
             r = pt_row(ptr_x, ptr_y);
@@ -1188,7 +1191,17 @@ begin
     end
 end
 
+// selecciona una entrada por su nombre (y la deja a la vista)
+function select_name(string nm)
+private int i;
+begin
+    for (i = 0; i < n_entries; i++)
+        if (entries[i] == nm) reselect(i); if (sel >= ROWS) top_row = sel - ROWS / 2; if (top_row > n_entries - ROWS) top_row = n_entries - ROWS; end if (top_row < 0) top_row = 0; end end return 0; end
+    end
+end
+
 function go_up()
+private string nm;
 begin
     if (xt_screen == 1)
         if (xt_level > 0) xt_level--; xt_job = 0; xt_open_level(xt_level); return 0; end
@@ -1205,7 +1218,8 @@ begin
     elseif (store_dir != "" && (cur_dir == lists_dir || cur_dir == downloads_dir))
         cur_dir = home_dir; read_dir();
     elseif (parent_of(cur_dir) != cur_dir)
-        cur_dir = parent_of(cur_dir); read_dir();
+        nm = base_name(cur_dir); cur_dir = parent_of(cur_dir); read_dir();
+        select_name(nm);                                  // al subir, la carpeta de la que se viene queda seleccionada
     end
 end
 
@@ -1234,6 +1248,44 @@ begin
         toast(tr("t_notmedia"));
     else
         start_video(entry_path(i));
+    end
+end
+
+// los caracteres de t a partir del n-esimo (UTF-8)
+function string utf8_skip(string t, int n)
+private int i, c, l;
+begin
+    l = len(t); c = 0;
+    for (i = 0; i < l; i++)
+        if ((asc(substr(t, i, 1)) & 192) != 128)
+            if (c == n) return substr(t, i); end
+            c++;
+        end
+    end
+    return "";
+end
+
+// Los textos largos de la lista (una cabecera de un addon, un nombre de archivo...) se desplazan despacio para poder leerlos enteros:
+// la fila seleccionada y las cabeceras, que no se pueden seleccionar
+function mq_update()
+private int i, rowi, p;  string t;
+begin
+    if (mq_sel != sel || mq_top != top_row || mq_ver != dir_ver || mq_tf != tab_focus)
+        for (i = 0; i < ROWS; i++) if (row_over[i]) row_label[i] = fit_text(row_full[i], 590); end end
+        mq_sel = sel; mq_top = top_row; mq_ver = dir_ver; mq_tf = tab_focus; mq_t = 0;
+    end
+    mq_t++;
+    for (i = 0; i < ROWS; i++)
+        rowi = top_row + i;
+        if (rowi < n_entries && row_over[i] && ((rowi == sel && !tab_focus) || (entry_dir[rowi] == K_AWIDGET && entry_akind[rowi] == 8)))
+            p = (mq_t - 50) / 5;                                  // 50 fotogramas quieto y luego un caracter cada 5
+            if (p < 0) p = 0; end
+            if (p > row_pmax[i]) p = row_pmax[i]; end
+            if (mq_t > 50 + row_pmax[i] * 5 + 90) mq_t = 0; end    // al llegar al final se queda un momento y empieza otra vez
+            t = utf8_skip(row_full[i], p);
+            while (len(t) > 1 && tw(t) > 590) t = utf8_chop(t); end
+            if (t != row_label[i]) row_label[i] = t; end
+        end
     end
 end
 
@@ -3156,16 +3208,22 @@ begin
                 rowi = top_row + i;
                 if (rowi < n_entries)
                     row_label[i] = disp_name(rowi);
+                    row_full[i] = row_label[i]; row_over[i] = 0;
+                    if (grid_mode != 1 && fnt_t > 0 && tw(row_full[i]) > 590)
+                        row_over[i] = 1; row_pmax[i] = 0;
+                        while (row_pmax[i] < len(row_full[i]) && tw(utf8_skip(row_full[i], row_pmax[i])) > 590) row_pmax[i]++; end
+                    end
                     row_label[i] = fit_text(row_label[i], grid_mode == 1 ? 150 : 590);
                     if (getenv("MP_DEBUG") != "" && grid_mode == 1) say("GRIDLBL [" + i + "] '" + row_label[i] + "' tw=" + tw(row_label[i]) + " orig='" + disp_name(rowi) + "'"); end
                 else
-                    row_label[i] = "";
+                    row_label[i] = ""; row_over[i] = 0;
                 end
             end
-            grid_last = grid_mode;
+            grid_last = grid_mode; mq_t = 0;
 
             lbl_ver = dir_ver; lbl_top = top_row;
         end
+        if (grid_mode != 1) mq_update(); end
         k = cur_section();
         if (k >= 0)
             draw_tabs(k);
