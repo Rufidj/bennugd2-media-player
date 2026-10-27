@@ -1,0 +1,397 @@
+From 31b81452fb7c455a796c0a7c90e12748583520be Mon Sep 17 00:00:00 2001
+From: Rufidj <divaio19@gmail.com>
+Date: Tue, 27 Oct 2026 12:13:08 +0100
+Subject: [PATCH] libmod_video: conexiones entrantes de peers (puerto de
+ escucha), apertura del puerto en el router por UPnP o NAT-PMP, no conectar
+ consigo mismo y registrar los tiempos de espera
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ modules/libmod_video/torrent.c | 292 +++++++++++++++++++++++++++++++--
+ 1 file changed, 280 insertions(+), 12 deletions(-)
+
+diff --git a/modules/libmod_video/torrent.c b/modules/libmod_video/torrent.c
+index f5d213ae..ad00885e 100644
+--- a/modules/libmod_video/torrent.c
++++ b/modules/libmod_video/torrent.c
+@@ -254,6 +254,10 @@ static uint8_t g_pid[20];
+ static unsigned g_gen_counter;
+ static int64_t g_ahead = ( int64_t ) 192 << 20;           /* how far past the play position we download (the player raises it when it needs a bigger buffer) */
+ static int g_extra_on = 1, g_dht_on = 1;                    /* options: public trackers added to every torrent, and DHT */
++static sock_t g_psock = BAD_SOCK; static int g_pport, g_xport; static uint32_t g_myip;         /* incoming peers: listening socket, its port, the port announced (after NAT mapping), our public address */
++typedef struct { int used; sock_t s; uint8_t buf[68]; int n; uint32_t t0, ip; uint16_t port; } Pend;          /* a connection that came in and has not sent its handshake yet */
++static Pend g_pend[16];
++static volatile int g_nat_ok;
+ static sock_t g_dsock = BAD_SOCK; static uint8_t g_nid[20];
+ static uint32_t g_boot_ip[16]; static uint16_t g_boot_port[16]; static int g_nboot;
+ 
+@@ -527,7 +531,7 @@ static void peer_free( Torrent * t, int i ) {
+ 
+ static void send_ext_handshake( Torrent * t, Peer * p ) {
+     char d[200]; uint8_t m[220]; int n;
+-    n = snprintf( d, sizeof d, "d1:md11:ut_metadatai2ee1:pi%de1:v14:BennuGD2 Playere", g_port );
++    n = snprintf( d, sizeof d, "d1:md11:ut_metadatai2ee1:pi%de1:v14:BennuGD2 Playere", g_xport ? g_xport : g_port );
+     (void) t;
+     m[0] = 0; memcpy( m + 1, d, n );
+     send_msg( p, 20, m, n + 1 );
+@@ -644,6 +648,7 @@ static void peer_input( Torrent * t, Peer * p ) {
+         if ( p->st == 1 ) {                                              /* handshake: 68 bytes */
+             if ( p->rlen < 68 ) return;
+             DBG( "handshake from peer, %zu bytes", p->rlen );
++            if ( p->rlen >= 68 && !memcmp( p->rbuf + 48, g_pid, 20 ) ) { int ci = p->cand; peer_close( t, p ); if ( ci >= 0 && ci < MAX_CAND ) t->cand[ci].next_ms = now_ms() + 3600000; return; }      /* that is us */
+             if ( p->rbuf[0] != 19 || memcmp( p->rbuf + 1, "BitTorrent protocol", 19 ) || memcmp( p->rbuf + 28, t->ih, 20 ) ) { peer_close( t, p ); return; }
+             { uint8_t ext = p->rbuf[25] & 0x10;
+               memmove( p->rbuf, p->rbuf + 68, p->rlen - 68 ); p->rlen -= 68; p->st = 2;
+@@ -682,7 +687,7 @@ static void peer_connect( Torrent * t, int ci ) {
+ 
+ static void add_candidate( Torrent * t, uint32_t ip, uint16_t port ) {
+     int i, free_i = -1;
+-    if ( !port || !ip ) return;
++    if ( !port || !ip || ( g_myip && ip == g_myip ) ) return;                  /* never ourselves */
+     for ( i = 0; i < t->ncand; i++ ) if ( t->cand[i].used && t->cand[i].ip == ip && t->cand[i].port == port ) return;
+     for ( i = 0; i < t->ncand; i++ ) if ( !t->cand[i].used ) { free_i = i; break; }
+     if ( free_i < 0 ) { if ( t->ncand >= MAX_CAND ) return; free_i = t->ncand++; }
+@@ -718,10 +723,11 @@ static void url_escape_bytes( const uint8_t * in, int n, char * out ) {
+ static void announce_http( Torrent * t, const char * url, uint8_t ih[20], int64_t left ) {
+     char ihe[70], pie[70], full[2400]; uint8_t * body = NULL; size_t n = 0; BNode b; const char * sep = strchr( url, '?' ) ? "&" : "?";
+     url_escape_bytes( ih, 20, ihe ); url_escape_bytes( g_pid, 20, pie );
+-    snprintf( full, sizeof full, "%s%sinfo_hash=%s&peer_id=%s&port=%d&uploaded=0&downloaded=0&left=%lld&compact=1&numwant=60", url, sep, ihe, pie, g_port, ( long long ) left );
++    snprintf( full, sizeof full, "%s%sinfo_hash=%s&peer_id=%s&port=%d&uploaded=0&downloaded=0&left=%lld&compact=1&numwant=60", url, sep, ihe, pie, g_xport ? g_xport : g_port, ( long long ) left );
+     if ( http_get( full, &body, &n, 1 << 20, 15 ) != 0 ) { tlog( "tracker %s: no answer (failed to connect or error status)", url ); return; }
+     if ( bparse( body, body + n, &b, 0 ) && b.t == 'd' ) {
+-        BNode * peers = bget( &b, "peers" ), * fail = bget( &b, "failure reason" ); int before;
++        BNode * peers = bget( &b, "peers" ), * fail = bget( &b, "failure reason" ), * ext = bget( &b, "external ip" ); int before;
++        if ( ext && ext->t == 's' && ext->n == 4 ) memcpy( &g_myip, ext->s, 4 );
+         LOCK(); before = t->ncand; parse_peers( t, peers ); tlog( "tracker %s: %d new peers%s%.*s", url, t->ncand - before, fail && fail->t == 's' ? ", refused: " : "", fail && fail->t == 's' ? ( int ) fail->n : 0, fail && fail->t == 's' ? ( const char * ) fail->s : "" ); UNLOCK();
+     } else tlog( "tracker %s: answer is not a valid reply (%zu bytes)", url, n );
+     bfree( &b ); free( body );
+@@ -748,7 +754,7 @@ static void announce_udp( Torrent * t, const char * url, uint8_t ih[20], int64_t
+         cid = ( ( uint64_t ) be32r( resp + 8 ) << 32 ) | be32r( resp + 12 );
+         be64w( req, cid ); be32w( req + 8, 1 ); be32w( req + 12, tid + 1 ); memcpy( req + 16, ih, 20 ); memcpy( req + 36, g_pid, 20 );
+         be64w( req + 56, 0 ); be64w( req + 64, ( uint64_t ) left ); be64w( req + 72, 0 ); be32w( req + 80, 2 ); be32w( req + 84, 0 );
+-        be32w( req + 88, ( uint32_t ) rand() ); be32w( req + 92, 60 ); req[96] = ( uint8_t ) ( g_port >> 8 ); req[97] = ( uint8_t ) g_port;
++        be32w( req + 88, ( uint32_t ) rand() ); be32w( req + 92, 60 ); req[96] = ( uint8_t ) ( ( g_xport ? g_xport : g_port ) >> 8 ); req[97] = ( uint8_t ) ( g_xport ? g_xport : g_port );
+         sendto( s, ( const char * ) req, 98, 0, res->ai_addr, ( int ) res->ai_addrlen );
+         r = ( int ) recv( s, ( char * ) resp, sizeof resp, 0 );
+         act = r >= 8 ? be32r( resp ) : 99;
+@@ -940,7 +946,7 @@ static void tor_tick( Torrent * t ) {
+         Peer * p = t->peers[i];
+         if ( !p ) continue;
+         if ( p->st < 0 ) { peer_free( t, i ); continue; }
+-        if ( p->st == 0 && now - p->t_conn > 8000 ) { peer_close( t, p ); continue; }
++        if ( p->st == 0 && now - p->t_conn > 8000 ) { static int ntm; if ( ntm++ < 20 ) tlog( "peer %u.%u.%u.%u:%d: no answer (timeout)", p->ip & 255, ( p->ip >> 8 ) & 255, ( p->ip >> 16 ) & 255, p->ip >> 24, p->port ); peer_close( t, p ); continue; }
+         if ( p->st == 1 && now - p->t_conn > 15000 ) { peer_close( t, p ); continue; }
+         if ( p->st == 2 && now - p->t_rx > 90000 ) { peer_close( t, p ); continue; }
+         if ( p->st == 2 && p->nreq > 0 && now - p->rt[0] > 25000 ) {          /* the oldest request is not answered: this peer is of no use now */
+@@ -999,14 +1005,257 @@ static void peer_flush( Torrent * t, Peer * p ) {
+     p->soff = p->slen = 0;
+ }
+ 
++/* ------------------------------------------------------------------------------------------------ incoming peers */
++static void set_nonblock( sock_t c ) {
++#ifdef _WIN32
++    u_long nb = 1; ioctlsocket( c, FIONBIO, &nb );
++#else
++    fcntl( c, F_SETFL, fcntl( c, F_GETFL, 0 ) | O_NONBLOCK );       /* explicit: on BSD an accepted socket inherits the mode, on Linux it does not */
++#endif
++}
++
++static void pend_close( int k ) { if ( g_pend[k].used ) { CLOSESOCK( g_pend[k].s ); g_pend[k].used = 0; } }
++
++static void accept_peers( void ) {
++    int k;
++    for ( k = 0; k < 8; k++ ) {
++        struct sockaddr_in from; socklen_t fl = sizeof from; sock_t c = accept( g_psock, ( struct sockaddr * ) &from, &fl ); int j;
++        if ( c == BAD_SOCK ) return;
++        for ( j = 0; j < 16 && g_pend[j].used; j++ ) ;
++        if ( j == 16 ) { CLOSESOCK( c ); continue; }
++        set_nonblock( c );
++        g_pend[j].used = 1; g_pend[j].s = c; g_pend[j].n = 0; g_pend[j].t0 = now_ms(); g_pend[j].ip = from.sin_addr.s_addr; g_pend[j].port = ntohs( from.sin_port );
++    }
++}
++
++/* the handshake of an incoming connection arrived: find its torrent and let the usual code take over */
++static void pend_read( int k ) {
++    Pend * q = &g_pend[k]; int r, i, j;
++    if ( !q->used ) return;
++    r = ( int ) recv( q->s, ( char * ) q->buf + q->n, 68 - q->n, 0 );
++    if ( r == 0 ) { pend_close( k ); return; }
++    if ( r < 0 ) {
++#ifdef _WIN32
++        if ( SOCKERR != WSAEWOULDBLOCK ) pend_close( k );
++#else
++        if ( errno != EAGAIN && errno != EWOULDBLOCK && errno != EINTR ) pend_close( k );
++#endif
++        return;
++    }
++    q->n += r;
++    if ( q->n < 68 ) return;
++    if ( q->buf[0] != 19 || memcmp( q->buf + 1, "BitTorrent protocol", 19 ) ) { pend_close( k ); return; }
++    for ( i = 0; i < T_MAX; i++ ) {
++        Torrent * t = &g_t[i];
++        if ( !t->used || t->dying || t->loading || t->state == 2 || memcmp( t->ih, q->buf + 28, 20 ) ) continue;
++        for ( j = 0; j < MAX_PEERS && t->peers[j]; j++ ) ;
++        if ( j == MAX_PEERS ) break;
++        { Peer * p = ( Peer * ) calloc( 1, sizeof *p ); uint8_t h[68];
++          p->sock = q->s; p->ip = q->ip; p->port = q->port; p->st = 1; p->choked = 1; p->am_choking = 1; p->cand = -1; p->t_conn = p->t_rx = p->t_tx = now_ms();
++          p->rcap = 8192; p->rbuf = ( uint8_t * ) malloc( p->rcap ); memcpy( p->rbuf, q->buf, 68 ); p->rlen = 68;
++          h[0] = 19; memcpy( h + 1, "BitTorrent protocol", 19 ); memset( h + 20, 0, 8 ); h[25] = 0x10; memcpy( h + 28, t->ih, 20 ); memcpy( h + 48, g_pid, 20 );
++          send_raw( p, h, 68 );
++          t->peers[j] = p; q->used = 0;                                    /* the socket now belongs to the peer */
++          tlog( "incoming peer %u.%u.%u.%u:%d", p->ip & 255, ( p->ip >> 8 ) & 255, ( p->ip >> 16 ) & 255, p->ip >> 24, p->port );
++          peer_input( t, p ); }
++        return;
++    }
++    pend_close( k );
++}
++
++/* ------------------------------------------------------------------------------------------------ opening the port in the router (UPnP, then NAT-PMP) */
++static char g_gw_host[64], g_ctl_host[64], g_ctl_path[256], g_ctl_type[100]; static int g_ctl_port;
++
++/* a small blocking http exchange (the router is on the local network) */
++static int nat_http( const char * host, int port, const char * req, size_t rl, char * resp, size_t cap ) {
++    struct addrinfo hints, * res = NULL; char ps[16]; sock_t c; int n = 0; struct pollfd pf; uint32_t t0 = now_ms(); struct timeval tv;
++    memset( &hints, 0, sizeof hints ); hints.ai_family = AF_INET; hints.ai_socktype = SOCK_STREAM; snprintf( ps, sizeof ps, "%d", port );
++    if ( getaddrinfo( host, ps, &hints, &res ) != 0 || !res ) return -1;
++    c = socket( AF_INET, SOCK_STREAM, 0 );
++    if ( c == BAD_SOCK ) { freeaddrinfo( res ); return -1; }
++    set_nonblock( c );
++    if ( connect( c, res->ai_addr, ( int ) res->ai_addrlen ) != 0 ) {
++        pf.fd = c; pf.events = POLLOUT; pf.revents = 0;
++        if ( poll( &pf, 1, 3000 ) <= 0 ) { CLOSESOCK( c ); freeaddrinfo( res ); return -1; }
++        { int err = 0; socklen_t el = sizeof err; getsockopt( c, SOL_SOCKET, SO_ERROR, ( char * ) &err, &el ); if ( err ) { CLOSESOCK( c ); freeaddrinfo( res ); return -1; } }
++    }
++    freeaddrinfo( res );
++#ifndef _WIN32
++    fcntl( c, F_SETFL, fcntl( c, F_GETFL, 0 ) & ~O_NONBLOCK );
++#endif
++    tv.tv_sec = 3; tv.tv_usec = 0; setsockopt( c, SOL_SOCKET, SO_RCVTIMEO, ( const char * ) &tv, sizeof tv ); setsockopt( c, SOL_SOCKET, SO_SNDTIMEO, ( const char * ) &tv, sizeof tv );
++    if ( send( c, req, ( int ) rl, MSG_NOSIGNAL ) != ( int ) rl ) { CLOSESOCK( c ); return -1; }
++    while ( n < ( int ) cap - 1 && now_ms() - t0 < 6000 ) { int k = ( int ) recv( c, resp + n, ( int ) cap - 1 - n, 0 ); if ( k <= 0 ) break; n += k; }
++    resp[n] = 0; CLOSESOCK( c );
++    return n;
++}
++
++static const char * find_between( const char * s, const char * a, const char * b, char * out, size_t outn ) {
++    const char * p = strstr( s, a ), * q;
++    if ( !p ) return NULL;
++    p += strlen( a ); q = strstr( p, b );
++    if ( !q || ( size_t ) ( q - p ) >= outn ) return NULL;
++    memcpy( out, p, ( size_t ) ( q - p ) ); out[q - p] = 0;
++    return q;
++}
++
++static int upnp_soap( const char * action, const char * args, char * resp, size_t cap ) {
++    char body[1400], req[2200]; int bl, rl;
++    bl = snprintf( body, sizeof body, "<?xml version=\"1.0\"?><s:Envelope xmlns:s=\"http://schemas.xmlsoap.org/soap/envelope/\" s:encodingStyle=\"http://schemas.xmlsoap.org/soap/encoding/\"><s:Body><u:%s xmlns:u=\"%s\">%s</u:%s></s:Body></s:Envelope>", action, g_ctl_type, args, action );
++    rl = snprintf( req, sizeof req, "POST %s HTTP/1.1\r\nHOST: %s:%d\r\nContent-Type: text/xml; charset=\"utf-8\"\r\nSOAPAction: \"%s#%s\"\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", g_ctl_path, g_ctl_host, g_ctl_port, g_ctl_type, action, bl, body );
++    return nat_http( g_ctl_host, g_ctl_port, req, ( size_t ) rl, resp, cap );
++}
++
++static int nat_local_ip( char * out, size_t n ) {
++    sock_t s = socket( AF_INET, SOCK_DGRAM, 0 ); struct sockaddr_in to, me; socklen_t l = sizeof me;
++    out[0] = 0;
++    if ( s == BAD_SOCK ) return 0;
++    memset( &to, 0, sizeof to ); to.sin_family = AF_INET; to.sin_port = htons( 53 ); inet_pton( AF_INET, "192.0.2.1", &to.sin_addr );
++    if ( connect( s, ( struct sockaddr * ) &to, sizeof to ) == 0 && getsockname( s, ( struct sockaddr * ) &me, &l ) == 0 ) inet_ntop( AF_INET, &me.sin_addr, out, ( socklen_t ) n );
++    CLOSESOCK( s );
++    return out[0] != 0;
++}
++
++/* reads the description of one device and looks for its WAN connection service; 1 = found (the control address is stored) */
++static int upnp_try( const char * host, int port, const char * path ) {
++    char req[500], * xml = ( char * ) malloc( 65536 ); int rl, n, i; const char * svc = NULL;
++    static const char * types[] = { "urn:schemas-upnp-org:service:WANIPConnection:2", "urn:schemas-upnp-org:service:WANIPConnection:1", "urn:schemas-upnp-org:service:WANPPPConnection:1", NULL };
++    if ( !xml ) return 0;
++    rl = snprintf( req, sizeof req, "GET %s HTTP/1.1\r\nHOST: %s:%d\r\nConnection: close\r\n\r\n", path, host, port );
++    n = nat_http( host, port, req, ( size_t ) rl, xml, 65536 );
++    if ( n <= 0 ) { free( xml ); return 0; }
++    for ( i = 0; types[i] && !svc; i++ ) { const char * q = strstr( xml, types[i] ); if ( q ) { svc = q; snprintf( g_ctl_type, sizeof g_ctl_type, "%s", types[i] ); } }
++    if ( !svc || !find_between( svc, "<controlURL>", "</controlURL>", g_ctl_path, sizeof g_ctl_path ) ) { free( xml ); return 0; }
++    free( xml );
++    if ( !strncmp( g_ctl_path, "http://", 7 ) ) {
++        const char * h = g_ctl_path + 7; size_t hl = strcspn( h, ":/" ); char tmp[256];
++        memcpy( g_ctl_host, h, hl < 63 ? hl : 63 ); g_ctl_host[hl < 63 ? hl : 63] = 0; h += hl; g_ctl_port = 80;
++        if ( *h == ':' ) { g_ctl_port = atoi( h + 1 ); h += strcspn( h, "/" ); }
++        snprintf( tmp, sizeof tmp, "%s", *h ? h : "/" ); snprintf( g_ctl_path, sizeof g_ctl_path, "%s", tmp );
++    } else {
++        snprintf( g_ctl_host, sizeof g_ctl_host, "%s", host ); g_ctl_port = port;
++        if ( g_ctl_path[0] != '/' ) { char tmp[256]; snprintf( tmp, sizeof tmp, "/%s", g_ctl_path ); snprintf( g_ctl_path, sizeof g_ctl_path, "%s", tmp ); }
++    }
++    snprintf( g_gw_host, sizeof g_gw_host, "%s", host );
++    return 1;
++}
++
++/* SSDP: asks the network for routers; every device that answers is tried until one has a WAN connection service */
++static int upnp_discover( void ) {
++    static const char * st[] = { "urn:schemas-upnp-org:device:InternetGatewayDevice:1", "urn:schemas-upnp-org:device:InternetGatewayDevice:2", "upnp:rootdevice", NULL };
++    sock_t s = socket( AF_INET, SOCK_DGRAM, 0 ); struct sockaddr_in to; char msg[400], buf[2048], loc[300]; int i, k, nloc = 0, tried = 0;
++    struct { char host[64]; int port; char path[256]; int done; } L[12];
++    if ( s == BAD_SOCK ) return 0;
++    set_nonblock( s );
++    memset( &to, 0, sizeof to ); to.sin_family = AF_INET; to.sin_port = htons( 1900 ); inet_pton( AF_INET, "239.255.255.250", &to.sin_addr );
++    for ( i = 0; st[i]; i++ ) {
++        int ml = snprintf( msg, sizeof msg, "M-SEARCH * HTTP/1.1\r\nHOST: 239.255.255.250:1900\r\nMAN: \"ssdp:discover\"\r\nMX: 2\r\nST: %s\r\n\r\n", st[i] );
++        uint32_t t0 = now_ms();
++        sendto( s, msg, ml, 0, ( struct sockaddr * ) &to, sizeof to );
++        while ( now_ms() - t0 < 2200 && nloc < 12 ) {
++            struct pollfd pf; int r; char * q; pf.fd = s; pf.events = POLLIN; pf.revents = 0;
++            if ( poll( &pf, 1, 300 ) <= 0 ) continue;
++            r = ( int ) recv( s, buf, sizeof buf - 1, 0 );
++            if ( r <= 0 ) continue;
++            buf[r] = 0;
++            if ( !find_between( buf, "LOCATION:", "\r\n", loc, sizeof loc ) && !find_between( buf, "Location:", "\r\n", loc, sizeof loc ) && !find_between( buf, "location:", "\r\n", loc, sizeof loc ) ) continue;
++            q = loc; while ( *q == ' ' ) q++;
++            if ( strncmp( q, "http://", 7 ) ) continue;
++            { const char * h = q + 7; size_t hl = strcspn( h, ":/" ); int port = 80, dup = 0; char host[64], path[256];
++              if ( hl >= sizeof host ) continue;
++              memcpy( host, h, hl ); host[hl] = 0; h += hl;
++              if ( *h == ':' ) { port = atoi( h + 1 ); h += strcspn( h, "/" ); }
++              snprintf( path, sizeof path, "%s", *h ? h : "/" );
++              for ( k = 0; k < nloc; k++ ) if ( !strcmp( L[k].host, host ) && L[k].port == port && !strcmp( L[k].path, path ) ) dup = 1;
++              if ( dup ) continue;
++              snprintf( L[nloc].host, sizeof L[nloc].host, "%s", host ); L[nloc].port = port; snprintf( L[nloc].path, sizeof L[nloc].path, "%s", path ); L[nloc].done = 0; nloc++; }
++        }
++        for ( k = 0; k < nloc; k++ ) {                              /* the devices found so far, one by one */
++            if ( L[k].done ) continue;
++            L[k].done = 1; tried++;
++            if ( upnp_try( L[k].host, L[k].port, L[k].path ) ) { CLOSESOCK( s ); tlog( "nat: router found at %s:%d (%d device(s) answered)", L[k].host, L[k].port, nloc ); return 1; }
++        }
++    }
++    CLOSESOCK( s );
++    tlog( "nat: %d UPnP device(s) answered, none is a router with a WAN service (UPnP may be off in the router)", nloc );
++    return 0;
++}
++
++static int upnp_map( int port, const char * local_ip ) {
++    char args[700], resp[3000], ext[64]; int lease;
++    for ( lease = 7200; lease >= 0; lease -= 7200 ) {                  /* some routers only accept permanent leases */
++        snprintf( args, sizeof args, "<NewRemoteHost></NewRemoteHost><NewExternalPort>%d</NewExternalPort><NewProtocol>TCP</NewProtocol><NewInternalPort>%d</NewInternalPort><NewInternalClient>%s</NewInternalClient><NewEnabled>1</NewEnabled><NewPortMappingDescription>BennuGD2 Media Player</NewPortMappingDescription><NewLeaseDuration>%d</NewLeaseDuration>", port, port, local_ip, lease );
++        if ( upnp_soap( "AddPortMapping", args, resp, sizeof resp ) > 0 && !strncmp( resp, "HTTP/1.1 200", 12 ) ) {
++            if ( upnp_soap( "GetExternalIPAddress", "", resp, sizeof resp ) > 0 && find_between( resp, "<NewExternalIPAddress>", "</NewExternalIPAddress>", ext, sizeof ext ) ) {
++                struct in_addr a; if ( inet_pton( AF_INET, ext, &a ) == 1 && a.s_addr ) { g_myip = a.s_addr; tlog( "nat: public address %s", ext ); }
++            }
++            tlog( "nat: UPnP opened TCP port %d (lease %d s)", port, lease );
++            return 1;
++        }
++        { char code[16] = ""; find_between( resp, "<errorCode>", "</errorCode>", code, sizeof code ); tlog( "nat: UPnP refused the mapping (lease %d, error %s)", lease, code[0] ? code : "?" ); if ( strcmp( code, "725" ) ) break; }
++    }
++    return 0;
++}
++
++static int natpmp_map( int port, const char * gw ) {
++    sock_t s = socket( AF_INET, SOCK_DGRAM, 0 ); struct sockaddr_in to; uint8_t req[12], resp[32]; struct pollfd pf; int tries, r;
++    if ( s == BAD_SOCK ) return 0;
++    set_nonblock( s );
++    memset( &to, 0, sizeof to ); to.sin_family = AF_INET; to.sin_port = htons( 5351 ); if ( inet_pton( AF_INET, gw, &to.sin_addr ) != 1 ) { CLOSESOCK( s ); return 0; }
++    memset( req, 0, sizeof req ); req[1] = 2; req[4] = ( uint8_t ) ( port >> 8 ); req[5] = ( uint8_t ) port; req[6] = ( uint8_t ) ( port >> 8 ); req[7] = ( uint8_t ) port; be32w( req + 8, 7200 );
++    for ( tries = 0; tries < 3; tries++ ) {
++        sendto( s, ( const char * ) req, 12, 0, ( struct sockaddr * ) &to, sizeof to );
++        pf.fd = s; pf.events = POLLIN; pf.revents = 0;
++        if ( poll( &pf, 1, 1000 ) > 0 && ( r = ( int ) recv( s, ( char * ) resp, sizeof resp, 0 ) ) >= 16 && resp[1] == 130 ) {
++            CLOSESOCK( s );
++            if ( resp[2] == 0 && resp[3] == 0 ) { int ext = ( resp[10] << 8 ) | resp[11]; if ( ext > 0 ) g_xport = ext; tlog( "nat: NAT-PMP opened TCP port %d (external %d)", port, ext ); return 1; }
++            tlog( "nat: NAT-PMP refused (code %d)", ( resp[2] << 8 ) | resp[3] ); return 0;
++        }
++    }
++    CLOSESOCK( s ); tlog( "nat: no NAT-PMP answer from %s", gw );
++    return 0;
++}
++
++static void nat_unmap( void ) {
++    char args[300], resp[2000];
++    if ( g_nat_ok != 1 || !g_ctl_type[0] ) return;
++    snprintf( args, sizeof args, "<NewRemoteHost></NewRemoteHost><NewExternalPort>%d</NewExternalPort><NewProtocol>TCP</NewProtocol>", g_pport );
++    upnp_soap( "DeletePortMapping", args, resp, sizeof resp );
++    g_nat_ok = 0;
++}
++
++static int nat_thread( void * arg ) {
++    char ip[64], gw[64]; int n, k; ( void ) arg;
++    if ( g_pport <= 0 ) return 0;
++    if ( !nat_local_ip( ip, sizeof ip ) ) { tlog( "nat: no local address" ); return 0; }
++    for ( k = 0; k < 2 && g_run; k++ ) {                                 /* it is repeated every 30 minutes because the lease is 2 hours */
++        g_nat_ok = 0;
++        if ( upnp_discover() && upnp_map( g_pport, ip ) ) g_nat_ok = 1;
++        else {
++            if ( g_gw_host[0] ) snprintf( gw, sizeof gw, "%s", g_gw_host );
++            else { snprintf( gw, sizeof gw, "%s", ip ); { char * d = strrchr( gw, '.' ); if ( d ) strcpy( d, ".1" ); } }
++            if ( natpmp_map( g_pport, gw ) ) g_nat_ok = 2;
++        }
++        if ( !g_nat_ok ) { tlog( "nat: the port could not be opened (an open port in the router would let more peers connect)" ); return 0; }
++        for ( n = 0; n < 1800 && g_run; n++ ) SDL_Delay( 1000 );
++        if ( !g_run ) break;
++        k = 0;
++    }
++    return 0;
++}
++
+ static int engine_thread( void * arg ) {
+-    struct pollfd fds[T_MAX * MAX_PEERS + 1]; Torrent * ft[T_MAX * MAX_PEERS + 1]; int fi[T_MAX * MAX_PEERS + 1]; int dpos;
++    struct pollfd fds[T_MAX * MAX_PEERS + 20]; Torrent * ft[T_MAX * MAX_PEERS + 20]; int fi[T_MAX * MAX_PEERS + 20];
+     ( void ) arg;
+     LOCK();
+     while ( g_run ) {
+         int n = 0, i, j, r; uint32_t now;
+-        dpos = -1;
+-        if ( g_dsock != BAD_SOCK ) { fds[n].fd = g_dsock; fds[n].events = POLLIN; fds[n].revents = 0; ft[n] = NULL; fi[n] = 0; dpos = n; n++; }
++        if ( g_dsock != BAD_SOCK ) { fds[n].fd = g_dsock; fds[n].events = POLLIN; fds[n].revents = 0; ft[n] = NULL; fi[n] = -1; n++; }
++        if ( g_psock != BAD_SOCK ) { fds[n].fd = g_psock; fds[n].events = POLLIN; fds[n].revents = 0; ft[n] = NULL; fi[n] = -2; n++; }
++        for ( j = 0; j < 16; j++ ) if ( g_pend[j].used ) {
++            if ( now_ms() - g_pend[j].t0 > 10000 ) { pend_close( j ); continue; }
++            fds[n].fd = g_pend[j].s; fds[n].events = POLLIN; fds[n].revents = 0; ft[n] = NULL; fi[n] = 100 + j; n++;
++        }
+         for ( i = 0; i < T_MAX; i++ ) {
+             Torrent * t = &g_t[i];
+             if ( !t->used ) continue;
+@@ -1023,10 +1272,15 @@ static int engine_thread( void * arg ) {
+         r = n ? poll( fds, n, 100 ) : ( SDL_Delay( 100 ), 0 );
+         LOCK();
+         if ( r > 0 ) {
+-            if ( dpos >= 0 && ( fds[dpos].revents & POLLIN ) ) dht_recv();
+             for ( i = 0; i < n; i++ ) {
+                 Torrent * t = ft[i]; Peer * p;
+-                if ( !t ) continue;
++                if ( !t ) {
++                    int code = fi[i];
++                    if ( code == -1 ) { if ( fds[i].revents & POLLIN ) dht_recv(); }
++                    else if ( code == -2 ) { if ( fds[i].revents & POLLIN ) accept_peers(); }
++                    else if ( g_pend[code - 100].used && g_pend[code - 100].s == fds[i].fd && ( fds[i].revents & ( POLLIN | POLLERR | POLLHUP ) ) ) pend_read( code - 100 );
++                    continue;
++                }
+                 p = t->peers[fi[i]];
+                 if ( !t->used || !p || p->st < 0 || p->sock != fds[i].fd ) continue;
+                 if ( fds[i].revents & ( POLLERR | POLLHUP | POLLNVAL ) && !( fds[i].revents & POLLIN ) ) { peer_close( t, p ); continue; }
+@@ -1349,7 +1603,18 @@ int torrent_init( const char * cache_dir ) {
+           if ( bind( ds, ( struct sockaddr * ) &da, sizeof da ) == 0 ) { g_dsock = ds; tlog( "dht: UDP socket ready" ); SDL_Thread * bt = SDL_CreateThread( dht_boot_thread, "dhtboot", NULL ); if ( bt ) SDL_DetachThread( bt ); }
+           else { tlog( "dht: cannot bind a UDP socket (errno %d)", errno ); CLOSESOCK( ds ); }
+       } else tlog( "dht: cannot create a UDP socket (errno %d)", errno ); }
++    { sock_t ps = socket( AF_INET, SOCK_STREAM, 0 ); struct sockaddr_in pa; int one2 = 1, bp = 0, q;
++      if ( ps != BAD_SOCK ) {
++          setsockopt( ps, SOL_SOCKET, SO_REUSEADDR, ( const char * ) &one2, sizeof one2 ); set_nonblock( ps );
++          for ( q = 0; q < 21 && !bp; q++ ) {
++              memset( &pa, 0, sizeof pa ); pa.sin_family = AF_INET; pa.sin_addr.s_addr = htonl( INADDR_ANY ); pa.sin_port = htons( ( unsigned short ) ( q < 20 ? 6881 + q : 0 ) );
++              if ( bind( ps, ( struct sockaddr * ) &pa, sizeof pa ) == 0 ) { socklen_t pl = sizeof pa; getsockname( ps, ( struct sockaddr * ) &pa, &pl ); bp = ntohs( pa.sin_port ); }
++          }
++          if ( bp && listen( ps, 16 ) == 0 ) { g_psock = ps; g_pport = bp; g_xport = bp; tlog( "peer port %d is listening", bp ); }
++          else { tlog( "cannot listen for incoming peers (errno %d)", errno ); CLOSESOCK( ps ); }
++      } }
+     g_eng_th = SDL_CreateThread( engine_thread, "torengine", NULL );
++    if ( g_psock != BAD_SOCK ) { SDL_Thread * nt = SDL_CreateThread( nat_thread, "nat", NULL ); if ( nt ) SDL_DetachThread( nt ); }
+     g_srv_th = SDL_CreateThread( server_thread, "torserver", NULL );
+     return 0;
+ }
+@@ -1362,6 +1627,9 @@ void torrent_shutdown( void ) {
+     SDL_WaitThread( g_eng_th, NULL ); SDL_WaitThread( g_srv_th, NULL );
+     for ( i = 0; i < T_MAX; i++ ) if ( g_t[i].used ) torrent_free_data( &g_t[i], 0 );
+     if ( g_lsock != BAD_SOCK ) CLOSESOCK( g_lsock );
++    nat_unmap();
+     if ( g_dsock != BAD_SOCK ) CLOSESOCK( g_dsock );
+-    g_lsock = BAD_SOCK; g_dsock = BAD_SOCK; g_port = 0;
++    if ( g_psock != BAD_SOCK ) CLOSESOCK( g_psock );
++    { int k; for ( k = 0; k < 16; k++ ) pend_close( k ); }
++    g_lsock = BAD_SOCK; g_dsock = BAD_SOCK; g_psock = BAD_SOCK; g_port = 0; g_pport = 0; g_xport = 0;
+ }
+-- 
+2.43.0
+
