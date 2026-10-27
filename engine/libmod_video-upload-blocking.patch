@@ -1,0 +1,32 @@
+From 00006edebbf752f1a0b375e181d71d4b4ce667f0 Mon Sep 17 00:00:00 2001
+From: Rufidj <divaio19@gmail.com>
+Date: Tue, 27 Oct 2026 11:22:07 +0100
+Subject: [PATCH] libmod_video: las conexiones aceptadas vuelven a ser
+ bloqueantes (en BSD heredan el modo no bloqueante del socket de escucha: en
+ la PS5 cortaban la subida)
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ modules/libmod_video/upload.c | 6 ++++++
+ 1 file changed, 6 insertions(+)
+
+diff --git a/modules/libmod_video/upload.c b/modules/libmod_video/upload.c
+index 904ca511..255c2a53 100644
+--- a/modules/libmod_video/upload.c
++++ b/modules/libmod_video/upload.c
+@@ -200,6 +200,12 @@ static int accept_thread( void * arg ) {
+         if ( poll( &pf, 1, 300 ) > 0 && ( pf.revents & POLLIN ) ) {
+             sock_t c = accept( aa.s, NULL, NULL ); int busy;
+             if ( c == BAD_SOCK ) continue;
++            /* on BSD systems (the PS5) an accepted socket inherits the non-blocking mode of the listening one: make it blocking */
++#ifdef _WIN32
++            { u_long nb = 0; ioctlsocket( c, FIONBIO, &nb ); }
++#else
++            fcntl( c, F_SETFL, fcntl( c, F_GETFL, 0 ) & ~O_NONBLOCK );
++#endif
+             SDL_LockMutex( g_mu ); busy = g_conns >= MAX_CONN; if ( !busy ) g_conns++; SDL_UnlockMutex( g_mu );
+             if ( busy ) { reply( c, 503, "Busy", "text/plain", "busy", 4 ); CLOSESOCK( c ); continue; }
+             { ConnArg * ca = ( ConnArg * ) malloc( sizeof *ca ); SDL_Thread * th = NULL;
+-- 
+2.43.0
+
