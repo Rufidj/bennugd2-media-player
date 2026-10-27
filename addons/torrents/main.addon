@@ -20,7 +20,15 @@ page home:
     if recent is not empty:
         show folder "Recent links" opening history info "The magnet links and addresses you played before."
     show button "Play a magnet link or the address of a .torrent" doing open_link info "Paste it with the keyboard: it is played and kept in Recent links."
+    set cache_bytes to 0
+    for each f in list_files(data_folder() + "/torrents", "dat"):
+        set cache_bytes to cache_bytes + f.size
+    show button "Clear the torrent cache ({format_size(cache_bytes)})" doing clear_cache_page info "Deletes what the torrents downloaded and kept in {data_folder()}/torrents. It is not possible while a torrent is playing."
     show button "Receive .torrent files from the PC" doing receive_page info "Shows an address and a PIN: open it in the browser of your PC and drop the .torrent files there. They are saved in {data_folder()}/torrent_files."
+
+# ---- the downloaded data of the torrents
+page clear_cache_page:
+    set deleted to clear_torrent_cache()
 
 # ---- receiving files from the PC
 page receive_page:

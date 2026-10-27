@@ -323,3 +323,5 @@ s_ru_hint=完成后请按“停止”
 s_tor_rebuf=正在缓冲
 st_torextra=额外的公共 Tracker(种子)
 st_tordht=DHT:无需 Tracker 查找节点(种子)
+s_tor_skip=按 START 立即开始
+t_tor_cleared=个种子文件已删除

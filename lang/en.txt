@@ -324,3 +324,5 @@ s_ru_hint=Press Stop when you are done
 s_tor_rebuf=Buffering
 st_torextra=Extra public trackers (torrents)
 st_tordht=DHT: find peers without trackers (torrents)
+s_tor_skip=Press START to begin now
+t_tor_cleared=torrent files deleted

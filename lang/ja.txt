@@ -323,3 +323,5 @@ s_ru_hint=終わったら「停止」を押してください
 s_tor_rebuf=バッファリング中
 st_torextra=追加の公開トラッカー(トレント)
 st_tordht=DHT: トラッカーなしでピアを探す(トレント)
+s_tor_skip=STARTで今すぐ再生
+t_tor_cleared=個のトレントファイルを削除しました

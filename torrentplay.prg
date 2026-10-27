@@ -18,6 +18,7 @@ global
     int    set_tor_keep, set_tor_up;     // ajustes: conservar lo descargado; subida (indice)
     int    set_tor_extra = 1, set_tor_dht = 1;                   // ajustes: trackers publicos adicionales y DHT
     int    tor_stall;                    // 1 = el video esta en pausa porque se acabo el colchon (se reanuda solo)
+    int    tor_ema, tor_ahead_mb;        // media de la velocidad de descarga y cuanto se descarga por delante (MB)
     int    tor_fsize;                    // tamano del archivo que se ve
 end
 
@@ -46,7 +47,8 @@ end
 function tor_cleanup()
 begin
     if (tor_h) torrent_remove(tor_h, !set_tor_keep); tor_h = 0; end
-    tor_job = 0; tor_playing = 0; tor_stall = 0;
+    tor_job = 0; tor_playing = 0; tor_stall = 0; tor_ema = 0; tor_ahead_mb = 0;
+    torrent_ahead(192);
     prog_stop();
 end
 
@@ -144,26 +146,59 @@ begin
     end
 end
 
-// Mientras se ve: si el colchon que queda por delante baja de lo que se gasta en unos 3 segundos, se pausa el video y se reanuda solo
-// cuando hay para unos 12 (en vez de ir a tirones). Se calcula con lo que pesa el archivo y lo que dura.
+// Mientras se ve: el colchon que hay que tener por delante depende de la velocidad real de la descarga:
+//  - si baja bastante mas rapido de lo que gasta el video: unos 12 segundos
+//  - si va justo o mas lento: lo que falta para llegar al final sin parar ((lo que gasta el video - lo que baja) x la duracion)
+// Cuando queda menos de lo que se gasta en 3 segundos se pausa y se reanuda solo al llenar el colchon (START empieza ya).
 function tor_watch()
-private int rate, low, high, b, d;
+private int rate, low, high, b, d, dl, need, eta;
 begin
     if (!tor_playing || !tor_h || !vh) return 0; end
     d = vdur();
-    rate = (d > 0 && tor_fsize > 0) ? (int)((tor_fsize / 1000) * 1000 / (d / 1000 + 1)) : 2000000;           // bytes por segundo
-    high = rate * 12; if (high < 12582912) high = 12582912; end if (high > 100663296) high = 100663296; end
+    rate = (d > 0 && tor_fsize > 0) ? (int)((tor_fsize / 1000) * 1000 / (d / 1000 + 1)) : 2000000;           // bytes por segundo del video
+    dl = torrent_rate(tor_h);
+    if (tor_ema == 0) tor_ema = dl; end
+    tor_ema += (dl - tor_ema) / 90;                                                                          // media de unos 1,5 s
+    high = rate * 12; if (high < 12582912) high = 12582912; end
+    if (d > 0 && tor_fsize > 0 && tor_ema < rate * 14 / 10)
+        need = rate - tor_ema; if (need < 0) need = 0; end
+        need = (int)((need / 1024) * (d / 1000) * 11 / 10) * 1024;                                              // lo que falta para llegar al final
+        if (need > high) high = need; end
+    end
+    if (tor_fsize > 0 && high > tor_fsize / 10 * 9) high = tor_fsize / 10 * 9; end
+    if (high > 4294967296) high = 4294967296; end
+    if (getenv("MP_TOR_HIGH") != "") high = atoi(getenv("MP_TOR_HIGH")); end                               // solo pruebas
     low = rate * 3; if (low < 4194304) low = 4194304; end if (low > high / 2) low = high / 2; end
-    if (getenv("MP_TOR_HIGH") != "") high = atoi(getenv("MP_TOR_HIGH")); low = high / 2; end                    // solo pruebas
+    if (high / 1048576 + 64 != tor_ahead_mb) tor_ahead_mb = high / 1048576 + 64; torrent_ahead(tor_ahead_mb); end   // el motor descarga por delante lo que haga falta
     b = (int)torrent_buffered(tor_h);
     if (tor_stall)
         if (video_is_playing(vh)) tor_stall = 0;                              // se reanudo a mano
         elseif (b >= high || torrent_percent(tor_h) >= 99) video_pause(vh, 0); tor_stall = 0;
-        else s_toast = tr("s_tor_rebuf") + " " + (b * 100 / high) + " %   " + (torrent_rate(tor_h) / 1024) + " KB/s"; toast_t = 6;
+        else
+            eta = dl > 0 ? (high - b) / dl : 0;
+            s_toast = tr("s_tor_rebuf") + " " + (b * 100 / high) + " %   " + (dl / 1024) + " KB/s" + (eta > 1 ? "   ~" + (eta >= 90 ? (eta / 60) + " min" : eta + " s") : "") + "   -   " + tr("s_tor_skip"); toast_t = 6;
         end
     elseif (video_is_playing(vh) && b < low && torrent_percent(tor_h) < 98)
         video_pause(vh, 1); tor_stall = 1;
     end
+end
+
+// borra lo que se descargo de los torrents (los archivos .dat de la carpeta torrents): se llama desde un addon
+function int tor_clear_cache()
+private int dh, n; int tot; string nm, dir;
+begin
+    if (tor_h || tor_job) toast(tr("t_ru_busy")); return -1; end                               // hay un torrent en marcha
+    dir = store_dir != "" ? join_path(store_dir, "torrents") : join_path(cd(), "torrents");
+    dh = diropen(join_path(dir, "*"));
+    if (!dh) toast("0 " + tr("t_tor_cleared")); return 0; end
+    nm = dirread(dh); n = 0; tot = 0;
+    while (nm != "")
+        if (len(nm) == 44 && lcase(ext_of(nm)) == "dat") tot += fileinfo.size; if (fremove(join_path(dir, nm)) == 0) n++; end end        // solo los de 40 letras hexadecimales + .dat
+        nm = dirread(dh);
+    end
+    dirclose(dh);
+    toast(n + " " + tr("t_tor_cleared") + " (" + fmt_size(tot) + ")");
+    return n;
 end
 
 // texto con la velocidad y los peers, para mostrar mientras se ve

@@ -1749,6 +1749,7 @@ begin
 end
 
 // ---- funciones integradas
+declare function int tor_clear_cache() end
 declare function string ad_b64(string s) end
 declare function string ad_urlenc(string s) end
 declare function string ad_hex_digit(int n) end
@@ -2238,6 +2239,7 @@ begin
     elseif (f == "data_folder") return ad_str(store_dir);
     elseif (f == "make_folder") mkdir(ad_text(a0)); return 0;
     elseif (f == "receive_files") ru_pending = ad_text(a0); return 0;
+    elseif (f == "clear_torrent_cache") return ad_num(tor_clear_cache());
     elseif (f == "magnets") return ad_magnets(ad_text(a0));
     elseif (f == "links") return ad_links(ad_text(a0), argc > 1 ? ad_text(a1) : "");
     elseif (f == "html_text") return ad_str(ad_html_text(ad_text(a0)));

@@ -190,7 +190,7 @@ global
     string s_mtitle, s_mopt[10], s_mhint, s_kbtitle, s_kbin, s_kbrow[5], s_kbs[6];
     int txt_mtitle, txt_mopt[10], txt_mhint, txt_kbin, txt_kbrow[5], txt_kbs[6];
     // idioma y aspecto
-    string lang_cur = "es"; string lang_k[320]; string lang_v[320]; int lang_n, lang_ver;
+    string lang_cur = "es"; string lang_k[480]; string lang_v[480]; int lang_n, lang_ver;
     int skin = 1;                                 // 0 clasico, 1 PlayStation
     int g_bg_ps, g_wave[3], g_pill, g_sym[4];
     int hint_key = -1, hint_n, hint_ic[6], hint_icx[6]; string s_h[6]; int txt_h[6];
@@ -1414,7 +1414,7 @@ begin
     fh = fopen("lang/" + code + ".txt", O_READ);
     if (!fh) return 0; end
     lang_n = 0;
-    while (!feof(fh) && lang_n < 320)
+    while (!feof(fh) && lang_n < 480)
         ln = fgets(fh);
         p = find(ln, "=");
         if (p > 0 && substr(ln, 0, 1) != "#")

@@ -12,3 +12,5 @@ Copy them to {data_folder()}/torrent_files => Cópialos a {data_folder()}/torren
 Magnet link or address of a .torrent => Enlace magnet o dirección de un .torrent
 Receive .torrent files from the PC => Recibir archivos .torrent del PC
 Shows an address and a PIN: open it in the browser of your PC and drop the .torrent files there. They are saved in {data_folder()}/torrent_files. => Muestra una dirección y un PIN: ábrela en el navegador de tu PC y suelta ahí los archivos .torrent. Se guardan en {data_folder()}/torrent_files.
+Clear the torrent cache ({format_size(cache_bytes)}) => Borrar la caché de torrents ({format_size(cache_bytes)})
+Deletes what the torrents downloaded and kept in {data_folder()}/torrents. It is not possible while a torrent is playing. => Borra lo que descargaron los torrents y se guardó en {data_folder()}/torrents. No se puede mientras se reproduce un torrent.
