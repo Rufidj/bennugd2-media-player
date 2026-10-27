@@ -103,6 +103,9 @@ else
   echo "   no hay DLL de terceros: indica WIN_DEPS o WINBASE" >&2; exit 1
 fi
 
+# el runtime recien compilado (bgdi, bgdc y modulos) sustituye al del paquete base; solo lo que ya traia el paquete
+for f in "$WIN"/*.dll "$WIN"/*.exe; do [ -f "$STAGE/$(basename "$f")" ] && cp "$f" "$STAGE/"; done
+
 # el modulo de video con el reloj de video corregido (si hay paquete de FFmpeg para recompilarlo)
 if [ -n "$FF" ] && [ -d "$ENGINE/modules/libmod_video" ]; then
   echo "   recompilando libmod_video.dll para Windows..."
