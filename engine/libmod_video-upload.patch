@@ -1,0 +1,399 @@
+From 1299b7227af6ad01c1ef67a3e6aa0f576633578d Mon Sep 17 00:00:00 2001
+From: Rufidj <divaio19@gmail.com>
+Date: Tue, 27 Oct 2026 11:11:12 +0100
+Subject: [PATCH] libmod_video: recibir archivos desde otro ordenador por una
+ pagina web (servidor con PIN, sin pisar archivos, nombres seguros) y
+ funciones UPLOAD_*
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+---
+ modules/libmod_video/libmod_video.c         |  15 ++
+ modules/libmod_video/libmod_video.h         |   9 +
+ modules/libmod_video/libmod_video_exports.h |   9 +
+ modules/libmod_video/upload.c               | 261 ++++++++++++++++++++
+ modules/libmod_video/upload.h               |  29 +++
+ 5 files changed, 323 insertions(+)
+ create mode 100644 modules/libmod_video/upload.c
+ create mode 100644 modules/libmod_video/upload.h
+
+diff --git a/modules/libmod_video/libmod_video.c b/modules/libmod_video/libmod_video.c
+index 9dabb943..abf654e7 100644
+--- a/modules/libmod_video/libmod_video.c
++++ b/modules/libmod_video/libmod_video.c
+@@ -54,6 +54,7 @@
+ 
+ #include "libmod_video.h"
+ #include "torrent.h"
++#include "upload.h"
+ #include "libmod_video_hwdec.h"
+ #include <time.h>
+ #include <pthread.h>
+@@ -1779,6 +1780,7 @@ void __bgdexport( libmod_video, module_initialize )() {
+ 
+ void __bgdexport( libmod_video, module_finalize )() {
+     torrent_shutdown();
++    upload_stop();
+     for ( int i = 1; i <= MAX_VIDEOS; i++ ) if ( g_vid[i].used ) vid_free( &g_vid[i] );
+     zombie_tick( 1 );
+     zimg_tick( 1 );
+@@ -2508,4 +2510,17 @@ int64_t libmod_video_torrent_ready( INSTANCE * my, int64_t * params ) { return t
+ int64_t libmod_video_torrent_downloaded( INSTANCE * my, int64_t * params ) { return torrent_downloaded( ( int ) params[0] ); }
+ int64_t libmod_video_torrent_upload_limit( INSTANCE * my, int64_t * params ) { torrent_set_upload_limit( ( int ) params[0] ); return 0; }
+ 
++/* ---- receive files from another computer through a web page (see upload.h) ---- */
++int64_t libmod_video_upload_start( INSTANCE * my, int64_t * params ) {
++    int r = upload_start( string_get( params[0] ), ( int ) params[1], string_get( params[2] ) );
++    string_discard( params[0] ); string_discard( params[2] ); return r;
++}
++int64_t libmod_video_upload_stop( INSTANCE * my, int64_t * params ) { upload_stop(); return 0; }
++int64_t libmod_video_upload_files( INSTANCE * my, int64_t * params ) { return upload_file_count(); }
++int64_t libmod_video_upload_bytes( INSTANCE * my, int64_t * params ) { return upload_total_bytes(); }
++int64_t libmod_video_upload_percent( INSTANCE * my, int64_t * params ) { return upload_percent(); }
++int64_t libmod_video_upload_current( INSTANCE * my, int64_t * params ) { return tor_str( upload_current() ); }
++int64_t libmod_video_upload_ip( INSTANCE * my, int64_t * params ) { return tor_str( upload_local_ip() ); }
++int64_t libmod_video_upload_error( INSTANCE * my, int64_t * params ) { return tor_str( upload_last_error() ); }
++
+ #include "libmod_video_exports.h"
+diff --git a/modules/libmod_video/libmod_video.h b/modules/libmod_video/libmod_video.h
+index 45b06911..5cf467f3 100644
+--- a/modules/libmod_video/libmod_video.h
++++ b/modules/libmod_video/libmod_video.h
+@@ -129,4 +129,13 @@ extern int64_t libmod_video_torrent_ready( INSTANCE * my, int64_t * params );
+ extern int64_t libmod_video_torrent_downloaded( INSTANCE * my, int64_t * params );
+ extern int64_t libmod_video_torrent_upload_limit( INSTANCE * my, int64_t * params );
+ 
++extern int64_t libmod_video_upload_start( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_upload_stop( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_upload_files( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_upload_bytes( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_upload_percent( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_upload_current( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_upload_ip( INSTANCE * my, int64_t * params );
++extern int64_t libmod_video_upload_error( INSTANCE * my, int64_t * params );
++
+ #endif
+diff --git a/modules/libmod_video/libmod_video_exports.h b/modules/libmod_video/libmod_video_exports.h
+index 82c6cc2d..e2eddab4 100644
+--- a/modules/libmod_video/libmod_video_exports.h
++++ b/modules/libmod_video/libmod_video_exports.h
+@@ -84,6 +84,15 @@ DLSYSFUNCS __bgdexport( libmod_video, functions_exports )[] = {
+     FUNC( "TORRENT_DOWNLOADED"   , "I"  , TYPE_INT   , libmod_video_torrent_downloaded ),
+     FUNC( "TORRENT_UPLOAD_LIMIT" , "I"  , TYPE_INT   , libmod_video_torrent_upload_limit ),
+ 
++    FUNC( "UPLOAD_START"         , "SIS", TYPE_INT   , libmod_video_upload_start   ),
++    FUNC( "UPLOAD_STOP"          , ""   , TYPE_INT   , libmod_video_upload_stop    ),
++    FUNC( "UPLOAD_FILES"         , ""   , TYPE_INT   , libmod_video_upload_files   ),
++    FUNC( "UPLOAD_BYTES"         , ""   , TYPE_INT   , libmod_video_upload_bytes   ),
++    FUNC( "UPLOAD_PERCENT"       , ""   , TYPE_INT   , libmod_video_upload_percent ),
++    FUNC( "UPLOAD_CURRENT"       , ""   , TYPE_STRING, libmod_video_upload_current ),
++    FUNC( "UPLOAD_IP"            , ""   , TYPE_STRING, libmod_video_upload_ip      ),
++    FUNC( "UPLOAD_ERROR"         , ""   , TYPE_STRING, libmod_video_upload_error   ),
++
+     FUNC( 0                   , 0     , 0       , 0                        )
+ };
+ 
+diff --git a/modules/libmod_video/upload.c b/modules/libmod_video/upload.c
+new file mode 100644
+index 00000000..e22b3cbb
+--- /dev/null
++++ b/modules/libmod_video/upload.c
+@@ -0,0 +1,261 @@
++/*
++ *  upload.c - receive files through a web page, see upload.h
++ */
++#include <stdio.h>
++#include <stdlib.h>
++#include <string.h>
++#include <stdint.h>
++#include <errno.h>
++#include <time.h>
++#include <sys/stat.h>
++#include <SDL.h>
++
++#ifdef _WIN32
++#include <winsock2.h>
++#include <ws2tcpip.h>
++#define poll WSAPoll
++#define CLOSESOCK closesocket
++typedef SOCKET sock_t;
++#define BAD_SOCK INVALID_SOCKET
++#else
++#include <unistd.h>
++#include <poll.h>
++#include <sys/socket.h>
++#include <netinet/in.h>
++#include <arpa/inet.h>
++#include <netdb.h>
++#define CLOSESOCK close
++typedef int sock_t;
++#define BAD_SOCK (-1)
++#endif
++
++#include "upload.h"
++
++#ifndef MSG_NOSIGNAL
++#define MSG_NOSIGNAL 0
++#endif
++
++#define MAX_CONN 6
++#define CHUNK 262144
++
++static SDL_mutex * g_mu;
++static volatile int g_run, g_conns;
++static sock_t g_lsock = BAD_SOCK;
++static SDL_Thread * g_th;
++static char g_folder[1024], g_pin[32], g_cur[256], g_err[200], g_ip[64];
++static int g_files, g_pct = -1;
++static int64_t g_bytes;
++
++static const char PAGE[] =
++"<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\">"
++"<title>Media Player</title><style>"
++"body{margin:0;font-family:system-ui,sans-serif;background:#0b1530;color:#e8eefc;display:flex;flex-direction:column;align-items:center}"
++"h1{font-weight:500;margin:28px 12px 4px}p{margin:4px 12px;color:#9fb2d8;text-align:center}"
++"#pin{font-size:28px;width:130px;text-align:center;letter-spacing:6px;margin:14px;padding:8px;border-radius:8px;border:1px solid #3b5ba5;background:#12224a;color:#fff}"
++"#drop{width:min(560px,90vw);height:170px;border:2px dashed #4a6bc0;border-radius:14px;display:flex;align-items:center;justify-content:center;"
++"text-align:center;margin:12px;cursor:pointer;background:#101c3e}#drop.over{background:#1b3070}"
++".f{width:min(560px,90vw);margin:6px;background:#12224a;border-radius:8px;padding:8px 12px;box-sizing:border-box;font-size:14px}"
++".b{height:6px;background:#1f3470;border-radius:3px;margin-top:6px}.b i{display:block;height:6px;background:#5aa9ff;border-radius:3px;width:0}"
++".ok{color:#7be29a}.er{color:#ff8a8a}</style></head><body>"
++"<h1>Enviar archivos a la consola</h1><p>Escribe el PIN que ves en la pantalla y suelta aqu&iacute; los archivos.</p>"
++"<input id=\"pin\" maxlength=\"8\" placeholder=\"PIN\" autocomplete=\"off\" inputmode=\"numeric\">"
++"<div id=\"drop\"><div>Arrastra los archivos aqu&iacute;<br>o pulsa para elegirlos</div></div>"
++"<input id=\"sel\" type=\"file\" multiple style=\"display:none\"><div id=\"list\"></div>"
++"<script>"
++"var d=document.getElementById('drop'),s=document.getElementById('sel'),L=document.getElementById('list'),P=document.getElementById('pin');"
++"P.value=localStorage.getItem('pin')||'';"
++"function size(n){return n>1073741824?(n/1073741824).toFixed(1)+' GB':n>1048576?(n/1048576).toFixed(1)+' MB':Math.ceil(n/1024)+' KB'}"
++"var q=[],busy=false;"
++"function next(){if(busy||!q.length)return;busy=true;var f=q.shift(),row=document.createElement('div');row.className='f';"
++"row.innerHTML='<span></span> <small></small><div class=\"b\"><i></i></div>';row.firstChild.textContent=f.name;L.prepend(row);"
++"var x=new XMLHttpRequest();x.open('POST','/upload?name='+encodeURIComponent(f.name));x.setRequestHeader('X-Pin',P.value);"
++"x.upload.onprogress=function(e){if(e.lengthComputable){row.querySelector('i').style.width=(100*e.loaded/e.total)+'%';row.querySelector('small').textContent=size(e.loaded)+' / '+size(e.total)}};"
++"x.onload=function(){busy=false;var sm=row.querySelector('small');if(x.status==200){row.querySelector('i').style.width='100%';sm.className='ok';sm.textContent='listo - '+size(f.size)}"
++"else{sm.className='er';sm.textContent=x.status==403?'PIN incorrecto':('error '+x.status+' '+x.responseText)}next()};"
++"x.onerror=function(){busy=false;row.querySelector('small').className='er';row.querySelector('small').textContent='sin conexi\\u00f3n';next()};x.send(f)}"
++"function add(fs){localStorage.setItem('pin',P.value);for(var i=0;i<fs.length;i++)q.push(fs[i]);next()}"
++"d.onclick=function(){s.click()};s.onchange=function(){add(s.files);s.value=''};"
++"d.ondragover=function(e){e.preventDefault();d.className='over'};d.ondragleave=function(){d.className=''};"
++"d.ondrop=function(e){e.preventDefault();d.className='';add(e.dataTransfer.files)};"
++"</script></body></html>";
++
++static void set_err( const char * m ) { SDL_LockMutex( g_mu ); snprintf( g_err, sizeof g_err, "%s", m ); SDL_UnlockMutex( g_mu ); }
++
++static int send_all( sock_t s, const char * b, size_t n ) {
++    while ( n ) { int k = ( int ) send( s, b, ( int ) n, MSG_NOSIGNAL ); if ( k <= 0 ) return -1; b += k; n -= ( size_t ) k; }
++    return 0;
++}
++
++static void reply( sock_t c, int code, const char * text, const char * type, const char * body, size_t blen ) {
++    char h[300]; int k = snprintf( h, sizeof h, "HTTP/1.1 %d %s\r\nContent-Type: %s\r\nContent-Length: %zu\r\nConnection: close\r\nCache-Control: no-store\r\n\r\n", code, text, type, blen );
++    send_all( c, h, ( size_t ) k ); if ( blen ) send_all( c, body, blen );
++}
++
++static void url_decode( char * s ) {
++    char * w = s;
++    for ( ; *s; s++ ) {
++        if ( *s == '%' && s[1] && s[2] ) {
++            int a = s[1] >= 'A' ? ( s[1] | 32 ) - 'a' + 10 : s[1] - '0', b = s[2] >= 'A' ? ( s[2] | 32 ) - 'a' + 10 : s[2] - '0';
++            if ( a >= 0 && a < 16 && b >= 0 && b < 16 ) { *w++ = ( char ) ( a * 16 + b ); s += 2; continue; }
++        }
++        *w++ = *s == '+' ? ' ' : *s;
++    }
++    *w = 0;
++}
++
++/* a name that is safe to create inside the folder: just a base name, no control characters, nothing that hides it */
++static void safe_name( char * s ) {
++    char * base = s, * p, * w; size_t n;
++    for ( p = s; *p; p++ ) if ( *p == '/' || *p == '\\' ) base = p + 1;
++    memmove( s, base, strlen( base ) + 1 );
++    for ( p = s; *p; p++ ) if ( ( unsigned char ) *p < 32 || *p == ':' || *p == '*' || *p == '?' || *p == '"' || *p == '<' || *p == '>' || *p == '|' ) *p = '_';
++    for ( w = s; *w == '.' || *w == ' '; w++ ) ;
++    memmove( s, w, strlen( w ) + 1 );
++    n = strlen( s ); while ( n && ( s[n - 1] == '.' || s[n - 1] == ' ' ) ) s[--n] = 0;
++    if ( n > 200 ) { s[200] = 0; while ( ( s[199] & 0xC0 ) == 0x80 ) s[199]--; }
++    if ( !s[0] ) strcpy( s, "file" );
++}
++
++static int exists( const char * p ) { struct stat st; return stat( p, &st ) == 0; }
++
++/* "name.ext" -> "name (2).ext" until it is free */
++static void unique_path( const char * folder, const char * name, char * out, size_t outn ) {
++    char stem[512], ext[64] = ""; const char * dot = strrchr( name, '.' ); int k;
++    if ( dot && dot != name && strlen( dot ) <= 12 ) { snprintf( ext, sizeof ext, "%s", dot ); snprintf( stem, sizeof stem, "%.*s", ( int ) ( dot - name ), name ); }
++    else snprintf( stem, sizeof stem, "%s", name );
++    snprintf( out, outn, "%s/%s", folder, name );
++    for ( k = 2; exists( out ) && k < 10000; k++ ) snprintf( out, outn, "%s/%s (%d)%s", folder, stem, k, ext );
++}
++
++static int conn_thread( void * arg ) {
++    sock_t c = ( sock_t ) ( intptr_t ) arg; char head[16384]; int n = 0; char * body_start, * p, * q; struct timeval tv;
++    tv.tv_sec = 30; tv.tv_usec = 0;
++    setsockopt( c, SOL_SOCKET, SO_RCVTIMEO, ( const char * ) &tv, sizeof tv ); setsockopt( c, SOL_SOCKET, SO_SNDTIMEO, ( const char * ) &tv, sizeof tv );
++    while ( n < ( int ) sizeof head - 1 ) {
++        int k = ( int ) recv( c, head + n, sizeof head - 1 - n, 0 );
++        if ( k <= 0 ) goto done;
++        n += k; head[n] = 0;
++        if ( strstr( head, "\r\n\r\n" ) ) break;
++    }
++    body_start = strstr( head, "\r\n\r\n" );
++    if ( !body_start ) { reply( c, 400, "Bad Request", "text/plain", "bad request", 11 ); goto done; }
++    body_start += 4;
++    if ( !strncmp( head, "GET / ", 6 ) || !strncmp( head, "GET /?", 6 ) ) { reply( c, 200, "OK", "text/html; charset=utf-8", PAGE, sizeof PAGE - 1 ); goto done; }
++    if ( !strncmp( head, "POST /upload?name=", 18 ) ) {
++        char name[512], path[1400], part[1450]; long long total = 0, got = 0; char pin[40] = ""; FILE * f; char * buf; int ok = 1; int have = ( int ) ( ( head + n ) - body_start );
++        p = head + 18; q = strchr( p, ' ' ); if ( !q ) { reply( c, 400, "Bad Request", "text/plain", "bad name", 8 ); goto done; }
++        { size_t l = ( size_t ) ( q - p ); if ( l >= sizeof name ) l = sizeof name - 1; memcpy( name, p, l ); name[l] = 0; }
++        url_decode( name ); safe_name( name );
++        p = strstr( head, "\r\nX-Pin:" ); if ( !p ) p = strstr( head, "\r\nx-pin:" );
++        if ( p ) { p += 8; while ( *p == ' ' ) p++; { size_t l = strcspn( p, "\r\n" ); if ( l >= sizeof pin ) l = sizeof pin - 1; memcpy( pin, p, l ); pin[l] = 0; } }
++        if ( strcmp( pin, g_pin ) ) { reply( c, 403, "Forbidden", "text/plain", "pin", 3 ); goto done; }
++        p = strstr( head, "\r\nContent-Length:" ); if ( !p ) p = strstr( head, "\r\ncontent-length:" );
++        if ( !p ) { reply( c, 411, "Length Required", "text/plain", "length", 6 ); goto done; }
++        total = atoll( p + 17 );
++        if ( total < 0 ) { reply( c, 400, "Bad Request", "text/plain", "length", 6 ); goto done; }
++        unique_path( g_folder, name, path, sizeof path );
++        snprintf( part, sizeof part, "%s.part", path );
++        f = fopen( part, "wb" );
++        if ( !f ) { set_err( "cannot write in the folder" ); reply( c, 500, "Error", "text/plain", "cannot write", 12 ); goto done; }
++        buf = ( char * ) malloc( CHUNK );
++        SDL_LockMutex( g_mu ); snprintf( g_cur, sizeof g_cur, "%s", strrchr( path, '/' ) ? strrchr( path, '/' ) + 1 : path ); g_pct = 0; SDL_UnlockMutex( g_mu );
++        if ( have > total ) have = ( int ) total;
++        if ( have > 0 ) { if ( fwrite( body_start, 1, ( size_t ) have, f ) != ( size_t ) have ) ok = 0; got += have; SDL_LockMutex( g_mu ); g_bytes += have; SDL_UnlockMutex( g_mu ); }
++        while ( ok && buf && got < total && g_run ) {
++            long long want = total - got < CHUNK ? total - got : CHUNK; int k = ( int ) recv( c, buf, ( int ) want, 0 );
++            if ( k <= 0 ) { ok = 0; break; }
++            if ( fwrite( buf, 1, ( size_t ) k, f ) != ( size_t ) k ) { set_err( "write failed (is the disk full?)" ); ok = 0; break; }
++            got += k;
++            SDL_LockMutex( g_mu ); g_bytes += k; g_pct = total ? ( int ) ( got * 100 / total ) : 100; SDL_UnlockMutex( g_mu );
++        }
++        free( buf );
++        if ( fclose( f ) != 0 ) ok = 0;
++        if ( ok && got == total && rename( part, path ) == 0 ) {
++            SDL_LockMutex( g_mu ); g_files++; g_pct = -1; g_cur[0] = 0; SDL_UnlockMutex( g_mu );
++            reply( c, 200, "OK", "text/plain", "ok", 2 );
++        } else {
++            remove( part );
++            SDL_LockMutex( g_mu ); g_pct = -1; g_cur[0] = 0; SDL_UnlockMutex( g_mu );
++            reply( c, 507, "Insufficient Storage", "text/plain", "failed", 6 );
++        }
++        goto done;
++    }
++    reply( c, 404, "Not Found", "text/plain", "not found", 9 );
++done:
++    CLOSESOCK( c );
++    SDL_LockMutex( g_mu ); g_conns--; SDL_UnlockMutex( g_mu );
++    return 0;
++}
++
++static int accept_thread( void * arg ) {
++    ( void ) arg;
++    while ( g_run ) {
++        struct pollfd pf; pf.fd = g_lsock; pf.events = POLLIN; pf.revents = 0;
++        if ( poll( &pf, 1, 300 ) > 0 ) {
++            sock_t c = accept( g_lsock, NULL, NULL ); int busy;
++            if ( c == BAD_SOCK ) continue;
++            SDL_LockMutex( g_mu ); busy = g_conns >= MAX_CONN; if ( !busy ) g_conns++; SDL_UnlockMutex( g_mu );
++            if ( busy ) { reply( c, 503, "Busy", "text/plain", "busy", 4 ); CLOSESOCK( c ); continue; }
++            { SDL_Thread * th = SDL_CreateThread( conn_thread, "upload", ( void * ) ( intptr_t ) c );
++              if ( th ) SDL_DetachThread( th ); else { CLOSESOCK( c ); SDL_LockMutex( g_mu ); g_conns--; SDL_UnlockMutex( g_mu ); } }
++        }
++    }
++    return 0;
++}
++
++int upload_start( const char * folder, int port, const char * pin ) {
++    struct sockaddr_in sa; int i, one = 1, bound = 0;
++    if ( g_run ) return -1;
++    if ( !g_mu ) g_mu = SDL_CreateMutex();
++#ifdef _WIN32
++    { WSADATA w; WSAStartup( MAKEWORD( 2, 2 ), &w ); }
++#endif
++    if ( !folder || !*folder || !pin || !*pin ) return -2;
++    snprintf( g_folder, sizeof g_folder, "%s", folder );
++    { size_t n = strlen( g_folder ); while ( n > 1 && g_folder[n - 1] == '/' ) g_folder[--n] = 0; }
++    snprintf( g_pin, sizeof g_pin, "%s", pin );
++    g_files = 0; g_bytes = 0; g_pct = -1; g_cur[0] = 0; g_err[0] = 0; g_conns = 0;
++    g_lsock = socket( AF_INET, SOCK_STREAM, 0 );
++    if ( g_lsock == BAD_SOCK ) { set_err( "no socket" ); return -3; }
++    setsockopt( g_lsock, SOL_SOCKET, SO_REUSEADDR, ( const char * ) &one, sizeof one );
++    for ( i = 0; i < 20 && !bound; i++ ) {
++        memset( &sa, 0, sizeof sa ); sa.sin_family = AF_INET; sa.sin_addr.s_addr = htonl( INADDR_ANY ); sa.sin_port = htons( ( unsigned short ) ( port + i ) );
++        if ( bind( g_lsock, ( struct sockaddr * ) &sa, sizeof sa ) == 0 ) { bound = port + i; break; }
++    }
++    if ( !bound || listen( g_lsock, 8 ) != 0 ) { CLOSESOCK( g_lsock ); g_lsock = BAD_SOCK; set_err( "no free port" ); return -4; }
++    g_run = 1;
++    g_th = SDL_CreateThread( accept_thread, "uploadsrv", NULL );
++    return bound;
++}
++
++void upload_stop( void ) {
++    if ( !g_run ) return;
++    g_run = 0;
++    SDL_WaitThread( g_th, NULL ); g_th = NULL;
++    if ( g_lsock != BAD_SOCK ) CLOSESOCK( g_lsock );
++    g_lsock = BAD_SOCK;
++}
++
++int          upload_running( void ) { return g_run; }
++int          upload_file_count( void ) { return g_files; }
++int64_t      upload_total_bytes( void ) { return g_bytes; }
++int          upload_percent( void ) { return g_pct; }
++const char * upload_current( void ) { return g_cur; }
++const char * upload_last_error( void ) { return g_err; }
++
++/* the interface address a connection to the outside would use (no packet is sent: it is only a UDP "connect") */
++const char * upload_local_ip( void ) {
++    sock_t s; struct sockaddr_in to, me; socklen_t l = sizeof me;
++    g_ip[0] = 0;
++#ifdef _WIN32
++    { WSADATA w; WSAStartup( MAKEWORD( 2, 2 ), &w ); }
++#endif
++    s = socket( AF_INET, SOCK_DGRAM, 0 );
++    if ( s == BAD_SOCK ) return g_ip;
++    memset( &to, 0, sizeof to ); to.sin_family = AF_INET; to.sin_port = htons( 53 ); inet_pton( AF_INET, "192.0.2.1", &to.sin_addr );
++    if ( connect( s, ( struct sockaddr * ) &to, sizeof to ) == 0 && getsockname( s, ( struct sockaddr * ) &me, &l ) == 0 )
++        inet_ntop( AF_INET, &me.sin_addr, g_ip, sizeof g_ip );
++    CLOSESOCK( s );
++    if ( !strncmp( g_ip, "0.", 2 ) ) g_ip[0] = 0;
++    return g_ip;
++}
+diff --git a/modules/libmod_video/upload.h b/modules/libmod_video/upload.h
+new file mode 100644
+index 00000000..7f706933
+--- /dev/null
++++ b/modules/libmod_video/upload.h
+@@ -0,0 +1,29 @@
++/*
++ *  upload.h - receive files from another computer through a web page (part of libmod_video)
++ *
++ *  A small web server runs on its own threads. Opening its address in a browser shows a page where files are
++ *  dropped; each one is sent with a plain POST and written into the chosen folder. A PIN that the person at the
++ *  console reads out protects it: without it nothing is written. Nothing is ever overwritten (the new file gets a
++ *  free name like "video (2).mp4"), only the folder given to upload_start() is written, and the name of every file
++ *  is reduced to a safe base name.
++ */
++#ifndef __UPLOAD_H
++#define __UPLOAD_H
++
++#include <stdint.h>
++
++/* folder: where the files go (must exist). port: first port to try (the next 19 are tried too).
++ * pin: text the browser has to give. Returns the port that is listening, or a negative number. */
++int          upload_start( const char * folder, int port, const char * pin );
++void         upload_stop( void );
++int          upload_running( void );
++
++int          upload_file_count( void );          /* files received since the start */
++int64_t      upload_total_bytes( void );         /* bytes received since the start */
++int          upload_percent( void );             /* of the file being received, 0..100 (-1 = none right now) */
++const char * upload_current( void );             /* its name ("" = none) */
++const char * upload_last_error( void );
++/* address of this computer on the local network ("192.168.1.50"), "" if it cannot be found */
++const char * upload_local_ip( void );
++
++#endif
+-- 
+2.43.0
+

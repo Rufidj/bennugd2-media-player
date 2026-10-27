@@ -41,6 +41,7 @@ global
     // ventana de progreso propia (la barra del sistema de la PS5 no se puede usar desde un titulo)
     int    ov_on, ov_pct, ov_cancel;    // visible / porcentaje 0-100 / con boton de cancelar
     string ov_title = "", s_ovt = "", s_ovp = "", s_ovh = "";
+    string ov_sub = "", ov_btn = "";             // texto bajo la barra (si no, el porcentaje) y texto del boton (si no, "Cancelar")
     int    txt_ovt, txt_ovp, txt_ovh;
     string wid_name = "";                      // ajuste que edita el campo de texto abierto
     string store_seen[64]; int store_seen_n;   // carpetas ya listadas (el addon del usuario manda sobre el que trae el reproductor)
@@ -313,6 +314,7 @@ private int rc; string gp, ga;
 begin
     rc = addon_run(page, args);
     if (rc == 1) return 0; end
+    if (ru_pending != "") gp = ru_pending; ru_pending = ""; ru_begin(gp); return 0; end            // "receive_files(carpeta)"
     gp = ad_goto_page; ga = ad_goto_args;
     if (rc == 0 && gp != "")
         if (gp == "home") as_depth = 0; end                       // "go to home" empieza de nuevo: no se apilan paginas
@@ -915,11 +917,11 @@ begin
         spr_sizex[S_OVFG] = w * 100 / 8; spr_sizey[S_OVFG] = 16 * 100 / 8;
     end
     if (s_ovt != fit_text(ov_title, 760)) s_ovt = fit_text(ov_title, 760); end
-    if (s_ovp != ov_pct + " %") s_ovp = ov_pct + " %"; end
+    if (s_ovp != (ov_sub != "" ? ov_sub : ov_pct + " %")) s_ovp = ov_sub != "" ? ov_sub : ov_pct + " %"; end
     txt_want[txt_ovt] = 8589934336 + (255);
     txt_want[txt_ovp] = 8589934336 + (230);
     if (ov_cancel)
-        if (s_ovh != tr("h_cancel")) s_ovh = tr("h_cancel"); end
+        if (s_ovh != (ov_btn != "" ? ov_btn : tr("h_cancel"))) s_ovh = ov_btn != "" ? ov_btn : tr("h_cancel"); end
         put_sel(S_OVBTN, SW / 2, OV_BY, 280, 50, -23);
         if (!touch_mode) put(S_OVICO, g_sym[1], SW / 2 - tw(s_ovh) / 2 - 22, OV_BY + 2, 80, 255, -26); end
         write_move(txt_ovh, ur(SW / 2 + (touch_mode ? 0 : 22)), ur(OV_BY));

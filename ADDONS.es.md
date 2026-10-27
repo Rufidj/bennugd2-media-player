@@ -119,6 +119,7 @@ Un vídeo puede ser un **enlace magnet** o la dirección (o el archivo) de un **
 | `search_form(texto, base)` | la dirección del formulario de búsqueda de la página con `{q}` donde van las palabras (`""` si no hay; un formulario que se envía por POST da `post:DIRECCIÓN|cuerpo`) |
 | `search_hint(texto, base)` | cuando la página no tiene un formulario legible (la búsqueda la hace JavaScript), una dirección de búsqueda deducida de las rutas que nombra la página (`/buscar/`, `/search/`...), con `{q}` al final |
 | `list_files(carpeta, extensión)` | los archivos de una carpeta como lista de `{name, path, size}` (extensión sin el punto, `""` para todos) |
+| `receive_files(carpeta)` | al terminar la página, el reproductor muestra una dirección y un PIN y recibe los archivos que se sueltan en esa dirección desde el navegador de otro ordenador, guardándolos en la carpeta |
 | `data_folder()` / `make_folder(ruta)` | la carpeta de datos del reproductor / crea una carpeta |
 | `host_of(url)` / `origin_of(url)` | `ejemplo.org` / `https://ejemplo.org` |
 

@@ -679,6 +679,7 @@ global
     // cabecera del addon
     string ad_i_name = "", ad_i_id = "", ad_i_ver = "", ad_i_author = "", ad_i_desc = "";
     string ad_st_name[24]; string ad_st_label[24]; string ad_st_type[24]; string ad_st_def[24]; string ad_st_choices[24]; int ad_st_hidden[24]; int ad_nst;
+    string ru_pending = "";                           // receive_files(carpeta): el reproductor abre la recepcion al terminar la pagina
     string ad_goto_page = "", ad_goto_args = "";      // "go to PAGE": la pagina a la que hay que ir cuando termina la actual
 end
 
@@ -2236,6 +2237,7 @@ begin
     elseif (f == "list_files") return ad_list_files(ad_text(a0), argc > 1 ? ad_text(a1) : "");
     elseif (f == "data_folder") return ad_str(store_dir);
     elseif (f == "make_folder") mkdir(ad_text(a0)); return 0;
+    elseif (f == "receive_files") ru_pending = ad_text(a0); return 0;
     elseif (f == "magnets") return ad_magnets(ad_text(a0));
     elseif (f == "links") return ad_links(ad_text(a0), argc > 1 ? ad_text(a1) : "");
     elseif (f == "html_text") return ad_str(ad_html_text(ad_text(a0)));

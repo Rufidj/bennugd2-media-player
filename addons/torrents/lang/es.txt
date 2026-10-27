@@ -10,3 +10,5 @@ Paste it with the keyboard: it is played and kept in Recent links. => Escríbelo
 No .torrent files found => No hay archivos .torrent
 Copy them to {data_folder()}/torrent_files => Cópialos a {data_folder()}/torrent_files
 Magnet link or address of a .torrent => Enlace magnet o dirección de un .torrent
+Receive .torrent files from the PC => Recibir archivos .torrent del PC
+Shows an address and a PIN: open it in the browser of your PC and drop the .torrent files there. They are saved in {data_folder()}/torrent_files. => Muestra una dirección y un PIN: ábrela en el navegador de tu PC y suelta ahí los archivos .torrent. Se guardan en {data_folder()}/torrent_files.

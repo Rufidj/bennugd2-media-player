@@ -63,7 +63,7 @@ const
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
     MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27; MA_DOWNLOAD = 29; MA_DELETE_DL = 30; MA_DELETE_DL_YES = 31; MA_DL_VIDEO = 32; MA_DL_AUDIO = 33; MA_DL_FMT = 400; MA_UNK_YES = 34; MA_CACHE_YES = 35; MA_ST_BACK = 36;
     MA_FILES = 37; MA_FCOPY = 38; MA_FMOVE = 39; MA_FPASTE = 40; MA_FRENAME = 41; MA_FDEL = 42; MA_FDEL_YES = 43; MA_FNEWDIR = 44; MA_FMARK = 45; MA_FMARKALL = 46; MA_FPROPS = 47;
-    MA_IMG_SLIDE = 48; MA_IMG_INT = 49; MA_IMG_TR = 50; MA_IMG_SHUF = 51; MA_IMG_ROT = 52; MA_IMG_INFO = 53; MA_IMG_CLOSE = 54; MA_TOR_FILE = 60;
+    MA_IMG_SLIDE = 48; MA_IMG_INT = 49; MA_IMG_TR = 50; MA_IMG_SHUF = 51; MA_IMG_ROT = 52; MA_IMG_INFO = 53; MA_IMG_CLOSE = 54; MA_TOR_FILE = 60; MA_FRECV = 55;
     // ajustes: tipo de fila y su identificador
     STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
     ST_LANG = 1; ST_SKIN = 2; ST_PREVIEW = 3; ST_SEEK = 4; ST_VIZ = 5; ST_UNKNOWN = 6; ST_INSTALL = 7; ST_STOREURL = 8; ST_ACCOUNTS = 9;
@@ -289,6 +289,7 @@ include "addon_ui.prg";
 include "fileops.prg";
 include "imageviewer.prg";
 include "torrentplay.prg";
+include "receive.prg";
 
 process main()
 private
@@ -855,6 +856,7 @@ begin
     if (xt_job) xt_step(); return 0; end                          // Xtream: cargando categorías o canales
     if (store_job == 1) store_step(); return 0; end                // instalando: no se atiende al mando
     if (fo_job == 1) fo_step(); return 0; end                      // copiando, moviendo o borrando: solo se puede cancelar
+    if (ru_job) ru_step(); return 0; end                           // recibiendo archivos del PC: solo se puede parar
     if (tor_job > 0) tor_step(); return 0; end                    // preparando un torrent: solo se puede cancelar
     if (dl_job == 1) dl_step(); return 0; end                      // descargando un video: solo se puede cancelar
     if (store_load) store_fetch(); return 0; end                   // la tienda se pide en el fotograma siguiente (primero addons y después listas)
@@ -1881,6 +1883,7 @@ begin
         menu_add(tr("m_props"), MA_FPROPS);
     end
     menu_add(tr("m_newdir"), MA_FNEWDIR);
+    menu_add(tr("m_receive"), MA_FRECV);
     if (entry_is_real(sel)) menu_add(entry_mark[sel] ? tr("m_unmark") : tr("m_mark"), MA_FMARK); end
     menu_add(mark_n > 0 ? tr("m_unmark_all") : tr("m_mark_all"), MA_FMARKALL);
     menu_show(tr("mt_files"));
@@ -2006,6 +2009,7 @@ begin
             end
         end
         case MA_FDEL_YES: fo_start(FO_DEL); end
+        case MA_FRECV: ru_begin(cur_dir); end
         case MA_FPROPS: fo_start(FO_INFO); end
         case MA_FNEWDIR: kb_open(tr("k_newdir"), "", KB_NEWDIR); end
         case MA_FMARK: mark_toggle(sel); if (sel + 1 < n_entries) sel++; if (sel >= top_row + ROWS) top_row++; end end end

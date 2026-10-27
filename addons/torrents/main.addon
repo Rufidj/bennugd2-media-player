@@ -20,6 +20,11 @@ page home:
     if recent is not empty:
         show folder "Recent links" opening history info "The magnet links and addresses you played before."
     show button "Play a magnet link or the address of a .torrent" doing open_link info "Paste it with the keyboard: it is played and kept in Recent links."
+    show button "Receive .torrent files from the PC" doing receive_page info "Shows an address and a PIN: open it in the browser of your PC and drop the .torrent files there. They are saved in {data_folder()}/torrent_files."
+
+# ---- receiving files from the PC
+page receive_page:
+    receive_files(data_folder() + "/torrent_files")
 
 # ---- .torrent files in the folders
 page local:
