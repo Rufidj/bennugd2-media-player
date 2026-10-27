@@ -45,6 +45,8 @@ page add_site:
         try:
             fetch text from address with header "User-Agent" is browser()
             set found_form to search_form(result, address)
+            if found_form is empty:
+                set found_form to search_hint(result, address)
             if found_form is not empty:
                 set template to found_form
         on error:
@@ -88,7 +90,12 @@ page results with query:
         for each target in search_targets(site.url):
             try:
                 set address to replace(target, "\{q\}", url_encode(query))
-                fetch text from address with header "User-Agent" is browser()
+                if target starts with "post:":
+                    set bits to split(slice(target, 6, length(target)), "|")
+                    set address to bits[1]
+                    fetch text from address with method "POST" with body replace(join(slice(bits, 2, length(bits)), "|"), "\{q\}", url_encode(query)) with header "Content-Type" is "application/x-www-form-urlencoded" with header "User-Agent" is browser()
+                otherwise:
+                    fetch text from address with header "User-Agent" is browser()
                 set page_text to result
                 set before to length(found)
                 collect(found, page_text, address, site.name)
@@ -171,10 +178,15 @@ define search_targets(url):
     set out to []
     if url contains "\{q\}":
         add url to out
+        if (not (url starts with "post:")) and url contains "?":
+            add "{slice(url, 1, index_of(url, '?') - 1)}/\{q\}" to out      # the same page with the words in the path
         give back out
     set o to origin_of(url)
     add "{o}/search/\{q\}" to out
+    add "{o}/buscar/\{q\}" to out
+    add "{o}/busqueda/\{q\}" to out
     add "{o}/?s=\{q\}" to out
+    add "{o}/buscar?q=\{q\}" to out
     add "{o}/search?q=\{q\}" to out
     add "{o}/search.php?q=\{q\}" to out
     add "{o}/index.php?search=\{q\}" to out

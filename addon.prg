@@ -2077,6 +2077,33 @@ begin
     return q < 0 ? u : substr(u, 0, q);
 end
 
+// Muchas webs no tienen un formulario que se pueda leer: la busqueda la hace JavaScript y lleva a una direccion como /buscar/palabra.
+// Se mira si la pagina (enlaces o codigo) nombra una ruta de busqueda y se devuelve la direccion con {q} ("" si no hay pistas)
+function string ad_search_hint(string t, string base)
+private string lo, kw[8], path; int i, p, st, en, c, k;
+begin
+    kw[0] = "/buscar/"; kw[1] = "/search/"; kw[2] = "/busqueda/"; kw[3] = "/busca/"; kw[4] = "/find/"; kw[5] = "/resultados/"; kw[6] = "/s/"; kw[7] = "/query/";
+    lo = lcase(t);
+    for (i = 0; i < 8; i++)
+        p = find(lo, kw[i]);
+        while (p >= 0)
+            st = p;                                                      // el principio de la ruta: hasta una comilla, un espacio, un parentesis...
+            while (st > 0)
+                c = asc(substr(t, st - 1, 1));
+                if (c == 34 || c == 39 || c == 32 || c == 40 || c == 61 || c == 60 || c == 62 || c == 10 || c == 13 || c == 9) break; end
+                st--;
+            end
+            if (substr(t, st, 1) == "/" || substr(t, st, 4) == "http")
+                en = p + len(kw[i]);
+                path = substr(t, st, en - st);
+                if (len(path) < 80 && find(path, "{") < 0 && find(path, "}") < 0) return ad_abs_url(base, path) + "{q}"; end
+            end
+            p = find(lo, kw[i], p + 1);
+        end
+    end
+    return "";
+end
+
 // el formulario de busqueda de una pagina: devuelve la direccion con {q} donde van las palabras ("" si no hay ninguno)
 function string ad_search_form(string t, string base)
 private string lo, ftag, lftag, act, meth, body, lbody, tag, ltag, nm, ty, val, params, qname, qtype, best, url; int p, q, e, ip, iq, score, bestscore;
@@ -2092,7 +2119,7 @@ begin
         body = e < 0 ? substr(t, q + 1) : substr(t, q + 1, e - q - 1); lbody = lcase(body);
         p = q;
         meth = lcase(ad_attr(ftag, lftag, "method"));
-        if (meth == "post") continue; end
+        if (find(lbody, "type=\"password\"") >= 0 || find(lbody, "type='password'") >= 0 || find(lbody, "type=password") >= 0) continue; end    // un formulario de acceso no es una busqueda
         act = ad_attr(ftag, lftag, "action");
         qname = ""; qtype = ""; params = ""; ip = 0;
         while (ip >= 0)
@@ -2116,7 +2143,8 @@ begin
         if (score > bestscore)
             bestscore = score;
             url = ad_abs_url(base, act == "" ? base : act);
-            best = url + (find(url, "?") >= 0 ? "&" : "?") + qname + "={q}" + params;
+            if (meth == "post") best = "post:" + url + "|" + qname + "={q}" + params;                    // se envia por POST: "post:direccion|cuerpo"
+            else best = url + (find(url, "?") >= 0 ? "&" : "?") + qname + "={q}" + params; end
         end
     end
     return best;
@@ -2174,6 +2202,7 @@ begin
         if (v < 0) return 0; end
         return v;
     elseif (f == "search_form") return ad_str(ad_search_form(ad_text(a0), argc > 1 ? ad_text(a1) : ""));
+    elseif (f == "search_hint") return ad_str(ad_search_hint(ad_text(a0), argc > 1 ? ad_text(a1) : ""));
     elseif (f == "host_of") return ad_str(ad_host_of(ad_text(a0)));
     elseif (f == "origin_of") return ad_str(ad_origin_of(ad_text(a0)));
     elseif (f == "magnets") return ad_magnets(ad_text(a0));

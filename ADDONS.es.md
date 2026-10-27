@@ -116,7 +116,8 @@ Un vídeo puede ser un **enlace magnet** o la dirección (o el archivo) de un **
 | `html_decode(texto)` | solo decodifica `&amp; &lt; &#39;...` |
 | `find_all(texto, regex)` | el primer grupo (o toda la coincidencia) de cada coincidencia de una expresión regular |
 | `format_size(bytes)` | `1.4 GB` |
-| `search_form(texto, base)` | la dirección del formulario de búsqueda de la página con `{q}` donde van las palabras (`""` si no hay) |
+| `search_form(texto, base)` | la dirección del formulario de búsqueda de la página con `{q}` donde van las palabras (`""` si no hay; un formulario que se envía por POST da `post:DIRECCIÓN|cuerpo`) |
+| `search_hint(texto, base)` | cuando la página no tiene un formulario legible (la búsqueda la hace JavaScript), una dirección de búsqueda deducida de las rutas que nombra la página (`/buscar/`, `/search/`...), con `{q}` al final |
 | `host_of(url)` / `origin_of(url)` | `ejemplo.org` / `https://ejemplo.org` |
 
 ## Valores
