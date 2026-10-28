@@ -66,7 +66,7 @@ const
     MA_IMG_SLIDE = 48; MA_IMG_INT = 49; MA_IMG_TR = 50; MA_IMG_SHUF = 51; MA_IMG_ROT = 52; MA_IMG_INFO = 53; MA_IMG_CLOSE = 54; MA_TOR_FILE = 60; MA_FRECV = 55; MA_RS_YES = 56; MA_RS_NO = 57; MA_NETDEL = 77; MA_PREP = 75; MA_PSHUF = 76; MA_PSPEED = 70; MA_PSUB = 71; MA_PAV = 72; MA_PAUDIO = 73; MA_PSUBS = 74;
     // ajustes: tipo de fila y su identificador
     STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
-    ST_WINDOW = 26; ST_UPDATES = 27; ST_CHECKNOW = 28; ST_SKININST = 29;
+    ST_WINDOW = 26; ST_UPDATES = 27; ST_CHECKNOW = 28; ST_SKININST = 29; ST_ICONS = 30;
     ST_LANG = 1; ST_SKIN = 2; ST_PREVIEW = 3; ST_SEEK = 4; ST_VIZ = 5; ST_UNKNOWN = 6; ST_INSTALL = 7; ST_STOREURL = 8; ST_ACCOUNTS = 9;
     ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18; ST_HIDDEN = 19; ST_ALLFILES = 20; ST_TORKEEP = 21; ST_TORUP = 22; ST_TOREXTRA = 23; ST_TORDHT = 24; ST_RESUME = 25;
     APP_VERSION = "1.1.1";
@@ -222,6 +222,10 @@ global
     int txc = 8589934336; int txs = 8589934336;   // color de los textos de la interfaz y de la fila elegida (RGB<<8, mas el bit 32 que los distingue de 'sin pedir'); los fija el aspecto
     int skin_loaded = -1;                         // aspecto cuyos graficos estan en memoria
     int g_bg_ps, g_wave[4], g_pill, g_sym[4];
+    int btn_pref;                                 // ajuste Iconos de botones: 0 automatico, 1 teclado, 2 PlayStation, 3 Nintendo, 4 Xbox
+    int btn_set = -1;                             // juego de iconos en uso: 0 teclado, 1 PlayStation, 2 Nintendo, 3 Xbox
+    string bt_n[7];                               // nombre de cada boton en los textos: ok back opt tri l1 r1 start
+    int bt_iw[4];                                 // ancho (logico) de cada icono, con su hueco
     int hint_key = -1, hint_n, hint_ic[6], hint_icx[6]; string s_h[6]; int txt_h[6];
     int sc_f[200], sc_a[200], sc_n;               // entrada guiada para pruebas (MP_SCRIPT)
     string last_sub_raw = "";                    // cache del subtitulo
@@ -526,9 +530,7 @@ begin
     skin_scan();
     skin_load();
     make_cursor();
-    g_sym[0] = map_load("res/sym_cross.png"); g_sym[1] = map_load("res/sym_circle.png");
-    g_sym[2] = map_load("res/sym_triangle.png"); g_sym[3] = map_load("res/sym_square.png");
-    for (i = 0; i < 4; i++) center_set(0, g_sym[i], 36, 36); hires(g_sym[i]); end
+    btn_apply();
 end
 
 // el cursor del raton (res/cursor.png, ya a resolucion real): el punto caliente es la punta de la flecha
@@ -1550,6 +1552,73 @@ begin
     return cur + d;
 end
 
+// ---- iconos de botones segun la plataforma: teclado (PC), PlayStation, Nintendo o Xbox / mando generico (Android)
+function int btn_detect()
+begin
+    if (btn_pref > 0) return btn_pref - 1; end
+    if (is_ps5()) return 1; end
+    if (is_switch()) return 2; end
+    if (getenv("ANDROID_ROOT") != "") return 3; end
+    return 0;
+end
+
+function string str_sub(string t, string a, string b)
+private int p; string r;
+begin
+    p = find(t, a);
+    while (p >= 0)
+        r += substr(t, 0, p) + b;
+        t = substr(t, p + len(a));
+        p = find(t, a);
+    end
+    return r + t;
+end
+
+// cambia {ok} {back} {opt} {tri} {l1} {r1} {start} de los textos por el nombre de ese boton en esta plataforma
+function string btn_fill(string t)
+begin
+    if (find(t, "{") < 0) return t; end
+    t = str_sub(t, "{ok}", bt_n[0]); t = str_sub(t, "{back}", bt_n[1]); t = str_sub(t, "{opt}", bt_n[2]); t = str_sub(t, "{tri}", bt_n[3]);
+    t = str_sub(t, "{l1}", bt_n[4]); t = str_sub(t, "{r1}", bt_n[5]); t = str_sub(t, "{start}", bt_n[6]);
+    return t;
+end
+
+// nombres de los botones en los textos (en PlayStation el cuadrado y el triangulo se dicen con la palabra del idioma:
+// la fuente de mapa de bits de las ayudas del aspecto Clasico no tiene esos simbolos)
+function btn_names()
+begin
+    switch (btn_set)
+        case 1: bt_n[0] = "X"; bt_n[1] = "O"; bt_n[2] = tr("bt_sq"); bt_n[3] = tr("bt_tri"); bt_n[4] = "L1"; bt_n[5] = "R1"; bt_n[6] = "START"; end
+        case 2: bt_n[0] = "A"; bt_n[1] = "B"; bt_n[2] = "X"; bt_n[3] = "Y"; bt_n[4] = "L"; bt_n[5] = "R"; bt_n[6] = "+"; end
+        case 3: bt_n[0] = "A"; bt_n[1] = "B"; bt_n[2] = "X"; bt_n[3] = "Y"; bt_n[4] = "LB"; bt_n[5] = "RB"; bt_n[6] = "Menu"; end
+        default: bt_n[0] = "Enter"; bt_n[1] = "Esc"; bt_n[2] = "M"; bt_n[3] = "S"; bt_n[4] = "N"; bt_n[5] = "P"; bt_n[6] = "Space"; end
+    end
+end
+
+// carga los iconos del juego elegido y los nombres de los botones para los textos
+function btn_apply()
+private int i, ns, w, h; string pf;
+begin
+    ns = btn_detect();
+    if (ns == btn_set) return 0; end
+    if (btn_set >= 0) for (i = 0; i < 4; i++) if (g_sym[i] > 0) map_unload(0, g_sym[i]); end end end
+    btn_set = ns;
+    switch (ns)
+        case 1: pf = "ps"; end
+        case 2: pf = "nx"; end
+        case 3: pf = "xb"; end
+        default: pf = "pc"; end
+    end
+    btn_names();
+    for (i = 0; i < 4; i++)
+        g_sym[i] = map_load("res/btn_" + pf + "_" + i + ".png");
+        w = graphic_info(0, g_sym[i], G_WIDTH); h = graphic_info(0, g_sym[i], G_HEIGHT);
+        center_set(0, g_sym[i], w / 2, h / 2); hires(g_sym[i]);
+        bt_iw[i] = w * 80 / 150 + 6;
+    end
+    hint_key = -1; lang_ver++; lbl_ver = -1; mlbl_ver = -1; kb_dirty = 1;          // rehace las ayudas y los textos con los botones nuevos
+end
+
 // Barra de ayuda con los simbolos de botones de colores. ctx: 1 explorador, 2 menu, 3 teclado
 function hint_set(int ctx)
 private int k, hk, wtot, x0, w;
@@ -1561,23 +1630,23 @@ begin
         switch (ctx)
             case 1: hint_n = 3; hint_ic[0] = 0; s_h[0] = tr("h_open"); hint_ic[1] = 1; s_h[1] = tr("h_back"); hint_ic[2] = 3; s_h[2] = tr("h_options"); end
             case 5: hint_n = 3; hint_ic[0] = 0; s_h[0] = tr("h_install"); hint_ic[1] = 1; s_h[1] = tr("h_back"); hint_ic[2] = 3; s_h[2] = tr("h_options"); end
-            case 6: hint_n = 4; hint_ic[0] = 0; s_h[0] = tr("h_options"); hint_ic[1] = 1; s_h[1] = tr("h_back"); hint_ic[2] = 2; s_h[2] = tr("h_rotate"); s_h[3] = "START " + tr("h_slideshow"); end
+            case 6: hint_n = 4; hint_ic[0] = 0; s_h[0] = tr("h_options"); hint_ic[1] = 1; s_h[1] = tr("h_back"); hint_ic[2] = 2; s_h[2] = tr("h_rotate"); s_h[3] = bt_n[6] + " " + tr("h_slideshow"); end
             case 4: hint_n = 1; hint_ic[0] = 1; s_h[0] = tr("h_back"); end
             case 2: hint_n = 2; hint_ic[0] = 0; s_h[0] = tr("h_choose"); hint_ic[1] = 1; s_h[1] = tr("h_cancel"); end
             default:
                 hint_n = 6;
                 hint_ic[0] = 0; s_h[0] = tr("h_type"); hint_ic[1] = 3; s_h[1] = tr("h_delete"); hint_ic[2] = 2; s_h[2] = tr("h_space");
-                s_h[3] = "L1 " + tr("h_shift"); s_h[4] = "START " + tr("h_accept"); hint_ic[5] = 1; s_h[5] = tr("h_cancel");
+                s_h[3] = bt_n[4] + " " + tr("h_shift"); s_h[4] = bt_n[6] + " " + tr("h_accept"); hint_ic[5] = 1; s_h[5] = tr("h_cancel");
             end
         end
         // en el movil no hay botones de consola: los simbolos sobran
         if (touch_mode) for (k = 0; k < 6; k++) hint_ic[k] = -1; end end
         wtot = 0;
-        for (k = 0; k < hint_n; k++) wtot += (hint_ic[k] >= 0 ? 44 : 0) + tw(s_h[k]) + (k < hint_n - 1 ? 44 : 0); end
+        for (k = 0; k < hint_n; k++) wtot += (hint_ic[k] >= 0 ? bt_iw[hint_ic[k]] : 0) + tw(s_h[k]) + (k < hint_n - 1 ? 44 : 0); end
         x0 = (SW - wtot) / 2;
         for (k = 0; k < hint_n; k++)
-            w = hint_ic[k] >= 0 ? 44 : 0;
-            hint_icx[k] = x0 + 22;
+            w = hint_ic[k] >= 0 ? bt_iw[hint_ic[k]] : 0;
+            hint_icx[k] = x0 + (w - 6) / 2;
             write_move(txt_h[k], ur(x0 + w), ur(HINT_Y));
             x0 += w + tw(s_h[k]) + 44;
         end
@@ -1704,7 +1773,7 @@ function string tr(string k)
 private int i;
 begin
     for (i = 0; i < lang_n; i++)
-        if (lang_k[i] == k) return lang_v[i]; end
+        if (lang_k[i] == k) return btn_fill(lang_v[i]); end
     end
     return k;
 end
@@ -1730,7 +1799,7 @@ begin
         end
     end
     fclose(fh);
-    lang_cur = code; lang_ver++;
+    lang_cur = code; lang_ver++; btn_names();
     // fuerza que los textos ya construidos se rehagan
     lbl_ver = -1; pv_idx = -1; mlbl_ver = -1; kb_dirty = 1; last_sec = -1;
     apply_lang_font();
@@ -1766,6 +1835,7 @@ begin
             k = substr(ln, 0, p); v = substr(ln, p + 1);
             if (k == "lang" && is_lang(v)) lang_cur = v; end
             if (k == "skin") if (v != "" && (v == "0" || atoi(v) > 0)) skin = atoi(v); else skin_pref = v; end end
+            if (k == "icons") btn_pref = atoi(v); if (btn_pref < 0 || btn_pref > 4) btn_pref = 0; end end
             if (k == "pv") set_preview = atoi(v) ? 1 : 0; end
             if (k == "seek") set_seek = atoi(v); if (set_seek < 0 || set_seek > 3) set_seek = 1; end end
             if (k == "unk") set_unknown = atoi(v) ? 1 : 0; end
@@ -1797,6 +1867,7 @@ begin
     if (!fh) return 0; end
     fputs(fh, "lang=" + lang_cur);
     fputs(fh, "skin=" + skin_id());
+    fputs(fh, "icons=" + btn_pref);
     fputs(fh, "pv=" + set_preview);
     fputs(fh, "seek=" + set_seek);
     fputs(fh, "unk=" + set_unknown);
@@ -1854,6 +1925,7 @@ begin
             st_row(n, ST_LANG, STT_CHOICE, tr("st_lang"), tr("lang_name")); n++;
             st_row(n, ST_SKIN, STT_CHOICE, tr("st_skin"), skin_name()); n++;
             st_row(n, ST_SKININST, STT_ACTION, tr("st_skin_install"), ""); n++;
+            st_row(n, ST_ICONS, STT_CHOICE, tr("st_icons"), tr(btn_pref == 0 ? "icons_auto" : (btn_pref == 1 ? "icons_pc" : (btn_pref == 2 ? "icons_ps" : (btn_pref == 3 ? "icons_nx" : "icons_xb"))))); n++;
             if (is_desktop()) st_row(n, ST_WINDOW, STT_CHOICE, tr("st_window"), win_mode == 0 ? tr("st_win0") : (win_mode == 1 ? tr("st_win1") : tr("st_win2"))); n++; end
             st_row(n, ST_VIEW, STT_CHOICE, tr("st_view"), set_view == 0 ? tr("st_view_list") : (set_view == 1 ? tr("st_view_grid") : tr("st_view_auto"))); n++;
             st_row(n, ST_PREVIEW, STT_TOGGLE, tr("st_preview"), st_onoff(set_preview)); n++;
@@ -1911,6 +1983,7 @@ begin
             cfg_save();
         end
         case ST_SKIN: skin_step(d); end
+        case ST_ICONS: btn_pref = (btn_pref + 5 + (d < 0 ? -1 : 1)) % 5; btn_apply(); cfg_save(); st_build(); end
         case ST_WINDOW: win_mode = (win_mode + 3 + d) % 3; cfg_save(); if ((win_mode == 2) != win_full) win_full = (win_mode == 2); screen.fullscreen = win_full; set_mode(RW, RH, win_flags()); end end
         case ST_RESUME: set_resume = !set_resume; cfg_save(); end
         case ST_UPDATES: set_updates = !set_updates; cfg_save(); end

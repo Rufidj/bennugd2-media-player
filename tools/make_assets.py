@@ -350,7 +350,33 @@ def symbol(name, col, kind):
     else:
         dd.rectangle([c-r, c-r, c+r, c+r], outline=col, width=w)
     im.resize((n, n), Image.LANCZOS).save(f"{out}/{name}.png")
-symbol("sym_cross", (110, 160, 255, 255), "cross")
-symbol("sym_circle", (255, 95, 105, 255), "circle")
-symbol("sym_triangle", (70, 215, 170, 255), "triangle")
-symbol("sym_square", (255, 140, 210, 255), "square")
+symbol("btn_ps_0", (110, 160, 255, 255), "cross")
+symbol("btn_ps_1", (255, 95, 105, 255), "circle")
+symbol("btn_ps_2", (70, 215, 170, 255), "triangle")
+symbol("btn_ps_3", (255, 140, 210, 255), "square")
+
+# ---- iconos de botones de cada plataforma: 0 = aceptar, 1 = atras, 2 = triangulo / Y, 3 = cuadrado / X (el orden que usa el reproductor)
+BOLD = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
+def letter_button(name, ch, fill, ink, ring):
+    k = 4; n = 72
+    im = Image.new("RGBA", (n*k, n*k), (0, 0, 0, 0)); dd = ImageDraw.Draw(im)
+    dd.ellipse([3*k, 3*k, (n-3)*k, (n-3)*k], fill=fill, outline=ring, width=3*k)
+    f = ImageFont.truetype(BOLD, 40*k); b = dd.textbbox((0, 0), ch, font=f)
+    dd.text((n*k/2 - (b[0]+b[2])/2, n*k/2 - (b[1]+b[3])/2), ch, font=f, fill=ink)
+    im.resize((n, n), Image.LANCZOS).save(f"{out}/{name}.png")
+# Nintendo: boton gris claro con la letra oscura (A aceptar, B atras, Y a la izquierda, X arriba)
+for i, ch in enumerate("ABYX"): letter_button(f"btn_nx_{i}", ch, (214, 216, 222, 235), (40, 42, 50, 255), (255, 255, 255, 140))
+# Xbox / mandos genericos de Android: cada boton con su color
+for i, (ch, col) in enumerate([("A", (96, 190, 70)), ("B", (232, 72, 62)), ("Y", (236, 188, 36)), ("X", (62, 128, 226))]):
+    letter_button(f"btn_xb_{i}", ch, col + (240,), (255, 255, 255, 255), (255, 255, 255, 120))
+# teclado de PC: teclas redondeadas (las anchas para Enter y Esc)
+def key_cap(name, label, w):
+    k = 4; h = 72
+    im = Image.new("RGBA", (w*k, h*k), (0, 0, 0, 0)); dd = ImageDraw.Draw(im)
+    dd.rounded_rectangle([3*k, 3*k, (w-3)*k, (h-3)*k], radius=14*k, fill=(235, 238, 245, 235), outline=(255, 255, 255, 150), width=3*k)
+    dd.rounded_rectangle([3*k, (h-12)*k, (w-3)*k, (h-3)*k], radius=10*k, fill=(170, 176, 192, 235))
+    size = 34 if len(label) <= 1 else 28
+    f = ImageFont.truetype(BOLD, size*k); b = dd.textbbox((0, 0), label, font=f)
+    dd.text((w*k/2 - (b[0]+b[2])/2, (h-8)*k/2 - (b[1]+b[3])/2), label, font=f, fill=(36, 40, 52, 255))
+    im.resize((w, h), Image.LANCZOS).save(f"{out}/{name}.png")
+for i, (label, w) in enumerate([("Enter", 132), ("Esc", 96), ("S", 72), ("M", 72)]): key_cap(f"btn_pc_{i}", label, w)
