@@ -302,7 +302,7 @@ declare function int open_account_menu(int i) end
 
 function int is_ps5()
 begin
-    return substr(cd(), 0, 5) == "/app0";
+    return find(cd(), "/app0") >= 0;                 // en la consola el directorio es /mnt/sandbox/PPSA000NN_000/app0
 end
 
 // Nintendo Switch: el motor entra en romfs:/ (alli van el .dcb, los recursos y los idiomas) y monta la tarjeta SD como sdmc:/
