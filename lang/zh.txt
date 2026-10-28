@@ -375,3 +375,7 @@ k_ns_pass=密码
 t_ns_full=无法再添加服务器 (16)
 t_ns_saved=服务器已保存
 t_ns_removed=服务器已删除
+st_skin_install=从网址安装皮肤
+k_skinurl=皮肤文件夹地址（含 skin.cfg）
+t_skin_installed=皮肤已安装
+t_skin_bad=皮肤无效或缺少文件

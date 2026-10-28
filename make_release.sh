@@ -50,6 +50,7 @@ cp /tmp/mediaplayer-release.dcb "$STAGE/mediaplayer.dcb"
 cp LICENSE ADDONS.md ADDONS.es.md "$STAGE/"
 cp lang/*.txt "$STAGE/lang/"
 cp res/*.png "$STAGE/res/" && mkdir -p "$STAGE/res/fonts" && cp res/fonts/* "$STAGE/res/fonts/"
+cp -r res/skins "$STAGE/res/"
 cp lists/*.m3u "$STAGE/lists/"
 for a in $ADDONS; do mkdir -p "$STAGE/addons/$a" && cp -r "addons/$a"/* "$STAGE/addons/$a/"; done
 
@@ -135,6 +136,7 @@ cp LICENSE ADDONS.md ADDONS.es.md "$STAGE/"
 cp lang/*.txt "$STAGE/lang/"
 rm -rf "$STAGE/res" && mkdir -p "$STAGE/res/fonts"
 cp res/*.png "$STAGE/res/" && cp res/fonts/* "$STAGE/res/fonts/"
+cp -r res/skins "$STAGE/res/"
 cp lists/*.m3u "$STAGE/lists/"
 for a in $ADDONS; do rm -rf "$STAGE/addons/$a"; mkdir -p "$STAGE/addons/$a" && cp -r "addons/$a"/* "$STAGE/addons/$a/"; done
 

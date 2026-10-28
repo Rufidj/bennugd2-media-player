@@ -17,6 +17,7 @@ mkdir -p "$STAGE/res" "$STAGE/videos"
 mkdir -p "$STAGE/lang"
 cp res/*.png "$STAGE/res/"
 cp -r res/fonts "$STAGE/res/"
+cp -r res/skins "$STAGE/res/"
 cp lang/*.txt "$STAGE/lang/"
 cp lists/*.m3u "$STAGE/videos/"
 if [ -d samples ]; then cp samples/* "$STAGE/videos/" 2>/dev/null || true; fi

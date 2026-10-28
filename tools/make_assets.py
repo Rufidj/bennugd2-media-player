@@ -107,6 +107,7 @@ import numpy as np
 from PIL import ImageFilter, ImageChops
 
 def save_rgba(arr, name):
+    os.makedirs(os.path.dirname(f"{out}/{name}"), exist_ok=True)
     Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGBA").save(f"{out}/{name}.png")
 
 def vgrad(top, bot, w=1920, h=1080):
@@ -121,7 +122,8 @@ def glow_blob(w, h, cx, cy, rx, ry, col, power=2.0):
     return a[..., None] * np.array(col, float)[None, None, :]
 
 def bg_save(key, arr):
-    Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGB").save(f"{out}/skin_{key}_bg.png")
+    os.makedirs(f"{out}/skins/{key}", exist_ok=True)
+    Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGB").save(f"{out}/skins/{key}/bg.png")
 
 def dot(key, name, col, size=96, power=2.4, spike=0.0):
     y, x = np.mgrid[0:size, 0:size]; c = (size - 1) / 2.0
@@ -131,9 +133,10 @@ def dot(key, name, col, size=96, power=2.4, spike=0.0):
         a = np.maximum(a, spike * np.clip(1 - np.abs(x - c) / c, 0, 1) ** 6 * np.clip(1 - np.abs(y - c) / (c * 0.25), 0, 1) ** 2)
         a = np.maximum(a, spike * np.clip(1 - np.abs(y - c) / c, 0, 1) ** 6 * np.clip(1 - np.abs(x - c) / (c * 0.25), 0, 1) ** 2)
     arr = np.zeros((size, size, 4)); arr[..., :3] = col; arr[..., 3] = a * 255
-    save_rgba(arr, f"skin_{key}_{name}")
+    save_rgba(arr, f"skins/{key}/{name}")
 
 def pill(key, col, style="round", w=1056, h=72):
+    os.makedirs(f"{out}/skins/{key}", exist_ok=True)
     k = 4
     im = Image.new("RGBA", (w*k, h*k), (0, 0, 0, 0)); dd = ImageDraw.Draw(im)
     if style == "chamfer":                                    # esquinas cortadas y doble linea (neon)
@@ -150,17 +153,18 @@ def pill(key, col, style="round", w=1056, h=72):
     if style == "chamfer": hd.polygon([(4+20, 4), (w-4, 4), (w-4, h-24), (w-24, h-4), (4, h-4), (4, 24)], outline=col + (110,), width=5)
     else: hd.rounded_rectangle([3, 3, w-3, h-3], radius=h//2-3, outline=col + (90 if style != "thick" else 130,), width=5)
     halo = halo.filter(ImageFilter.GaussianBlur(3 if style != "thick" else 5))
-    Image.alpha_composite(halo, im).save(f"{out}/skin_{key}_pill.png")
+    Image.alpha_composite(halo, im).save(f"{out}/skins/{key}/pill.png")
 
 # ---- PlayStation: olas con linea translucida y halo
 def skin_wave(key, k, base, amp, n, phase, fill, edge):
+    os.makedirs(f"{out}/skins/{key}", exist_ok=True)
     W, H = 3840, 1080
     pts = [(x, F*base + F*amp * math.sin(2*math.pi*n*x/1920.0 + phase) + 0.35*F*amp*math.sin(2*math.pi*2*n*x/1920.0 + phase*1.7)) for x in range(0, W + 1, 8)]
     fl = Image.new("RGBA", (W, H), (0, 0, 0, 0)); ImageDraw.Draw(fl).polygon(pts + [(W, H), (0, H)], fill=fill + (26,))
     ln = Image.new("RGBA", (W, H), (0, 0, 0, 0)); ImageDraw.Draw(ln).line(pts, fill=edge + (60,), width=3)
     halo = Image.new("RGBA", (W, H), (0, 0, 0, 0)); ImageDraw.Draw(halo).line(pts, fill=edge + (70,), width=14)
     halo = halo.filter(ImageFilter.GaussianBlur(9))
-    Image.alpha_composite(Image.alpha_composite(fl, halo), ln).save(f"{out}/skin_{key}_f{k}.png")
+    Image.alpha_composite(Image.alpha_composite(fl, halo), ln).save(f"{out}/skins/{key}/f{k}.png")
 
 bg_save("ps", vgrad((6, 14, 46), (10, 54, 138)) + glow_blob(1920, 1080, 960, 960, 900, 560, (20, 80, 190), 1.5) * 0.7)
 for k, (base, amp, n, ph, fill, edge) in enumerate([(470, 42, 1, 0.0, (120, 180, 255), (190, 225, 255)), (545, 32, 2, 1.7, (90, 150, 255), (170, 210, 255)), (615, 26, 2, 3.4, (160, 210, 255), (220, 240, 255))]):
@@ -177,7 +181,7 @@ def curtain(name, col, w, seed):
     vert = np.clip(1 - np.abs((y - 380) / 520.0), 0, 1) ** 1.6 * np.clip(y / 140.0, 0, 1)    # intensidad: mas fuerte arriba, se desvanece abajo
     a = prof * rays * vert
     arr = np.zeros((1080, w, 4)); arr[..., :3] = col; arr[..., 3] = a * 200
-    save_rgba(arr, f"skin_aurora_{name}")
+    save_rgba(arr, f"skins/aurora/{name}")
 curtain("f0", (80, 255, 170), 520, 1); curtain("f1", (60, 220, 230), 420, 2); curtain("f2", (170, 120, 255), 460, 3)
 pill("aurora", (160, 255, 220), "thick")
 
@@ -198,7 +202,7 @@ def retro_sun(name, top, bot, size, stripes=True, half=False):
     arr[..., :3] = np.where(a[..., None] > 0.05, arr[..., :3], glow); 
     if half: arr = arr[: size // 2]
     save_rgba(arr, name)
-retro_sun("skin_sunset_f0", (255, 236, 130), (255, 90, 110), 760)
+retro_sun("skins/sunset/f0", (255, 236, 130), (255, 90, 110), 760)
 def cloud(name, w, h, col, seed):
     rng = np.random.default_rng(seed); im = Image.new("L", (w, h), 0); dd = ImageDraw.Draw(im)
     for i in range(14):
@@ -207,12 +211,13 @@ def cloud(name, w, h, col, seed):
     im = im.filter(ImageFilter.GaussianBlur(h * 0.16)); a = np.array(im, float)
     arr = np.zeros((h, w, 4)); arr[..., :3] = col; arr[..., 3] = a * 0.55
     save_rgba(arr, name)
-cloud("skin_sunset_f1", 1000, 190, (255, 200, 170), 4); cloud("skin_sunset_f2", 760, 140, (255, 170, 190), 9)
+cloud("skins/sunset/f1", 1000, 190, (255, 200, 170), 4); cloud("skins/sunset/f2", 760, 140, (255, 170, 190), 9)
 def land(name, w=1920, h=330, col=(20, 8, 30)):
+    os.makedirs(os.path.dirname(f"{out}/{name}"), exist_ok=True)
     pts = [(x, h * 0.45 + 40 * math.sin(x / 210.0) + 22 * math.sin(x / 83.0 + 1.3) + 0.00006 * (x - 960) ** 2 * 0.2) for x in range(0, w + 1, 6)]
     im = Image.new("RGBA", (w * 2, h * 2), (0, 0, 0, 0)); ImageDraw.Draw(im).polygon([(x * 2, y * 2) for x, y in pts] + [(w * 2, h * 2), (0, h * 2)], fill=col + (255,))
     im.resize((w, h), Image.LANCZOS).save(f"{out}/{name}.png")
-land("skin_sunset_f3")
+land("skins/sunset/f3")
 pill("sunset", (255, 200, 170))
 
 # ---- Neon: rejilla en perspectiva, sol a rayas y lineas que avanzan hacia ti
@@ -223,10 +228,10 @@ fd.rectangle([0, HZ, 1920, 1080], fill=(10, 3, 28))
 for i in range(-22, 23):                                                           # lineas que convergen en el horizonte
     fd.line([(960 + i * 30, HZ), (960 + i * 260, 1080)], fill=(120, 40, 200), width=2)
 fd.line([(0, HZ), (1920, HZ)], fill=(255, 90, 220), width=3)
-floor.save(f"{out}/skin_neon_bg.png")
+os.makedirs(f"{out}/skins/neon", exist_ok=True); floor.save(f"{out}/skins/neon/bg.png")
 la = np.zeros((10, 1920, 4)); prof = np.exp(-(((np.arange(10) - 4.5) / 1.6) ** 2)); la[..., :3] = (255, 80, 220); la[..., 3] = prof[:, None] * 255
-save_rgba(la, "skin_neon_f0")
-retro_sun("skin_neon_f1", (255, 230, 90), (255, 40, 170), 560, True, True)
+save_rgba(la, "skins/neon/f0")
+retro_sun("skins/neon/f1", (255, 230, 90), (255, 40, 170), 560, True, True)
 pill("neon", (90, 240, 255), "chamfer")
 
 # ---- Brasas: chispas que suben (mezcla aditiva) sobre un fondo rojo oscuro
@@ -242,12 +247,93 @@ for cx, cy, rx, ry, col in [(420, 330, 520, 300, (60, 40, 150)), (1450, 700, 620
 img = Image.fromarray(np.clip(neb, 0, 255).astype(np.uint8), "RGB"); gd = ImageDraw.Draw(img)
 for i in range(260):                                                              # estrellas pequenas fijas
     sx, sy = rng.integers(0, 1920), rng.integers(0, 1080); v = int(rng.uniform(70, 200)); gd.point((sx, sy), fill=(v, v, min(255, v + 40)))
-img.save(f"{out}/skin_cosmos_bg.png")
+os.makedirs(f"{out}/skins/cosmos", exist_ok=True); img.save(f"{out}/skins/cosmos/bg.png")
 dot("cosmos", "f0", (200, 220, 255), 96, 2.2, 0.9); dot("cosmos", "f1", (255, 225, 190), 96, 2.2, 0.9)
 st = np.zeros((12, 520, 4)); xs = np.arange(520)[None, :]; ys = np.arange(12)[:, None]
 st[..., :3] = (220, 235, 255); st[..., 3] = (np.clip(xs / 520.0, 0, 1) ** 2.4) * np.exp(-(((ys - 5.5) / (0.9 + 2.2 * xs / 520.0)) ** 2)) * 255
-save_rgba(st, "skin_cosmos_f2")
+save_rgba(st, "skins/cosmos/f2")
 pill("cosmos", (190, 210, 255))
+
+
+# ---- skin.cfg de cada aspecto de fabrica (el mismo formato que usan los aspectos propios: ver SKINS.md) y su fuente
+import shutil
+FONTS = {"aurora": "lato/Lato-Medium.ttf", "sunset": "noto/NotoSerif-Regular.ttf", "neon": "noto/NotoSansMono-Bold.ttf", "embers": "lato/Lato-Bold.ttf", "cosmos": "lato/Lato-Light.ttf"}
+CFG = {
+"ps": """name=PlayStation
+text=FFFFFF
+select=FFFFFF
+background=bg.png
+pill=pill.png
+layer=f0.png effect=scroll speed=22 loop=1920
+layer=f1.png effect=scroll speed=45 loop=1920
+layer=f2.png effect=scroll speed=67 loop=1920
+""",
+"aurora": """name=Aurora
+font=font.ttf
+text=D9F5EE
+select=9AFFD8
+background=bg.png
+pill=pill.png
+layer=f0.png effect=sway count=2 x=140 dx=750 y=360 amp=80 period=23 pulse=32 alpha=150 breathe=95 tilt=2.6 add=1
+layer=f1.png effect=sway count=2 x=390 dx=750 y=360 amp=80 period=23 pulse=32 alpha=150 breathe=95 tilt=2.6 add=1
+layer=f2.png effect=sway count=1 x=640 y=360 amp=80 period=23 pulse=32 alpha=150 breathe=95 tilt=2.6 add=1
+""",
+"sunset": """name=Atardecer
+font=font.ttf
+text=FFE3D3
+select=FFD27A
+background=bg.png
+pill=pill.png
+layer=f0.png effect=bob x=960 y=480 size=62 amp=10 period=4 pulse=1
+layer=f1.png effect=drift count=2 x0=-450 dx=1220 y=120 dy=170 speed=45 dspeed=60 alpha=200
+layer=f2.png effect=drift count=2 x0=-150 dx=1220 y=205 dy=170 speed=75 dspeed=60 alpha=180
+layer=f3.png effect=static x=640 y=610 front=1
+""",
+"neon": """name=Neon
+font=font.ttf
+text=F2D9FF
+select=5FF0FF
+background=bg.png
+pill=pill.png
+layer=f1.png effect=bob x=640 y=280 amp=3 period=3.5
+layer=f0.png effect=perspective count=12 horizon=373 period=3.3 alpha=170 add=1
+""",
+"embers": """name=Brasas
+font=font.ttf
+text=FFE0D0
+select=FFC48A
+background=bg.png
+pill=pill.png
+layer=f0.png effect=rise count=22 size=25-80 amp=28 period=5.5-10.5 y0=740 y1=-40 add=1
+layer=f1.png effect=rise count=8 size=25-80 amp=28 period=5.5-10.5 y0=740 y1=-40 add=1
+""",
+"cosmos": """name=Cosmos
+font=font.ttf
+text=E6ECFF
+select=C8D8FF
+background=bg.png
+pill=pill.png
+layer=f0.png effect=twinkle count=24 size=18-54 alpha=70-255 period=5-12 y=10-630 add=1
+layer=f1.png effect=twinkle count=8 size=18-54 alpha=70-255 period=5-12 y=10-630 add=1
+layer=f2.png effect=shoot period=6.3 vx=21 vy=9 angle=-23 add=1
+""",
+}
+for key, txt in CFG.items():
+    d = f"{out}/skins/{key}"; os.makedirs(d, exist_ok=True)
+    open(f"{d}/skin.cfg", "w", encoding="utf-8").write(txt)
+    if key in FONTS: shutil.copy("/usr/share/fonts/truetype/" + FONTS[key], f"{d}/font.ttf")
+
+
+# ---- plantilla para crear aspectos propios (skin_template/): imagenes de ejemplo + un skin.cfg comentado
+TPL = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "skin_template")
+os.makedirs(TPL, exist_ok=True)
+Image.fromarray(np.clip(vgrad((10, 20, 60), (40, 10, 90)) + glow_blob(1920, 1080, 960, 1000, 1000, 500, (90, 40, 200), 1.6) * 0.8, 0, 255).astype(np.uint8), "RGB").save(f"{TPL}/bg.png")
+_o = out; out = TPL; pill("_t", (200, 170, 255)); out = _o
+os.replace(f"{TPL}/skins/_t/pill.png", f"{TPL}/pill.png"); shutil.rmtree(f"{TPL}/skins")
+dot_arr = None
+_o = out; out = TPL; os.makedirs(f"{TPL}/skins", exist_ok=True); dot("_t", "star", (210, 190, 255), 96, 2.4); out = _o
+os.replace(f"{TPL}/skins/_t/star.png", f"{TPL}/star.png"); shutil.rmtree(f"{TPL}/skins")
+open(f"{TPL}/skin.cfg", "w", encoding="utf-8").write(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "skin_template.cfg"), encoding="utf-8").read())
 
 def symbol(name, col, kind):
     k = 4; n = 72

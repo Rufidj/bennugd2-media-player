@@ -375,3 +375,7 @@ k_ns_pass=비밀번호
 t_ns_full=더 추가할 수 없습니다 (16)
 t_ns_saved=서버를 저장했습니다
 t_ns_removed=서버를 삭제했습니다
+st_skin_install=URL에서 스킨 설치
+k_skinurl=스킨 폴더 주소(skin.cfg 포함)
+t_skin_installed=스킨이 설치되었습니다
+t_skin_bad=스킨이 올바르지 않거나 파일이 없습니다

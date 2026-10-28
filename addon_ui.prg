@@ -950,7 +950,7 @@ begin
         put(S_OVBG, g_barbg, SW / 2, OV_BARY, 100, 255, -23);
         spr_sizex[S_OVBG] = 420 / 8 * 100; spr_sizey[S_OVBG] = 60 * 100 / 8;
         if (s_ovc != ov_code) s_ovc = ov_code; end
-        txt_want[txt_ovc] = 8589934336 + (255);
+        txt_want[txt_ovc] = txc + (255);
     else
     put(S_OVBG, g_barbg, SW / 2, OV_BARY, 100, 255, -23);
     spr_sizex[S_OVBG] = 700 / 8 * 100; spr_sizey[S_OVBG] = 16 * 100 / 8;
@@ -962,14 +962,14 @@ begin
     end
     if (s_ovt != fit_text(ov_title, 760)) s_ovt = fit_text(ov_title, 760); end
     if (s_ovp != (ov_sub != "" || ov_dlg ? ov_sub : ov_pct + " %")) s_ovp = ov_sub != "" || ov_dlg ? ov_sub : ov_pct + " %"; end
-    txt_want[txt_ovt] = 8589934336 + (255);
-    txt_want[txt_ovp] = 8589934336 + (230);
+    txt_want[txt_ovt] = txc + (255);
+    txt_want[txt_ovp] = txc + (230);
     if (ov_cancel)
         if (s_ovh != (ov_btn != "" ? ov_btn : tr("h_cancel"))) s_ovh = ov_btn != "" ? ov_btn : tr("h_cancel"); end
         put_sel(S_OVBTN, SW / 2, OV_BY, 280, 50, -23);
         if (!touch_mode) put(S_OVICO, g_sym[1], SW / 2 - tw(s_ovh) / 2 - 22, OV_BY + 2, 80, 255, -26); end
         write_move(txt_ovh, ur(SW / 2 + (touch_mode ? 0 : 22)), ur(OV_BY));
-        txt_want[txt_ovh] = 8589934336 + (255);
+        txt_want[txt_ovh] = txc + (255);
     end
 end
 

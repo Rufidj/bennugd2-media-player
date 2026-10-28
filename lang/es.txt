@@ -376,3 +376,7 @@ k_ns_pass=Contraseña
 t_ns_full=No caben más servidores (16)
 t_ns_saved=Servidor guardado
 t_ns_removed=Servidor quitado
+st_skin_install=Instalar aspecto desde una URL
+k_skinurl=Direccion de la carpeta del aspecto (con su skin.cfg)
+t_skin_installed=Aspecto instalado
+t_skin_bad=El aspecto no es valido o faltan archivos

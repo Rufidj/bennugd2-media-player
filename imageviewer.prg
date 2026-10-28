@@ -268,15 +268,15 @@ begin
         put(S_SHADE_BOT, g_shade, SW / 2, SH - 128, 100, a, 5);
         spr_sizex[S_SHADE_BOT] = SW / 64 * 100; spr_sizey[S_SHADE_BOT] = 100;
         s_time = (img_pos + 1) + " / " + img_n + (img_slide ? "    " + tr("s_slideshow") + " " + img_secs(set_img_int) + " s" : "") + (img_zoom > 0 ? "    " + img_zoomf(img_zoom) + " %" : "");
-        txt_want[txt_title] = 8589934336 + (a);
-        txt_want[txt_time] = 8589934336 + (a);
+        txt_want[txt_title] = txc + (a);
+        txt_want[txt_time] = txc + (a);
         if (modal != M_MENU)
-            if (skin) hint_set(6); else s_hint = tr("h_image"); txt_want[txt_hint] = 8589934336 + (a * 150 / 255); end
-            if (skin) for (k = 0; k < hint_n; k++) txt_want[txt_h[k]] = 8589934336 + (a * 210 / 255); end end
+            if (skin) hint_set(6); else s_hint = tr("h_image"); txt_want[txt_hint] = txc + (a * 150 / 255); end
+            if (skin) for (k = 0; k < hint_n; k++) txt_want[txt_h[k]] = txc + (a * 210 / 255); end end
         end
     end
     if (toast_t > 0) toast_t--; end
-    if (toast_t > 0) txt_want[txt_toast] = 8589934336 + (255); end
+    if (toast_t > 0) txt_want[txt_toast] = txc + (255); end
 end
 
 // ---------------------------------------------------------------- menu y datos

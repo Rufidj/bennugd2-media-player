@@ -34,7 +34,7 @@ const
     S_VIDEO = 0; S_SHADE_BOT = 1; S_SHADE_TOP = 2; S_BTN = 3;          // 3..11
     S_FOCUS = 12; S_BAR_BG = 13; S_BAR_FG = 14; S_KNOB = 15;
     S_BROWSE_BG = 16; S_SEL = 17; S_ROWICON = 18;                      // 18..29
-    S_HEADER = 30; S_PREVIEW = 31; S_PANEL = 32; S_VIZ = 33; S_MSEL = 34; S_BG = 35; S_WAVE = 36; S_HICON = 39; S_OVDIM = 45; S_OVBOX = 46; S_OVBG = 47; S_OVFG = 48; S_OVBTN = 49; S_OVICO = 50; S_TABUL = 51; S_TABSEL = 52; S_IMG = 53; S_IMG2 = 54; S_IBG = 55; S_CURSOR = 56; S_FX = 57; FX_N = 34; S_COUNT = 91;
+    S_HEADER = 30; S_PREVIEW = 31; S_PANEL = 32; S_VIZ = 33; S_MSEL = 34; S_BG = 35; S_WAVE = 36; S_HICON = 39; S_OVDIM = 45; S_OVBOX = 46; S_OVBG = 47; S_OVFG = 48; S_OVBTN = 49; S_OVICO = 50; S_TABUL = 51; S_TABSEL = 52; S_IMG = 53; S_IMG2 = 54; S_IBG = 55; S_CURSOR = 56; S_FX = 57; FX_N = 64; S_COUNT = 121;
     HINT_Y = 684;
     OV_TY = 290; OV_BARY = 350; OV_PY = 392; OV_BY = 452;              // ventana de progreso: titulo, barra, porcentaje y boton (en la rejilla de 1280x720)
     GK_MAX = 8192;
@@ -57,7 +57,7 @@ const
     STORE_URL = "https://raw.githubusercontent.com/Rufidj/bennugd2-media-player/main/addons";
     M_NONE = 0; M_MENU = 1; M_KB = 2; M_CREDITS = 3; M_SYSKB = 4; M_SETTINGS = 5;                             // pantallas modales (menu / teclado)
     KB_NEWLIST = 1; KB_RENAME_LIST = 2; KB_URL = 3; KB_NEW_TITLE = 4; KB_ENTRY_TITLE = 5; KB_LOGO = 6; KB_ADDON = 7; KB_ASET = 8;
-    KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11; KB_AUTH_SERVER = 12; KB_ADDON_URL = 14; KB_STORE_URL = 15; KB_FRENAME = 16; KB_NEWDIR = 17; KB_WIDGET = 18; KB_NETURL = 19; KB_NETUSER = 20; KB_NETPASS = 21;
+    KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11; KB_AUTH_SERVER = 12; KB_ADDON_URL = 14; KB_STORE_URL = 15; KB_FRENAME = 16; KB_NEWDIR = 17; KB_WIDGET = 18; KB_NETURL = 19; KB_NETUSER = 20; KB_NETPASS = 21; KB_SKINURL = 22;
     MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
     MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_ASET = 300; MA_PICK = 100;
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
@@ -66,8 +66,7 @@ const
     MA_IMG_SLIDE = 48; MA_IMG_INT = 49; MA_IMG_TR = 50; MA_IMG_SHUF = 51; MA_IMG_ROT = 52; MA_IMG_INFO = 53; MA_IMG_CLOSE = 54; MA_TOR_FILE = 60; MA_FRECV = 55; MA_RS_YES = 56; MA_RS_NO = 57; MA_NETDEL = 77; MA_PREP = 75; MA_PSHUF = 76; MA_PSPEED = 70; MA_PSUB = 71; MA_PAV = 72; MA_PAUDIO = 73; MA_PSUBS = 74;
     // ajustes: tipo de fila y su identificador
     STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
-    ST_WINDOW = 26; ST_UPDATES = 27; ST_CHECKNOW = 28;
-    SKIN_COUNT = 7;
+    ST_WINDOW = 26; ST_UPDATES = 27; ST_CHECKNOW = 28; ST_SKININST = 29;
     ST_LANG = 1; ST_SKIN = 2; ST_PREVIEW = 3; ST_SEEK = 4; ST_VIZ = 5; ST_UNKNOWN = 6; ST_INSTALL = 7; ST_STOREURL = 8; ST_ACCOUNTS = 9;
     ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18; ST_HIDDEN = 19; ST_ALLFILES = 20; ST_TORKEEP = 21; ST_TORUP = 22; ST_TOREXTRA = 23; ST_TORDHT = 24; ST_RESUME = 25;
     APP_VERSION = "1.1.1";
@@ -220,7 +219,7 @@ global
     // idioma y aspecto
     string lang_cur = "es"; string lang_k[480]; string lang_v[480]; int lang_n, lang_ver;
     int skin = 1;                                 // 0 clasico, 1 PlayStation, 2 Aurora, 3 Atardecer, 4 Neon, 5 Brasas, 6 Cosmos
-    int skin_nfx;                                 // piezas animadas cargadas del aspecto actual
+    int txc = 8589934336; int txs = 8589934336;   // color de los textos de la interfaz y de la fila elegida (RGB<<8, mas el bit 32 que los distingue de 'sin pedir'); los fija el aspecto
     int skin_loaded = -1;                         // aspecto cuyos graficos estan en memoria
     int g_bg_ps, g_wave[4], g_pill, g_sym[4];
     int hint_key = -1, hint_n, hint_ic[6], hint_icx[6]; string s_h[6]; int txt_h[6];
@@ -374,6 +373,7 @@ include "torrentplay.prg";
 include "receive.prg";
 include "resume.prg";
 include "dlna.prg";
+include "skins.prg";
 include "update.prg";
 
 process main()
@@ -415,6 +415,7 @@ begin
     end
     if (getenv("MP_SELECT") != "") sel = atoi(getenv("MP_SELECT")); if (sel >= n_entries) sel = n_entries - 1; end end   // solo pruebas
     if (getenv("MP_XT_ENTER") != "") xt_enter(getenv("MP_XT_ENTER")); end   // solo pruebas
+    if (getenv("MP_SKINURL") != "") skin_install_url(getenv("MP_SKINURL")); end   // solo pruebas: instala un aspecto desde una URL
     if (getenv("MP_ADDON") != "") addon_open(getenv("MP_ADDON")); end        // solo pruebas: abre un addon (carpeta)
     if (getenv("MP_VIZ") != "") viz_mode = atoi(getenv("MP_VIZ")); end   // solo pruebas
     say("MediaPlayer: carpeta " + cur_dir + ", " + n_entries + " entradas");
@@ -428,6 +429,7 @@ begin
 
     while (!wm_info.exit_status)
         frame_n++;
+        if (getenv("ANDROID_ROOT") == "" && !is_ps5()) if (key(_f5)) if (!skin_f5) skin_f5 = 1; skin_loaded = -1; skin_scan(); skin_apply(); toast(skin_name()); end else skin_f5 = 0; end end    // F5: vuelve a leer el aspecto de su carpeta (para crearlos con comodidad)
         if (getenv("MP_FPSLOG") != "") fps_probe(); end                                                  // solo pruebas: tiempos entre fotogramas
         read_input();
         apply_script();
@@ -508,6 +510,7 @@ begin
     g_ovdim = map_new(8, 8);   map_clear(0, g_ovdim, rgba(0, 0, 0, 160));            // ventana de progreso: fondo atenuado, caja y relleno
     g_ovbox = map_new(8, 8);   map_clear(0, g_ovbox, rgba(16, 28, 60, 250));
     g_ovfill = map_new(8, 8);  map_clear(0, g_ovfill, rgba(90, 170, 255, 255));
+    skin_scan();
     skin_load();
     make_cursor();
     g_sym[0] = map_load("res/sym_cross.png"); g_sym[1] = map_load("res/sym_circle.png");
@@ -1039,7 +1042,7 @@ begin
         end
     end
     cur = tab_focus ? tab_cur : tab_index(ts);
-    for (i = 0; i < n; i++) txt_want[txt_tab[i]] = 8589934336 + (i == cur ? 255 : (tab_focus ? 210 : 150)); end
+    for (i = 0; i < n; i++) txt_want[txt_tab[i]] = (i == cur ? txs + 255 : txc + (tab_focus ? 210 : 150)); end
     k = tab_index(ts);
     // el subrayado se desliza hasta la seccion actual (y se esconde si el foco esta en Ajustes, que es una ventana y no una seccion)
     if (tul_f < frame_n - 1) tul_x = tab_x[k] + tab_w[k] / 2; tul_w = tab_w[k]; else tul_x = ease_to(tul_x, tab_x[k] + tab_w[k] / 2); tul_w = ease_to(tul_w, tab_w[k]); end
@@ -1418,158 +1421,6 @@ end
 
 
 // ====================================================================== aspecto (skin)
-function string skin_key()
-begin
-    switch (skin)
-        case 2: return "aurora"; end
-        case 3: return "sunset"; end
-        case 4: return "neon"; end
-        case 5: return "embers"; end
-        case 6: return "cosmos"; end
-    end
-    return "ps";
-end
-
-function string skin_name()
-begin
-    switch (skin)
-        case 0: return tr("skin_classic"); end
-        case 1: return tr("skin_ps"); end
-        case 2: return tr("skin_aurora"); end
-        case 3: return tr("skin_sunset"); end
-        case 4: return tr("skin_neon"); end
-        case 5: return tr("skin_embers"); end
-        case 6: return tr("skin_cosmos"); end
-    end
-    return "";
-end
-
-// Carga los graficos del aspecto elegido (fondo, pastilla y sus piezas animadas) y libera los del anterior
-function skin_load()
-private int k; string kk;
-begin
-    if (skin_loaded == skin) return 0; end
-    if (skin_loaded > 0)
-        map_unload(0, g_bg_ps); map_unload(0, g_pill);
-        for (k = 0; k < skin_nfx; k++) map_unload(0, g_wave[k]); end
-    end
-    skin_loaded = skin; skin_nfx = 0;
-    if (skin <= 0) return 0; end
-    kk = skin_key();
-    switch (skin)
-        case 3: skin_nfx = 4; end
-        case 4, 5: skin_nfx = 2; end
-        default: skin_nfx = 3; end
-    end
-    g_bg_ps = map_load("res/skin_" + kk + "_bg.png"); hires(g_bg_ps);
-    for (k = 0; k < skin_nfx; k++) g_wave[k] = map_load("res/skin_" + kk + "_f" + k + ".png"); hires(g_wave[k]); end
-    g_pill = map_load("res/skin_" + kk + "_pill.png"); hires(g_pill);
-end
-
-// seno en milesimas de grado, multiplicado por amp
-function int sn(int a, int amp)
-begin
-    return sin(a) * amp;
-end
-
-// una pieza animada: grafico, posicion logica, tamano %, transparencia, z y si suma luz
-function fx(int n, int g, int px, int py, int sz, int a, int zz, int add)
-begin
-    if (a < 0) a = 0; end
-    if (a > 255) a = 255; end
-    put(S_FX + n, g, px, py, sz, a, zz);
-    if (add) spr_fl[S_FX + n] = B_ABLEND; end
-end
-
-// Aurora: cinco cortinas de luz que se mecen, cambian de ancho y respiran
-function skin_aurora(int t)
-private int k;
-begin
-    for (k = 0; k < 5; k++)
-        fx(k, g_wave[k % 3], 140 + k * 250 + sn(t * 260 + k * 70000, 80), 360, 100 + sn(t * 210 + k * 110000, 32), 150 + sn(t * 400 + k * 83000, 95), 28, 1);
-        spr_sizey[S_FX + k] = 100 + sn(t * 170 + k * 50000, 10);
-        spr_angle[S_FX + k] = sn(t * 190 + k * 90000, 2600);
-    end
-end
-
-// Atardecer: el sol se mece, las nubes cruzan despacio a distinta velocidad y la tierra queda delante
-function skin_sunset(int t)
-private int k, xp, L;
-begin
-    L = 2100;
-    fx(0, g_wave[0], 960, 480 + sn(t * 90, 10), 62 + sn(t * 150, 1), 255, 29, 0);
-    for (k = 0; k < 4; k++)
-        xp = ((k * 610) + t * (3 + k * 2) / 4) % L;
-        fx(1 + k, g_wave[1 + (k % 2)], xp - 450, 120 + k * 85 + sn(t * 70 + k * 100000, 8), 100, 200 - k * 20, 28 - k, 0);
-    end
-    fx(5, g_wave[3], 640, 610, 100, 255, 20, 0);
-end
-
-// Neon: el sol a rayas y la rejilla, con lineas que avanzan hacia ti en perspectiva
-function skin_neon(int t)
-private int k, u, hz;
-begin
-    hz = 373;
-    fx(0, g_wave[1], 640, hz - 93 + sn(t * 100, 3), 100 + sn(t * 180, 2), 255, 29, 0);
-    for (k = 0; k < 12; k++)
-        u = (t * 5 + k * 1000 / 12) % 1000;
-        fx(1 + k, g_wave[0], 640, hz + (720 - hz) * (u * u / 1000) / 1000, 40 + u / 5, u * 170 / 1000, 25, 1);
-    end
-end
-
-// Brasas: chispas que suben titilando
-function skin_embers(int t)
-private int k, p, ph, u, a, sz;
-begin
-    for (k = 0; k < 30; k++)
-        p = 330 + (k * 53) % 300;
-        ph = (t + k * 97) % p;
-        u = ph * 1000 / p;
-        if (u < 150) a = u * 255 / 150; elseif (u > 650) a = (1000 - u) * 255 / 350; else a = 255; end
-        a = a * (180 + sn(t * 900 + k * 71000, 75)) / 255;
-        sz = 25 + (k * 37) % 55;
-        fx(k, g_wave[k % 4 == 0 ? 1 : 0], ((k * 191) % 1280) + sn(t * 500 + k * 70000, 28), 740 - 780 * u / 1000, sz, a, 27, 1);
-    end
-end
-
-// Cosmos: estrellas que titilan y, de vez en cuando, una estrella fugaz
-function skin_cosmos(int t)
-private int k, ph, cy, a;
-begin
-    for (k = 0; k < 32; k++)
-        a = 70 + 185 * (1000 + sn(t * (500 + (k % 3) * 300) + k * 53000, 1000)) / 2000;
-        fx(k, g_wave[k % 4 == 0 ? 1 : 0], (k * 347) % 1280, 10 + (k * 211) % 620, 18 + (k % 5) * 9, a, 27, 1);
-    end
-    ph = t % 380; cy = t / 380;
-    if (ph < 46)
-        fx(32, g_wave[2], 180 + (cy * 263) % 700 + ph * 21, 50 + (cy * 131) % 280 + ph * 9, 100, sn(ph * 3900, 255), 26, 1);
-        spr_angle[S_FX + 32] = -23000;
-    end
-end
-
-// Fondo del aspecto elegido: degradado y las piezas animadas propias de cada uno
-function draw_bg()
-private int k;
-begin
-    if (!skin) return 0; end
-    put(S_BG, g_bg_ps, SW / 2, SH / 2, 100, 255, 30);
-    switch (skin)
-        case 1:                                                // olas: cada una avanza en pasos de un pixel real en cada fotograma
-            for (k = 0; k < 3; k++)
-                if (wave_f != frame_n) wave_pos[k] = (wave_pos[k] + (k + 1) * 24) % (RW * 64); end
-                put(S_WAVE + k, g_wave[k], 1280, SH / 2, 100, 255, 28 - k);
-                spr_xr[S_WAVE + k] = -(wave_pos[k] / 64);
-            end
-        end
-        case 2: skin_aurora(frame_n); end
-        case 3: skin_sunset(frame_n); end
-        case 4: skin_neon(frame_n); end
-        case 5: skin_embers(frame_n); end
-        case 6: skin_cosmos(frame_n); end
-    end
-    wave_f = frame_n;
-end
-
 // Un numero corto a partir de la URL: sirve de nombre para el fichero de la cache
 function string url_hash(string s)
 private int h, i;
@@ -1719,7 +1570,7 @@ begin
         end
     end
     for (k = 0; k < hint_n; k++)
-        txt_want[txt_h[k]] = 8589934336 + (210);
+        txt_want[txt_h[k]] = txc + (210);
         if (hint_ic[k] >= 0) put(S_HICON + k, g_sym[hint_ic[k]], hint_icx[k], HINT_Y + 2, 80, 255, -12); end
     end
 end
@@ -1761,11 +1612,13 @@ private string f; int i;
 begin
     f = tr("lang_font");
     if (f == "lang_font") f = "res/fonts/ui_latin.ttf"; end
+    if (skin_font != "" && skin > 0 && lang_script() == 0 && lang_cur != "ru") f = skin_font; end        // la fuente del aspecto solo en idiomas latinos
     if (f == cur_font && texts_ready) return 0; end
     if (texts_ready) write_delete(ALL_TEXT); for (i = 0; i < 6; i++) txt_sub[i] = 0; end sf_cur = -1; end
     if (f != cur_font)
         if (fnt_t > 0) fnt_unload(fnt_t); end
         fnt_t = ttf_load(f);
+        if (fnt_t <= 0 && f != tr("lang_font")) f = (tr("lang_font") == "lang_font") ? "res/fonts/ui_latin.ttf" : tr("lang_font"); fnt_t = ttf_load(f); end     // la del aspecto no se pudo abrir: la normal
         if (fnt_t > 0) ttf_set_size(fnt_t, 42); end
         cur_font = f;
     end
@@ -1899,7 +1752,7 @@ begin
         if (p > 0)
             k = substr(ln, 0, p); v = substr(ln, p + 1);
             if (k == "lang" && is_lang(v)) lang_cur = v; end
-            if (k == "skin") skin = atoi(v); if (skin < 0 || skin >= SKIN_COUNT) skin = 1; end end
+            if (k == "skin") if (v != "" && (v == "0" || atoi(v) > 0)) skin = atoi(v); else skin_pref = v; end end
             if (k == "pv") set_preview = atoi(v) ? 1 : 0; end
             if (k == "seek") set_seek = atoi(v); if (set_seek < 0 || set_seek > 3) set_seek = 1; end end
             if (k == "unk") set_unknown = atoi(v) ? 1 : 0; end
@@ -1930,7 +1783,7 @@ begin
     fh = fopen(join_path(store_dir, "config.cfg"), O_WRITE);
     if (!fh) return 0; end
     fputs(fh, "lang=" + lang_cur);
-    fputs(fh, "skin=" + skin);
+    fputs(fh, "skin=" + skin_id());
     fputs(fh, "pv=" + set_preview);
     fputs(fh, "seek=" + set_seek);
     fputs(fh, "unk=" + set_unknown);
@@ -1987,6 +1840,7 @@ begin
         case 0:                                                  // interfaz
             st_row(n, ST_LANG, STT_CHOICE, tr("st_lang"), tr("lang_name")); n++;
             st_row(n, ST_SKIN, STT_CHOICE, tr("st_skin"), skin_name()); n++;
+            st_row(n, ST_SKININST, STT_ACTION, tr("st_skin_install"), ""); n++;
             if (getenv("ANDROID_ROOT") == "" && !is_ps5()) st_row(n, ST_WINDOW, STT_CHOICE, tr("st_window"), win_mode == 0 ? tr("st_win0") : (win_mode == 1 ? tr("st_win1") : tr("st_win2"))); n++; end
             st_row(n, ST_VIEW, STT_CHOICE, tr("st_view"), set_view == 0 ? tr("st_view_list") : (set_view == 1 ? tr("st_view_grid") : tr("st_view_auto"))); n++;
             st_row(n, ST_PREVIEW, STT_TOGGLE, tr("st_preview"), st_onoff(set_preview)); n++;
@@ -2043,7 +1897,7 @@ begin
             lang_load(d > 0 ? next_lang() : next_lang());       // el reproductor solo avanza en la lista de idiomas
             cfg_save();
         end
-        case ST_SKIN: skin = (skin + SKIN_COUNT + (d < 0 ? -1 : 1)) % SKIN_COUNT; skin_load(); cfg_save(); end
+        case ST_SKIN: skin_step(d); end
         case ST_WINDOW: win_mode = (win_mode + 3 + d) % 3; cfg_save(); if ((win_mode == 2) != win_full) win_full = (win_mode == 2); screen.fullscreen = win_full; set_mode(RW, RH, win_flags()); end end
         case ST_RESUME: set_resume = !set_resume; cfg_save(); end
         case ST_UPDATES: set_updates = !set_updates; cfg_save(); end
@@ -2084,6 +1938,7 @@ begin
             if (!set_unknown) toast(tr("st_needs_unknown")); else kb_open(tr("k_addon_url"), "https://", KB_ADDON_URL); end
         end
         case ST_STOREURL: kb_open(tr("k_store_url"), set_store_url, KB_STORE_URL); end
+        case ST_SKININST: kb_open(tr("k_skinurl"), "https://", KB_SKINURL); end
         case ST_ACCOUNTS: open_accounts_menu(); end
         case ST_OPENDL: modal = M_NONE; tab_goto(4); end
         case ST_CLEARCACHE:
@@ -2162,17 +2017,17 @@ begin
         end
         for (i = 0; i < 6; i++) write_move(txt_stc[i], ur(x0 + 54), ur(y0 + 134 + i * 60)); end
     end
-    txt_want[txt_mtitle] = 8589934336 + (255);
-    for (i = 0; i < 6; i++) txt_want[txt_stc[i]] = 8589934336 + (i == st_cat ? (st_col == 0 ? 255 : 220) : 160); end
+    txt_want[txt_mtitle] = txc + (255);
+    for (i = 0; i < 6; i++) txt_want[txt_stc[i]] = (i == st_cat ? txs + (st_col == 0 ? 255 : 220) : txc + 160); end
     for (i = 0; i < st_n; i++)
         a = (i == st_sel && st_col == 1) ? 255 : 190;
-        txt_want[txt_mopt[i]] = 8589934336 + (a);
-        txt_want[txt_stv[i]] = 8589934336 + (a == 255 ? 255 : 170);
+        txt_want[txt_mopt[i]] = (a == 255 ? txs + 255 : txc + a);
+        txt_want[txt_stv[i]] = (a == 255 ? txs + 255 : txc + 170);
     end
     put_sel(S_TABSEL, x0 + 175, y0 + 134 + st_cat * 60, 300, 52, -24);
     if (st_col == 1) spr_alpha[S_TABSEL] = 110; end
     if (st_col == 1) put_sel(S_MSEL, x0 + 335 + (w - 335) / 2 - 10, y0 + 134 + st_sel * 52, w - 365, 46, -24); end
-    if (skin) hint_set(2); else txt_want[txt_mhint] = 8589934336 + (170); end
+    if (skin) hint_set(2); else txt_want[txt_mhint] = txc + (170); end
 end
 
 function open_settings_menu(int keep)
@@ -2499,7 +2354,7 @@ begin
         case MA_IMG_CLOSE: close_image(); end
         case MA_STORE_REFRESH: store_open(); end
         case MA_SKIN:
-            skin = (skin + 1) % SKIN_COUNT; skin_load(); cfg_save(); open_settings_menu(1);
+            skin_step(1); open_settings_menu(1);
         end
         case MA_PSPEED, MA_PSUB, MA_PAV, MA_PREP, MA_PSHUF: play_menu_adjust(act, 1); end
         case MA_NETDEL: net_remove(atoi(entry_url[sel])); end
@@ -2763,6 +2618,7 @@ begin
         case KB_ADDON_URL:
             addon_install_url(kb_text); settings_open();
         end
+        case KB_SKINURL: skin_install_url(kb_text); settings_open(); end
         case KB_NETURL: net_add_url(kb_text); end
         case KB_NETUSER: net_add_user(kb_text); end
         case KB_NETPASS: net_add_pass(kb_text); end
@@ -2998,10 +2854,10 @@ begin
         write_move(txt_mtitle, ur((SW - tw(s_mtitle)) / 2), ur(y0 + 40));
         for (i = 0; i < 10; i++) write_move(txt_mopt[i], ur(x0 + 54), ur(y0 + 118 + i * 52)); end
     end
-    txt_want[txt_mtitle] = 8589934336 + (255);
-    for (i = 0; i < menu_n; i++) txt_want[txt_mopt[i]] = 8589934336 + (i == menu_sel ? 255 : 190); end
+    txt_want[txt_mtitle] = txc + (255);
+    for (i = 0; i < menu_n; i++) txt_want[txt_mopt[i]] = (i == menu_sel ? txs + 255 : txc + 190); end
     put_sel(S_MSEL, SW / 2, y0 + 118 + menu_sel * 52, w - 36, 46, -24);
-    if (skin) hint_set(2); else txt_want[txt_mhint] = 8589934336 + (170); end
+    if (skin) hint_set(2); else txt_want[txt_mhint] = txc + (170); end
 end
 
 function draw_modal()
@@ -3022,7 +2878,7 @@ begin
         spr_sizex[S_SHADE_TOP] = SW / 64 * 100; spr_sizey[S_SHADE_TOP] = 150;
         put(S_SHADE_BOT, g_shade, SW / 2, SH - 128, 100, 255, -10);
         spr_sizex[S_SHADE_BOT] = SW / 64 * 100; spr_sizey[S_SHADE_BOT] = 100;
-        if (skin) hint_set(4); else txt_want[txt_mhint] = 8589934336 + (170); end
+        if (skin) hint_set(4); else txt_want[txt_mhint] = txc + (170); end
         return 0;
     end
     if (modal == M_SETTINGS)
@@ -3030,23 +2886,23 @@ begin
         return 0;
     end
     modal_labels();
-    txt_want[txt_mtitle] = 8589934336 + (255);
+    txt_want[txt_mtitle] = txc + (255);
     if (modal == M_SYSKB)
-        txt_want[txt_mhint] = 8589934336 + (0);
-    elseif (skin) hint_set(modal == M_MENU ? 2 : 3); else txt_want[txt_mhint] = 8589934336 + (170); end
+        txt_want[txt_mhint] = txc + (0);
+    elseif (skin) hint_set(modal == M_MENU ? 2 : 3); else txt_want[txt_mhint] = txc + (170); end
     if (modal == M_MENU)
         for (i = 0; i < menu_n; i++)
-            txt_want[txt_mopt[i]] = 8589934336 + (i == menu_sel ? 255 : 190);
+            txt_want[txt_mopt[i]] = (i == menu_sel ? txs + 255 : txc + 190);
         end
         k = tw(menu_opt[menu_sel]) + 100; if (k < 640) k = 640; end
         put_sel(S_MSEL, 80 + k / 2, 170 + menu_sel * 52, k, 46, 15);
     elseif (modal == M_KB)
         if (kb_dirty) kb_rebuild_rows(); end
-        txt_want[txt_kbin] = 8589934336 + (255);
+        txt_want[txt_kbin] = txc + (255);
         put(S_PANEL, g_barbg, SW / 2, 170, 100, 255, 12);
         spr_sizex[S_PANEL] = 1100 / 8 * 100; spr_sizey[S_PANEL] = 44 * 100 / 8;
-        for (i = 0; i < 5; i++) txt_want[txt_kbrow[i]] = 8589934336 + (230); end
-        for (i = 0; i < 6; i++) txt_want[txt_kbs[i]] = 8589934336 + (230); end
+        for (i = 0; i < 5; i++) txt_want[txt_kbrow[i]] = txc + (230); end
+        for (i = 0; i < 6; i++) txt_want[txt_kbs[i]] = txc + (230); end
         if (kb_r < 5)
             bx = SW / 2 - (28 * 1556) / 200 + ((kb_c * 6 + 1) * 1556) / 200; by = 250 + kb_r * 56;   // 15,56 px de avance por caracter de la fuente
             put_sel(S_MSEL, bx, by, 40, 44, 15);
@@ -3573,19 +3429,19 @@ private
     string t, l[3];
 begin
     hide_sprites();
-    for (i = 0; i < ROWS; i++) txt_want[txt_row[i]] = 8589934336 + (0); txt_want[txt_cell[i]] = 8589934336 + (0); end
-    txt_want[txt_path] = 8589934336 + (0); txt_want[txt_hint] = 8589934336 + (0); txt_want[txt_empty] = 8589934336 + (0);
-    txt_want[txt_time] = 8589934336 + (0); txt_want[txt_title] = 8589934336 + (0); txt_want[txt_toast] = 8589934336 + (0);
-    for (i = 0; i < 6; i++) txt_want[txt_sub[i]] = 8589934336 + (0); end
-    for (i = 0; i < 7; i++) txt_want[txt_info[i]] = 8589934336 + (0); end
-    for (i = 0; i < 6; i++) txt_want[txt_tab[i]] = 8589934336 + (0); end
-    for (i = 0; i < 10; i++) txt_want[txt_stv[i]] = 8589934336 + (0); end
-    for (i = 0; i < 6; i++) txt_want[txt_stc[i]] = 8589934336 + (0); end
-    txt_want[txt_amsg] = 8589934336 + (0); txt_want[txt_ovt] = 8589934336 + (0); txt_want[txt_ovp] = 8589934336 + (0); txt_want[txt_ovh] = 8589934336 + (0); txt_want[txt_ovc] = 8589934336 + (0);
-    txt_want[txt_mtitle] = 8589934336 + (0); txt_want[txt_mhint] = 8589934336 + (0); txt_want[txt_kbin] = 8589934336 + (0); for (i = 0; i < 6; i++) txt_want[txt_kbs[i]] = 8589934336 + (0); end
-    for (i = 0; i < 10; i++) txt_want[txt_mopt[i]] = 8589934336 + (0); end
-    for (i = 0; i < 5; i++) txt_want[txt_kbrow[i]] = 8589934336 + (0); end
-    for (i = 0; i < 6; i++) txt_want[txt_h[i]] = 8589934336 + (0); end
+    for (i = 0; i < ROWS; i++) txt_want[txt_row[i]] = txc + (0); txt_want[txt_cell[i]] = txc + (0); end
+    txt_want[txt_path] = txc + (0); txt_want[txt_hint] = txc + (0); txt_want[txt_empty] = txc + (0);
+    txt_want[txt_time] = txc + (0); txt_want[txt_title] = txc + (0); txt_want[txt_toast] = txc + (0);
+    for (i = 0; i < 6; i++) txt_want[txt_sub[i]] = txc + (0); end
+    for (i = 0; i < 7; i++) txt_want[txt_info[i]] = txc + (0); end
+    for (i = 0; i < 6; i++) txt_want[txt_tab[i]] = txc + (0); end
+    for (i = 0; i < 10; i++) txt_want[txt_stv[i]] = txc + (0); end
+    for (i = 0; i < 6; i++) txt_want[txt_stc[i]] = txc + (0); end
+    txt_want[txt_amsg] = txc + (0); txt_want[txt_ovt] = txc + (0); txt_want[txt_ovp] = txc + (0); txt_want[txt_ovh] = txc + (0); txt_want[txt_ovc] = txc + (0);
+    txt_want[txt_mtitle] = txc + (0); txt_want[txt_mhint] = txc + (0); txt_want[txt_kbin] = txc + (0); for (i = 0; i < 6; i++) txt_want[txt_kbs[i]] = txc + (0); end
+    for (i = 0; i < 10; i++) txt_want[txt_mopt[i]] = txc + (0); end
+    for (i = 0; i < 5; i++) txt_want[txt_kbrow[i]] = txc + (0); end
+    for (i = 0; i < 6; i++) txt_want[txt_h[i]] = txc + (0); end
     for (i = 0; i < 6; i += 2) txt_want[txt_sub[i]] = 4294967296; end
 
     if (modal != M_NONE && !(modal == M_MENU && (state == ST_BROWSE || state == ST_IMAGE || state == ST_PLAY))) draw_modal(); return 0; end
@@ -3628,23 +3484,23 @@ begin
         if (k >= 0)
             draw_tabs(k);
         else
-            txt_want[txt_path] = 8589934336 + (255);
+            txt_want[txt_path] = txc + (255);
             put(S_HEADER, g_icon[10], 42, 40, 40, 200, -10);
         end
         draw_bg();
         if (modal == M_MENU)
             // el menu de opciones se dibuja encima (ver mas abajo) con su propia barra de ayuda
-        elseif (skin) hint_set(store_mode == 1 ? 5 : 1); else txt_want[txt_hint] = 8589934336 + (150); end
+        elseif (skin) hint_set(store_mode == 1 ? 5 : 1); else txt_want[txt_hint] = txc + (150); end
 
         if (n_entries == 0 && !addon_busy)
-            txt_want[txt_empty] = 8589934336 + (200);
+            txt_want[txt_empty] = txc + (200);
         end
         for (i = 0; i < ROWS; i++)
             rowi = top_row + i;
             if (rowi < n_entries)
                 by = ROW_Y0 + i * ROW_H + ROW_H / 2;
                 if (grid_mode == 1) by = grid_cy(i); end
-                txt_want[grid_mode == 1 ? txt_cell[i] : txt_row[i]] = 8589934336 + (rowi == sel && !tab_focus ? 255 : 190);
+                txt_want[grid_mode == 1 ? txt_cell[i] : txt_row[i]] = (rowi == sel && !tab_focus ? txs + 255 : txc + 190);
                 switch (entry_dir[rowi])
                     case K_DIR, K_MYLISTS, K_AFOLDER, K_DOWNLOADS, K_RESUMES, K_DLNADIR, K_DLNAMORE: g = g_icon[10]; end
                     case K_DLNA, K_DLNASRV, K_NETSRV: g = g_icon[14]; end
@@ -3695,13 +3551,13 @@ begin
             if (i < k) k = i; end
             if (k > 0) put(S_PREVIEW, cell_map[sel - top_row], 990, 260, k, 255, 5); end
         end
-        for (i = 0; i < 7; i++) txt_want[txt_info[i]] = 8589934336 + (i == 0 ? 255 : 200); end
+        for (i = 0; i < 7; i++) txt_want[txt_info[i]] = txc + (i == 0 ? 255 : 200); end
         if (pv_phase == 3) s_info[2] = tr("s_nopreview"); end
-        if (addon_busy && !ov_on) txt_want[txt_amsg] = 8589934336 + (255); end
+        if (addon_busy && !ov_on) txt_want[txt_amsg] = txc + (255); end
         if (ov_on) draw_overlay(); end
         if (modal == M_MENU) draw_menu_dialog(); end
         if (toast_t > 0) toast_t--; end
-        if (toast_t > 0) txt_want[txt_toast] = 8589934336 + (255); end
+        if (toast_t > 0) txt_want[txt_toast] = txc + (255); end
         return 0;
     end
 
@@ -3730,7 +3586,7 @@ begin
         end
         update_viz();
         put(S_VIZ, g_viz, 900, 330, 100, 255, -3);
-        txt_want[txt_title] = 8589934336 + (255);
+        txt_want[txt_title] = txc + (255);
     elseif (vid_w > 0 && vid_h > 0)
         k = SW * 100 / vid_w; i = SH * 100 / vid_h;
         if (i < k) k = i; end
@@ -3783,10 +3639,10 @@ begin
         end
         t = title_base + chapter_text();                  // el capitulo en el que se esta, junto al titulo
         if (t != s_title && title_base != "") s_title = t; end
-        txt_want[txt_time] = 8589934336 + (a);
-        txt_want[txt_title] = 8589934336 + (a);
+        txt_want[txt_time] = txc + (a);
+        txt_want[txt_title] = txc + (a);
     end
-    if (toast_t > 0) txt_want[txt_toast] = 8589934336 + (toast_t > 30 ? 255 : toast_t * 255 / 30); end
+    if (toast_t > 0) txt_want[txt_toast] = txc + (toast_t > 30 ? 255 : toast_t * 255 / 30); end
     if (muted && !music_mode) put(S_ROWICON, g_icon[9], SW - 56, 56, 60, 220, -6); end      // aviso permanente de que esta en silencio
 
     // subtitulos (por encima de los iconos cuando estos se ven)

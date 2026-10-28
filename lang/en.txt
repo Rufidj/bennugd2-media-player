@@ -376,3 +376,7 @@ k_ns_pass=Password
 t_ns_full=No room for more servers (16)
 t_ns_saved=Server saved
 t_ns_removed=Server removed
+st_skin_install=Install a skin from a URL
+k_skinurl=Address of the skin folder (with its skin.cfg)
+t_skin_installed=Skin installed
+t_skin_bad=The skin is not valid or files are missing

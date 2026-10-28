@@ -13,6 +13,7 @@ Interface drawn at 1080p with a PlayStation-style skin, designed to be driven wi
 - **Image viewer and slideshow**: open photos (jpg, png, bmp, gif, tga) from the file browser; photos taken with the phone are turned the right way up (EXIF); zoom and pan, rotate, and a slideshow every 3 to 60 seconds with fade, slide, slow zoom or random transitions, in normal or shuffled order
 - **Torrents**: the player can play a magnet link or a .torrent (from a folder, an address or an addon) while it downloads, with its own BitTorrent engine (no DHT yet). The example addon RETORRENT (`addons/torrents`) lists the .torrent files you keep on the console and plays magnet links you paste; it is not in the Store index. Addons can now show buttons, checks, choices and text fields, read folders (`list_files()`) and read web pages (`magnets()`, `links()`...)
 - **Receive files from your PC**: Files > options > *Receive files from the PC* shows an address and a PIN; open it in the browser of your PC or phone and drop the files there (no FTP program needed). Nothing is overwritten
+- **6 animated skins** (PlayStation, Aurora, Sunset, Neon, Embers, Cosmos) with their own fonts and colours, and **your own skins**: a folder with a `skin.cfg` and some PNG images, made on a PC and copied to the console or installed from a URL (see [SKINS.md](SKINS.md); template in `skin_template/`)
 - **Subtitles** (embedded + external `.srt`), **multiple audio tracks**, seeking, volume
 - **Streaming URLs**, `.m3u` / `.m3u8` lists with logos, list editor with an on-screen keyboard
 - **6 UI languages** with TrueType fonts: Spanish, English, Russian, Japanese, Chinese, Korean
@@ -204,4 +205,5 @@ Plex, Jellyfin, SomaFM, Radio Browser, Internet Archive, PeerTube and YouTube ar
 - Para probar las cuentas sin pagar nada: `python3 tools/test_server.py` levanta un servidor con tres listas de prueba (usuario `usuario1`, clave `clave-secreta`) y su propio catálogo; se usa con `MP_STORE_URL=http://127.0.0.1:8310/addons`. Para la PS5: `python3 tools/test_server.py 8310 192.168.1.50`.
 - Para compilar desde el código hace falta BennuGD2 con los cambios de `libmod_video` (parche en `engine/`).
 - Tutorial para crear addons en español: [ADDONS.es.md](ADDONS.es.md).
+- Aspectos (skins) animados, con fuente y colores propios, y los tuyos: una carpeta con un `skin.cfg` y unas imágenes PNG; se hacen en un PC y se copian a la consola o se instalan desde una URL. Guía: [SKINS.es.md](SKINS.es.md) (plantilla en `skin_template/`).
 - Los títulos de Plex con DRM no se pueden reproducir (el addon los oculta).
