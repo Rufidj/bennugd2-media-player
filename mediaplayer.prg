@@ -300,6 +300,18 @@ begin
     return substr(cd(), 0, 5) == "/app0";
 end
 
+// Nintendo Switch: el motor entra en romfs:/ (alli van el .dcb, los recursos y los idiomas) y monta la tarjeta SD como sdmc:/
+function int is_switch()
+begin
+    return substr(cd(), 0, 6) == "romfs:";
+end
+
+// PC de escritorio (ni Android, ni consola)
+function int is_desktop()
+begin
+    return getenv("ANDROID_ROOT") == "" && !is_ps5() && !is_switch();
+end
+
 // banderas de la ventana segun el ajuste (con marco / sin marco / pantalla completa); F11 alterna la pantalla completa
 function int win_flags()
 private int f;
@@ -307,7 +319,7 @@ begin
     f = 0;
     if (win_mode == 1) f |= MODE_FRAMELESS; end
     if (win_full) f |= MODE_FULLSCREEN; end
-    if (getenv("ANDROID_ROOT") == "" && !is_ps5()) f |= MODE_RESIZABLE; end                  // en PC la ventana se puede redimensionar (la imagen conserva la proporcion)
+    if (is_desktop()) f |= MODE_RESIZABLE; end                  // en PC la ventana se puede redimensionar (la imagen conserva la proporcion)
     return f;
 end
 
@@ -399,6 +411,7 @@ begin
     lang_load(lang_cur);          // carga el idioma, abre sus fuentes TrueType y crea los textos
     load_script();
     cur_dir = getenv("MEDIA_DIR");
+    if (cur_dir == "" && is_switch() && fexists("sdmc:/")) cur_dir = "sdmc:/"; end          // en la Switch se empieza por la raiz de la tarjeta SD
     if (cur_dir == "" && getenv("ANDROID_ROOT") != "")
         // en Android se abre la carpeta de los archivos del telefono (los videos,
         // la musica...), que es lo unico que hay ahi
@@ -429,7 +442,7 @@ begin
 
     while (!wm_info.exit_status)
         frame_n++;
-        if (getenv("ANDROID_ROOT") == "" && !is_ps5()) if (key(_f5)) if (!skin_f5) skin_f5 = 1; skin_loaded = -1; skin_scan(); skin_apply(); toast(skin_name()); end else skin_f5 = 0; end end    // F5: vuelve a leer el aspecto de su carpeta (para crearlos con comodidad)
+        if (is_desktop()) if (key(_f5)) if (!skin_f5) skin_f5 = 1; skin_loaded = -1; skin_scan(); skin_apply(); toast(skin_name()); end else skin_f5 = 0; end end    // F5: vuelve a leer el aspecto de su carpeta (para crearlos con comodidad)
         if (getenv("MP_FPSLOG") != "") fps_probe(); end                                                  // solo pruebas: tiempos entre fotogramas
         read_input();
         apply_script();
@@ -1841,7 +1854,7 @@ begin
             st_row(n, ST_LANG, STT_CHOICE, tr("st_lang"), tr("lang_name")); n++;
             st_row(n, ST_SKIN, STT_CHOICE, tr("st_skin"), skin_name()); n++;
             st_row(n, ST_SKININST, STT_ACTION, tr("st_skin_install"), ""); n++;
-            if (getenv("ANDROID_ROOT") == "" && !is_ps5()) st_row(n, ST_WINDOW, STT_CHOICE, tr("st_window"), win_mode == 0 ? tr("st_win0") : (win_mode == 1 ? tr("st_win1") : tr("st_win2"))); n++; end
+            if (is_desktop()) st_row(n, ST_WINDOW, STT_CHOICE, tr("st_window"), win_mode == 0 ? tr("st_win0") : (win_mode == 1 ? tr("st_win1") : tr("st_win2"))); n++; end
             st_row(n, ST_VIEW, STT_CHOICE, tr("st_view"), set_view == 0 ? tr("st_view_list") : (set_view == 1 ? tr("st_view_grid") : tr("st_view_auto"))); n++;
             st_row(n, ST_PREVIEW, STT_TOGGLE, tr("st_preview"), st_onoff(set_preview)); n++;
             st_row(n, ST_RESUME, STT_TOGGLE, tr("st_resume"), st_onoff(set_resume)); n++;
@@ -2045,10 +2058,10 @@ end
 // ====================================================================== almacen, listas y editor
 // Carpeta donde se guardan las listas: la primera de las candidatas en la que se pueda escribir
 function storage_init()
-private string c[5]; int i;
+private string c[6]; int i;
 begin
     c[0] = getenv("MP_STORE");
-    c[1] = "/data/mediaplayer";
+    c[1] = is_switch() ? "sdmc:/switch/mediaplayer" : "/data/mediaplayer";
     c[2] = "/mnt/usb0/mediaplayer";
     c[3] = "/download0/mediaplayer";
     c[4] = join_path(cd(), "mediaplayer_data");
