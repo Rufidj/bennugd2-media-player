@@ -24,6 +24,7 @@ LD_LIBRARY_PATH="$BIN" "$BIN/bgdc" mediaplayer.prg | grep -i "error" && exit 1 |
 STAGE="$(mktemp -d)"; trap 'rm -rf "$STAGE"' EXIT
 mkdir -p "$STAGE/romfs/res" "$STAGE/romfs/lang" "$STAGE/romfs/addons" "$STAGE/romfs/videos"
 cp mediaplayer.dcb "$STAGE/romfs/game.dcb"
+cp res/cacert.pem "$STAGE/romfs/cacert.pem"     # certificados raiz de Mozilla (curl.se/ca): la Switch no tiene almacen del sistema para https
 cp res/*.png "$STAGE/romfs/res/" && cp -r res/fonts res/skins "$STAGE/romfs/res/"
 cp lang/*.txt "$STAGE/romfs/lang/"
 cp lists/*.m3u "$STAGE/romfs/videos/"
