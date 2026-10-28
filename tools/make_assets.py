@@ -100,34 +100,57 @@ disc("ring", 144, 69, 70); disc("knob", 39, 18, 255)
 # ---- aspecto "PlayStation": fondo degradado, olas, selector en pastilla y simbolos de botones (estetica propia, sin logotipos)
 import math
 from PIL import ImageFilter
-bg = Image.new("RGB", (1920, 1080))
-d = ImageDraw.Draw(bg)
-for y in range(1080):
-    t = y / 1079.0
-    d.line([(0, y), (1920, y)], fill=(int(6 + 4*t), int(14 + 40*t), int(46 + 92*t)))
-glow = Image.new("RGB", (1920, 1080), (0, 0, 0))
-ImageDraw.Draw(glow).ellipse([240, 570, 1680, 1350], fill=(20, 80, 190))
-glow = glow.filter(ImageFilter.GaussianBlur(180))
-bg = Image.blend(bg, Image.composite(glow, bg, Image.new("L", (1920, 1080), 255)), 0.45)
-bg.save(f"{out}/bg_ps.png")
+# cada aspecto: color superior e inferior del fondo, resplandor, y un color por ola (relleno, linea) + el de la pastilla.
+# Las lineas son translucidas y con un halo suave (no un trazo duro)
+SKINS = {
+    "ps":     dict(top=(6, 14, 46),  bot=(10, 54, 138), glow=(20, 80, 190),  waves=[((120, 180, 255), (190, 225, 255)), ((90, 150, 255), (170, 210, 255)), ((160, 210, 255), (220, 240, 255))], pill=(175, 215, 255)),
+    "aurora": dict(top=(4, 20, 30),  bot=(8, 92, 96),   glow=(20, 170, 130), waves=[((90, 230, 190), (170, 255, 225)), ((60, 190, 170), (140, 240, 215)), ((140, 240, 210), (210, 255, 240))], pill=(160, 255, 220)),
+    "sunset": dict(top=(26, 10, 52), bot=(150, 56, 84), glow=(235, 110, 70), waves=[((255, 150, 110), (255, 205, 170)), ((230, 110, 140), (255, 180, 200)), ((255, 190, 120), (255, 225, 180))], pill=(255, 200, 170)),
+    "carbon": dict(top=(8, 8, 10),   bot=(44, 46, 54),  glow=(90, 96, 112),  waves=[((170, 176, 190), (215, 220, 232)), ((140, 146, 160), (200, 206, 220)), ((190, 196, 210), (230, 234, 244))], pill=(210, 216, 230)),
+    "ruby":   dict(top=(22, 4, 10),  bot=(112, 20, 44), glow=(190, 40, 70),  waves=[((255, 110, 130), (255, 180, 195)), ((220, 70, 100), (250, 150, 170)), ((255, 150, 160), (255, 205, 210))], pill=(255, 175, 190)),
+}
+import math
+from PIL import ImageFilter
 
-def wave(name, base, amp, n, phase, col, edge):
+def skin_bg(key, c):
+    bg = Image.new("RGB", (1920, 1080)); d = ImageDraw.Draw(bg)
+    for y in range(1080):
+        t = y / 1079.0
+        d.line([(0, y), (1920, y)], fill=tuple(int(c["top"][i] + (c["bot"][i] - c["top"][i]) * t) for i in range(3)))
+    glow = Image.new("RGB", (1920, 1080), (0, 0, 0))
+    ImageDraw.Draw(glow).ellipse([240, 570, 1680, 1350], fill=c["glow"])
+    glow = glow.filter(ImageFilter.GaussianBlur(180))
+    bg = Image.blend(bg, Image.composite(glow, bg, Image.new("L", (1920, 1080), 255)), 0.45)
+    bg.save(f"{out}/skin_{key}_bg.png")
+
+def skin_wave(key, k, base, amp, n, phase, fill, edge):
     W, H = 3840, 1080
-    im = Image.new("RGBA", (W, H), (0, 0, 0, 0)); dd = ImageDraw.Draw(im)
     pts = [(x, F*base + F*amp * math.sin(2*math.pi*n*x/1920.0 + phase) + 0.35*F*amp*math.sin(2*math.pi*2*n*x/1920.0 + phase*1.7)) for x in range(0, W + 1, 8)]
-    dd.polygon(pts + [(W, H), (0, H)], fill=col)
-    dd.line(pts, fill=edge, width=4)
-    im.save(f"{out}/{name}.png")
-wave("wave0", 470, 42, 1, 0.0, (120, 180, 255, 30), (190, 225, 255, 70))
-wave("wave1", 545, 32, 2, 1.7, (90, 150, 255, 36), (170, 210, 255, 80))
-wave("wave2", 615, 26, 2, 3.4, (160, 210, 255, 42), (220, 240, 255, 90))
+    fl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(fl).polygon(pts + [(W, H), (0, H)], fill=fill + (26,))               # relleno muy tenue
+    ln = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(ln).line(pts, fill=edge + (60,), width=3)                              # linea fina y translucida
+    halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    ImageDraw.Draw(halo).line(pts, fill=edge + (70,), width=14)
+    halo = halo.filter(ImageFilter.GaussianBlur(9))                                       # halo suave alrededor de la linea
+    im = Image.alpha_composite(Image.alpha_composite(fl, halo), ln)
+    im.save(f"{out}/skin_{key}_w{k}.png")
 
-def pill(name, w, h):
+def skin_pill(key, col, w=1056, h=72):
     k = 4
     im = Image.new("RGBA", (w*k, h*k), (0, 0, 0, 0)); dd = ImageDraw.Draw(im)
-    dd.rounded_rectangle([3*k, 3*k, (w-3)*k, (h-3)*k], radius=(h//2-3)*k, fill=(255, 255, 255, 46), outline=(175, 215, 255, 215), width=3*k)
-    im.resize((w, h), Image.LANCZOS).save(f"{out}/{name}.png")
-pill("sel_pill", 1056, 72)
+    dd.rounded_rectangle([3*k, 3*k, (w-3)*k, (h-3)*k], radius=(h//2-3)*k, fill=col + (34,), outline=col + (120,), width=2*k)
+    im = im.resize((w, h), Image.LANCZOS)
+    halo = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    ImageDraw.Draw(halo).rounded_rectangle([3, 3, w-3, h-3], radius=h//2-3, outline=col + (90,), width=5)
+    halo = halo.filter(ImageFilter.GaussianBlur(3))
+    Image.alpha_composite(halo, im).save(f"{out}/skin_{key}_pill.png")
+
+for key, c in SKINS.items():
+    skin_bg(key, c)
+    for k, (base, amp, n, ph) in enumerate([(470, 42, 1, 0.0), (545, 32, 2, 1.7), (615, 26, 2, 3.4)]):
+        skin_wave(key, k, base, amp, n, ph, c["waves"][k][0], c["waves"][k][1])
+    skin_pill(key, c["pill"])
 
 def symbol(name, col, kind):
     k = 4; n = 72

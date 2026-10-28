@@ -67,6 +67,7 @@ const
     // ajustes: tipo de fila y su identificador
     STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
     ST_WINDOW = 26; ST_UPDATES = 27; ST_CHECKNOW = 28;
+    SKIN_COUNT = 6;
     ST_LANG = 1; ST_SKIN = 2; ST_PREVIEW = 3; ST_SEEK = 4; ST_VIZ = 5; ST_UNKNOWN = 6; ST_INSTALL = 7; ST_STOREURL = 8; ST_ACCOUNTS = 9;
     ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18; ST_HIDDEN = 19; ST_ALLFILES = 20; ST_TORKEEP = 21; ST_TORUP = 22; ST_TOREXTRA = 23; ST_TORDHT = 24; ST_RESUME = 25;
     APP_VERSION = "1.1.1";
@@ -217,7 +218,8 @@ global
     int txt_mtitle, txt_mopt[10], txt_mhint, txt_kbin, txt_kbrow[5], txt_kbs[6];
     // idioma y aspecto
     string lang_cur = "es"; string lang_k[480]; string lang_v[480]; int lang_n, lang_ver;
-    int skin = 1;                                 // 0 clasico, 1 PlayStation
+    int skin = 1;                                 // 0 clasico, 1 PlayStation, 2 Aurora, 3 Atardecer, 4 Carbon, 5 Rubi
+    int skin_loaded = -1;                         // aspecto cuyos graficos estan en memoria
     int g_bg_ps, g_wave[3], g_pill, g_sym[4];
     int hint_key = -1, hint_n, hint_ic[6], hint_icx[6]; string s_h[6]; int txt_h[6];
     int sc_f[200], sc_a[200], sc_n;               // entrada guiada para pruebas (MP_SCRIPT)
@@ -504,9 +506,7 @@ begin
     g_ovdim = map_new(8, 8);   map_clear(0, g_ovdim, rgba(0, 0, 0, 160));            // ventana de progreso: fondo atenuado, caja y relleno
     g_ovbox = map_new(8, 8);   map_clear(0, g_ovbox, rgba(16, 28, 60, 250));
     g_ovfill = map_new(8, 8);  map_clear(0, g_ovfill, rgba(90, 170, 255, 255));
-    g_bg_ps = map_load("res/bg_ps.png"); hires(g_bg_ps);
-    for (i = 0; i < 3; i++) g_wave[i] = map_load("res/wave" + i + ".png"); hires(g_wave[i]); end
-    g_pill  = map_load("res/sel_pill.png"); hires(g_pill);
+    skin_load();
     make_cursor();
     g_sym[0] = map_load("res/sym_cross.png"); g_sym[1] = map_load("res/sym_circle.png");
     g_sym[2] = map_load("res/sym_triangle.png"); g_sym[3] = map_load("res/sym_square.png");
@@ -1415,6 +1415,47 @@ end
 
 
 // ====================================================================== aspecto (skin)
+function string skin_key()
+begin
+    switch (skin)
+        case 2: return "aurora"; end
+        case 3: return "sunset"; end
+        case 4: return "carbon"; end
+        case 5: return "ruby"; end
+    end
+    return "ps";
+end
+
+function string skin_name()
+begin
+    switch (skin)
+        case 0: return tr("skin_classic"); end
+        case 1: return tr("skin_ps"); end
+        case 2: return tr("skin_aurora"); end
+        case 3: return tr("skin_sunset"); end
+        case 4: return tr("skin_carbon"); end
+        case 5: return tr("skin_ruby"); end
+    end
+    return "";
+end
+
+// Carga los graficos del aspecto elegido (fondo, tres olas y pastilla) y libera los del anterior: cada ola ocupa unos 16 MB
+function skin_load()
+private int k; string kk;
+begin
+    if (skin_loaded == skin) return 0; end
+    if (skin_loaded > 0)
+        map_unload(0, g_bg_ps); map_unload(0, g_pill);
+        for (k = 0; k < 3; k++) map_unload(0, g_wave[k]); end
+    end
+    skin_loaded = skin;
+    if (skin <= 0) return 0; end
+    kk = skin_key();
+    g_bg_ps = map_load("res/skin_" + kk + "_bg.png"); hires(g_bg_ps);
+    for (k = 0; k < 3; k++) g_wave[k] = map_load("res/skin_" + kk + "_w" + k + ".png"); hires(g_wave[k]); end
+    g_pill = map_load("res/skin_" + kk + "_pill.png"); hires(g_pill);
+end
+
 // Fondo degradado con tres olas que se desplazan despacio (solo con el aspecto PlayStation)
 function draw_bg()
 private int k, ox;
@@ -1758,7 +1799,7 @@ begin
         if (p > 0)
             k = substr(ln, 0, p); v = substr(ln, p + 1);
             if (k == "lang" && is_lang(v)) lang_cur = v; end
-            if (k == "skin") skin = atoi(v) ? 1 : 0; end
+            if (k == "skin") skin = atoi(v); if (skin < 0 || skin >= SKIN_COUNT) skin = 1; end end
             if (k == "pv") set_preview = atoi(v) ? 1 : 0; end
             if (k == "seek") set_seek = atoi(v); if (set_seek < 0 || set_seek > 3) set_seek = 1; end end
             if (k == "unk") set_unknown = atoi(v) ? 1 : 0; end
@@ -1845,7 +1886,7 @@ begin
     switch (st_cat)
         case 0:                                                  // interfaz
             st_row(n, ST_LANG, STT_CHOICE, tr("st_lang"), tr("lang_name")); n++;
-            st_row(n, ST_SKIN, STT_CHOICE, tr("st_skin"), skin ? tr("skin_ps") : tr("skin_classic")); n++;
+            st_row(n, ST_SKIN, STT_CHOICE, tr("st_skin"), skin_name()); n++;
             if (getenv("ANDROID_ROOT") == "" && !is_ps5()) st_row(n, ST_WINDOW, STT_CHOICE, tr("st_window"), win_mode == 0 ? tr("st_win0") : (win_mode == 1 ? tr("st_win1") : tr("st_win2"))); n++; end
             st_row(n, ST_VIEW, STT_CHOICE, tr("st_view"), set_view == 0 ? tr("st_view_list") : (set_view == 1 ? tr("st_view_grid") : tr("st_view_auto"))); n++;
             st_row(n, ST_PREVIEW, STT_TOGGLE, tr("st_preview"), st_onoff(set_preview)); n++;
@@ -1902,7 +1943,7 @@ begin
             lang_load(d > 0 ? next_lang() : next_lang());       // el reproductor solo avanza en la lista de idiomas
             cfg_save();
         end
-        case ST_SKIN: skin = !skin; cfg_save(); end
+        case ST_SKIN: skin = (skin + SKIN_COUNT + (d < 0 ? -1 : 1)) % SKIN_COUNT; skin_load(); cfg_save(); end
         case ST_WINDOW: win_mode = (win_mode + 3 + d) % 3; cfg_save(); if ((win_mode == 2) != win_full) win_full = (win_mode == 2); screen.fullscreen = win_full; set_mode(RW, RH, win_flags()); end end
         case ST_RESUME: set_resume = !set_resume; cfg_save(); end
         case ST_UPDATES: set_updates = !set_updates; cfg_save(); end
@@ -2038,7 +2079,7 @@ function open_settings_menu(int keep)
 begin
     menu_clear();
     menu_add(tr("m_lang") + tr("lang_name"), MA_LANG);
-    menu_add(tr("m_skin") + (skin ? tr("skin_ps") : tr("skin_classic")), MA_SKIN);
+    menu_add(tr("m_skin") + (skin_name()), MA_SKIN);
     menu_add(tr("m_accounts"), MA_ACCOUNTS);
     menu_add(tr("m_about"), MA_ABOUT);
     menu_add(tr("m_back"), MA_CANCEL);
@@ -2358,7 +2399,7 @@ begin
         case MA_IMG_CLOSE: close_image(); end
         case MA_STORE_REFRESH: store_open(); end
         case MA_SKIN:
-            skin = !skin; cfg_save(); open_settings_menu(1);
+            skin = (skin + 1) % SKIN_COUNT; skin_load(); cfg_save(); open_settings_menu(1);
         end
         case MA_PSPEED, MA_PSUB, MA_PAV, MA_PREP, MA_PSHUF: play_menu_adjust(act, 1); end
         case MA_NETDEL: net_remove(atoi(entry_url[sel])); end
