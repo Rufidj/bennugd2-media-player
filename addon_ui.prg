@@ -42,6 +42,9 @@ global
     // ventana de progreso propia (la barra del sistema de la PS5 no se puede usar desde un titulo)
     int    ov_on, ov_pct, ov_cancel;    // visible / porcentaje 0-100 / con boton de cancelar
     string ov_title = "", s_ovt = "", s_ovp = "", s_ovh = "";
+    int    ov_dlg;                              // 1 = la ventana es un "dialog" de un addon (titulo, texto y codigo)
+    string ov_code = "", s_ovc = "";
+    int    txt_ovc;
     string ov_sub = "", ov_btn = "";             // texto bajo la barra (si no, el porcentaje) y texto del boton (si no, "Cancelar")
     int    txt_ovt, txt_ovp, txt_ovh;
     string wid_name = "";                      // ajuste que edita el campo de texto abierto
@@ -109,6 +112,22 @@ begin
     return 1;
 end
 
+// ventana aparte de un addon: titulo, un texto y (si hace falta) un codigo grande en el centro; con boton para cancelar
+function host_dialog(string title, string text, string code)
+private string g; int i;
+begin
+    g = code;
+    if (len(code) == 8) g = substr(code, 0, 4) + " " + substr(code, 4, 4); end
+    ov_dlg = 1; ov_on = 1; ov_title = title; ov_cancel = 1; ov_pct = 0; ov_sub = text; ov_code = g; ov_btn = "";
+    return 1;
+end
+
+function host_dialog_clear()
+begin
+    if (ov_dlg) ov_dlg = 0; ov_on = 0; ov_cancel = 0; ov_sub = ""; ov_code = ""; ov_btn = ""; end
+    return 1;
+end
+
 function host_message(string text)
 begin
     s_amsg = text != "" ? text : tr("s_loading");
@@ -125,8 +144,8 @@ begin
     if (wm_info.exit_status) ad_cancelled = 1; end
     if (modal != M_NONE)
         update_modal();
-    elseif (act_press[A_BACK])
-        ad_cancelled = 1;                     // ○ cancela lo que esté esperando el addon
+    elseif (act_press[A_BACK] || (ov_dlg && ov_cancel_asked()))
+        ad_cancelled = 1;                     // ○ (o un clic en el boton de una ventana de dialogo) cancela lo que esté esperando el addon
     end
     for (i = 0; i < A_COUNT; i++) act_press[i] = 0; end        // lo pulsado aquí ya está gastado (no debe llegar al explorador)
     layout_all();
@@ -927,15 +946,22 @@ begin
     spr_sizex[S_OVDIM] = SW / 8 * 100; spr_sizey[S_OVDIM] = SH / 8 * 100;
     put(S_OVBOX, g_ovbox, SW / 2, SH / 2, 100, 255, -22);
     spr_sizex[S_OVBOX] = 820 / 8 * 100; spr_sizey[S_OVBOX] = 270 / 8 * 100;
+    if (ov_dlg)                                    // dialogo de un addon: el codigo va dentro de una casilla clara, sin barra de progreso
+        put(S_OVBG, g_barbg, SW / 2, OV_BARY, 100, 255, -23);
+        spr_sizex[S_OVBG] = 420 / 8 * 100; spr_sizey[S_OVBG] = 60 * 100 / 8;
+        if (s_ovc != ov_code) s_ovc = ov_code; end
+        txt_want[txt_ovc] = 8589934336 + (255);
+    else
     put(S_OVBG, g_barbg, SW / 2, OV_BARY, 100, 255, -23);
     spr_sizex[S_OVBG] = 700 / 8 * 100; spr_sizey[S_OVBG] = 16 * 100 / 8;
-    w = ov_pct * 700 / 100;
+    end
+    w = ov_dlg ? 0 : ov_pct * 700 / 100;
     if (w > 0)
         put(S_OVFG, g_ovfill, SW / 2 - 350 + w / 2, OV_BARY, 100, 255, -24);
         spr_sizex[S_OVFG] = w * 100 / 8; spr_sizey[S_OVFG] = 16 * 100 / 8;
     end
     if (s_ovt != fit_text(ov_title, 760)) s_ovt = fit_text(ov_title, 760); end
-    if (s_ovp != (ov_sub != "" ? ov_sub : ov_pct + " %")) s_ovp = ov_sub != "" ? ov_sub : ov_pct + " %"; end
+    if (s_ovp != (ov_sub != "" || ov_dlg ? ov_sub : ov_pct + " %")) s_ovp = ov_sub != "" || ov_dlg ? ov_sub : ov_pct + " %"; end
     txt_want[txt_ovt] = 8589934336 + (255);
     txt_want[txt_ovp] = 8589934336 + (230);
     if (ov_cancel)

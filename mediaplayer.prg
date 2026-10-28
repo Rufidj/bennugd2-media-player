@@ -580,6 +580,7 @@ begin
     txt_amsg = write_var(fnt_t, ur(SW / 2), ur(SH / 2), -25, 4, s_amsg);
     txt_ovt = write_var(fnt_t, ur(SW / 2), ur(OV_TY), -30, 4, s_ovt);
     txt_ovp = write_var(fnt_t, ur(SW / 2), ur(OV_PY), -30, 4, s_ovp);
+    txt_ovc = write_var(fnt_t, ur(SW / 2), ur(OV_BARY), -30, 4, s_ovc);
     txt_ovh = write_var(fnt_t, ur(SW / 2), ur(OV_BY), -30, 4, s_ovh);
     for (i = 0; i < 6; i++) txt_tab[i] = write_var(fnt_t, ur(0), ur(44), -20, 3, s_tab[i]); end
     for (i = 0; i < 10; i++) txt_stv[i] = write_var(fnt_t, ur(SW - 130), ur(190 + i * 52), -30, 5, s_stv[i]); end
@@ -3181,7 +3182,7 @@ begin
     for (i = 0; i < 6; i++) txt_want[txt_tab[i]] = 8589934336 + (0); end
     for (i = 0; i < 10; i++) txt_want[txt_stv[i]] = 8589934336 + (0); end
     for (i = 0; i < 6; i++) txt_want[txt_stc[i]] = 8589934336 + (0); end
-    txt_want[txt_amsg] = 8589934336 + (0); txt_want[txt_ovt] = 8589934336 + (0); txt_want[txt_ovp] = 8589934336 + (0); txt_want[txt_ovh] = 8589934336 + (0);
+    txt_want[txt_amsg] = 8589934336 + (0); txt_want[txt_ovt] = 8589934336 + (0); txt_want[txt_ovp] = 8589934336 + (0); txt_want[txt_ovh] = 8589934336 + (0); txt_want[txt_ovc] = 8589934336 + (0);
     txt_want[txt_mtitle] = 8589934336 + (0); txt_want[txt_mhint] = 8589934336 + (0); txt_want[txt_kbin] = 8589934336 + (0); for (i = 0; i < 6; i++) txt_want[txt_kbs[i]] = 8589934336 + (0); end
     for (i = 0; i < 10; i++) txt_want[txt_mopt[i]] = 8589934336 + (0); end
     for (i = 0; i < 5; i++) txt_want[txt_kbrow[i]] = 8589934336 + (0); end

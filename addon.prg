@@ -657,7 +657,7 @@ const
     CM_CONTAINS = 10; CM_STARTS = 11; CM_ENDS = 12;
     // sentencias
     SK_SET = 0; SK_ADD = 1; SK_IF = 2; SK_FOR = 3; SK_WHILE = 4; SK_REPEAT = 5; SK_STOP = 6; SK_SKIP = 7; SK_EXIT = 8; SK_FETCH = 9; SK_TRY = 10;
-    SK_FAIL = 11; SK_SHOW = 12; SK_ASK = 13; SK_MESSAGE = 14; SK_WAIT = 15; SK_SAVE = 16; SK_LOG = 17; SK_GIVE = 18; SK_CALL = 19; SK_CLEAR = 20; SK_GOTO = 21;
+    SK_FAIL = 11; SK_SHOW = 12; SK_ASK = 13; SK_MESSAGE = 14; SK_WAIT = 15; SK_SAVE = 16; SK_LOG = 17; SK_GIVE = 18; SK_CALL = 19; SK_CLEAR = 20; SK_GOTO = 21; SK_DIALOG = 22;
     FL_NORMAL = 0; FL_STOP = 1; FL_SKIP = 2; FL_EXIT = 3; FL_RETURN = 4;
 end
 
@@ -1157,6 +1157,7 @@ begin
     elseif (w == "clear")
         ad_ct++;
         if (ad_isw("message")) ad_ct++; s = ad_new_stmt(SK_MESSAGE); ad_need_end(); return s; end
+        if (ad_isw("dialog")) ad_ct++; s = ad_new_stmt(SK_DIALOG); ad_need_end(); return s; end
         s = ad_new_stmt(SK_CLEAR); ad_se[s * 8] = ad_parse_postfix(); ad_need_end();
     elseif (w == "if")
         ad_ct++; s = ad_new_stmt(SK_IF); ad_se[s * 8] = ad_parse_or(); ad_needs(":", "at the end of the 'if' line"); ad_need_end();
@@ -1238,6 +1239,16 @@ begin
         end
         ad_need_end();
     elseif (w == "message") ad_ct++; s = ad_new_stmt(SK_MESSAGE); ad_se[s * 8] = ad_parse_or(); ad_need_end();
+    elseif (w == "dialog")
+        // dialog TITLE showing TEXT [with code CODE]: una ventana aparte (con boton de cancelar) para mostrar, por ejemplo, un codigo que hay que escribir en otra pantalla
+        ad_ct++; s = ad_new_stmt(SK_DIALOG); ad_se[s * 8] = ad_parse_or();
+        ad_needw("showing", "after the title in 'dialog TITLE showing TEXT'");
+        ad_se[s * 8 + 1] = ad_parse_or();
+        if (ad_accw("with"))
+            ad_needw("code", "after 'with' in 'dialog TITLE showing TEXT with code CODE'");
+            ad_se[s * 8 + 2] = ad_parse_or();
+        end
+        ad_need_end();
     elseif (w == "wait") ad_ct++; s = ad_new_stmt(SK_WAIT); ad_se[s * 8] = ad_parse_or(); ad_accw("seconds"); ad_need_end();
     elseif (w == "save")
         ad_ct++; s = ad_new_stmt(SK_SAVE);
@@ -2545,6 +2556,14 @@ begin
         case SK_CALL: ad_eval(ad_se[s * 8]); return FL_NORMAL; end
         case SK_FAIL: ad_err = ad_text(ad_eval(ad_se[s * 8])); if (ad_err == "") ad_err = "the addon stopped with an error"; end return FL_NORMAL; end
         case SK_LOG: host_log(ad_text(ad_eval(ad_se[s * 8]))); return FL_NORMAL; end
+        case SK_DIALOG:
+            if (ad_se[s * 8] != 0)
+                host_dialog(ad_text(ad_eval(ad_se[s * 8])), ad_text(ad_eval(ad_se[s * 8 + 1])), ad_se[s * 8 + 2] != 0 ? ad_text(ad_eval(ad_se[s * 8 + 2])) : "");
+            else
+                host_dialog_clear();
+            end
+            return FL_NORMAL;
+        end
         case SK_MESSAGE:
             if (ad_se[s * 8] != 0) host_message(ad_text(ad_eval(ad_se[s * 8]))); else host_message(""); end
             return FL_NORMAL;
@@ -2655,7 +2674,7 @@ begin
         ad_sc_set(ad_pg_par[pg * 12 + i], v < 0 ? 0 : v);
     end
     ad_exec_block(ad_pg_body[pg]);
-    host_message("");
+    host_message(""); host_dialog_clear();
     if (ad_cancelled) return 2; end
     if (ad_err != "") return 1; end
     return 0;
