@@ -66,7 +66,7 @@ const
     MA_IMG_SLIDE = 48; MA_IMG_INT = 49; MA_IMG_TR = 50; MA_IMG_SHUF = 51; MA_IMG_ROT = 52; MA_IMG_INFO = 53; MA_IMG_CLOSE = 54; MA_TOR_FILE = 60; MA_FRECV = 55; MA_RS_YES = 56; MA_RS_NO = 57; MA_PREP = 75; MA_PSHUF = 76; MA_PSPEED = 70; MA_PSUB = 71; MA_PAV = 72; MA_PAUDIO = 73; MA_PSUBS = 74;
     // ajustes: tipo de fila y su identificador
     STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
-    ST_WINDOW = 26;
+    ST_WINDOW = 26; ST_UPDATES = 27; ST_CHECKNOW = 28;
     ST_LANG = 1; ST_SKIN = 2; ST_PREVIEW = 3; ST_SEEK = 4; ST_VIZ = 5; ST_UNKNOWN = 6; ST_INSTALL = 7; ST_STOREURL = 8; ST_ACCOUNTS = 9;
     ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18; ST_HIDDEN = 19; ST_ALLFILES = 20; ST_TORKEEP = 21; ST_TORUP = 22; ST_TOREXTRA = 23; ST_TORDHT = 24; ST_RESUME = 25;
     APP_VERSION = "1.1.1";
@@ -114,6 +114,9 @@ global
     int wave_f; int wave_pos[3];                                  // posicion de las olas en 1/64 de pixel
     int win_mode, win_full;                           // ajuste: 0 con marco, 1 sin marco, 2 pantalla completa; win_full = pantalla completa activada con F11
     string title_base = "";                          // titulo del video (sin el capitulo)
+    int set_updates = 1;                              // ajuste: mirar si hay una version nueva al iniciar
+    int upd_state, upd_manual, upd_t;                 // comprobacion de version: 0 nada, 1 esperando la respuesta; upd_manual = la pidio el usuario
+    string upd_new = "";                              // version nueva encontrada ("" si no hay)
     int play_repeat, play_shuffle;                     // repetir (0 no, 1 la lista, 2 este video) y orden aleatorio
     int play_speed = 100, sub_delay_ms, av_off_ms;     // velocidad (%), retardo de subtitulos y desfase de la imagen (ms) del video que se ve
     int kp_slow, kp_fast, kp_subm, kp_subp, kp_avm, kp_avp, kp_menu, kp_r2, kp_l2, kp_r3;   // teclas / gatillos de la fotograma anterior (para detectar la pulsacion)
@@ -247,6 +250,8 @@ declare function string cut_text(string t, int n) end
 declare function string fit_text(string t, int maxw) end
 declare function read_dir() end
 declare function int rs_playable() end
+declare function update_check() end
+declare function upd_begin(int manual) end
 declare function reselect(int i) end
 declare function toast(string t) end
 declare function string tail_fit(string t, int maxw) end
@@ -355,6 +360,7 @@ include "imageviewer.prg";
 include "torrentplay.prg";
 include "receive.prg";
 include "resume.prg";
+include "update.prg";
 
 process main()
 private
@@ -429,6 +435,7 @@ begin
             load_wait--;
             if (load_wait == 0) s_toast = ""; toast_t = 0; start_video(load_path); load_path = ""; end
         end
+        update_check();
         if (modal != M_NONE) update_modal(); elseif (state == ST_BROWSE) update_browser(); elseif (state == ST_IMAGE) update_image(); else update_player(); end
         layout_all();
         draw_cursor();
@@ -1745,6 +1752,7 @@ begin
             if (k == "hidden") set_hidden = atoi(v); end
             if (k == "allfiles") set_allfiles = atoi(v); end
             if (k == "view") set_view = atoi(v); if (set_view < 0 || set_view > 2) set_view = 2; end end
+            if (k == "updates") set_updates = atoi(v); end
             if (k == "window") win_mode = atoi(v); if (win_mode < 0 || win_mode > 2) win_mode = 0; end end
         end
     end
@@ -1767,6 +1775,7 @@ begin
     fputs(fh, "view=" + set_view);
     fputs(fh, "resume=" + set_resume);
     fputs(fh, "window=" + win_mode);
+    fputs(fh, "updates=" + set_updates);
     fputs(fh, "torkeep=" + set_tor_keep);
     fputs(fh, "torextra=" + set_tor_extra);
     fputs(fh, "tordht=" + set_tor_dht);
@@ -1845,7 +1854,9 @@ begin
             st_row(n, ST_CLEARCACHE, STT_ACTION, tr("st_clear_cache"), ""); n++;
         end
         default:                                                 // acerca de
-            st_row(n, ST_VERSION, STT_INFO, tr("st_version"), APP_VERSION); n++;
+            st_row(n, ST_VERSION, STT_INFO, tr("st_version"), APP_VERSION + (upd_new != "" ? "  (" + tr("s_newver") + " " + upd_new + ")" : "")); n++;
+            st_row(n, ST_UPDATES, STT_TOGGLE, tr("st_updates"), st_onoff(set_updates)); n++;
+            st_row(n, ST_CHECKNOW, STT_ACTION, tr("st_checknow"), upd_state ? tr("s_checking") : ""); n++;
             st_row(n, ST_CREDITS, STT_ACTION, tr("m_about"), ""); n++;
         end
     end
@@ -1871,6 +1882,7 @@ begin
         case ST_SKIN: skin = !skin; cfg_save(); end
         case ST_WINDOW: win_mode = (win_mode + 3 + d) % 3; cfg_save(); if ((win_mode == 2) != win_full) win_full = (win_mode == 2); screen.fullscreen = win_full; set_mode(RW, RH, win_flags()); end end
         case ST_RESUME: set_resume = !set_resume; cfg_save(); end
+        case ST_UPDATES: set_updates = !set_updates; cfg_save(); end
         case ST_TORKEEP: set_tor_keep = !set_tor_keep; cfg_save(); end
         case ST_TOREXTRA: set_tor_extra = !set_tor_extra; tor_apply_settings(); cfg_save(); end
         case ST_TORDHT: set_tor_dht = !set_tor_dht; tor_apply_settings(); cfg_save(); end
@@ -1915,6 +1927,7 @@ begin
             menu_show(tr("mt_clear_cache"));
         end
         case ST_CREDITS: credits_open(); end
+        case ST_CHECKNOW: upd_begin(1); end
     end
 end
 
