@@ -1,0 +1,11 @@
+# Comprobaciones rapidas en cada subida: que los 6 idiomas tengan las mismas claves y que todas las que usa el codigo existan.
+# (No compila el motor ni los paquetes: eso se hace a mano con make_release.sh / build_ps5.sh.)
+name: checks
+on: [push, pull_request]
+jobs:
+  lang:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Idiomas
+        run: python3 tools/check_lang.py
