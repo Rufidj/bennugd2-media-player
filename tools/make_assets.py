@@ -100,57 +100,154 @@ disc("ring", 144, 69, 70); disc("knob", 39, 18, 255)
 # ---- aspecto "PlayStation": fondo degradado, olas, selector en pastilla y simbolos de botones (estetica propia, sin logotipos)
 import math
 from PIL import ImageFilter
-# cada aspecto: color superior e inferior del fondo, resplandor, y un color por ola (relleno, linea) + el de la pastilla.
-# Las lineas son translucidas y con un halo suave (no un trazo duro)
-SKINS = {
-    "ps":     dict(top=(6, 14, 46),  bot=(10, 54, 138), glow=(20, 80, 190),  waves=[((120, 180, 255), (190, 225, 255)), ((90, 150, 255), (170, 210, 255)), ((160, 210, 255), (220, 240, 255))], pill=(175, 215, 255)),
-    "aurora": dict(top=(4, 20, 30),  bot=(8, 92, 96),   glow=(20, 170, 130), waves=[((90, 230, 190), (170, 255, 225)), ((60, 190, 170), (140, 240, 215)), ((140, 240, 210), (210, 255, 240))], pill=(160, 255, 220)),
-    "sunset": dict(top=(26, 10, 52), bot=(150, 56, 84), glow=(235, 110, 70), waves=[((255, 150, 110), (255, 205, 170)), ((230, 110, 140), (255, 180, 200)), ((255, 190, 120), (255, 225, 180))], pill=(255, 200, 170)),
-    "carbon": dict(top=(8, 8, 10),   bot=(44, 46, 54),  glow=(90, 96, 112),  waves=[((170, 176, 190), (215, 220, 232)), ((140, 146, 160), (200, 206, 220)), ((190, 196, 210), (230, 234, 244))], pill=(210, 216, 230)),
-    "ruby":   dict(top=(22, 4, 10),  bot=(112, 20, 44), glow=(190, 40, 70),  waves=[((255, 110, 130), (255, 180, 195)), ((220, 70, 100), (250, 150, 170)), ((255, 150, 160), (255, 205, 210))], pill=(255, 175, 190)),
-}
+# ---- aspectos animados. Cada uno tiene su fondo, su pastilla de seleccion y sus propias piezas que el reproductor mueve
+# (olas, cortinas de luz, sol y nubes, rejilla neon, brasas, estrellas). Las piezas salen a tamano real (x1.5)
 import math
-from PIL import ImageFilter
+import numpy as np
+from PIL import ImageFilter, ImageChops
 
-def skin_bg(key, c):
-    bg = Image.new("RGB", (1920, 1080)); d = ImageDraw.Draw(bg)
-    for y in range(1080):
-        t = y / 1079.0
-        d.line([(0, y), (1920, y)], fill=tuple(int(c["top"][i] + (c["bot"][i] - c["top"][i]) * t) for i in range(3)))
-    glow = Image.new("RGB", (1920, 1080), (0, 0, 0))
-    ImageDraw.Draw(glow).ellipse([240, 570, 1680, 1350], fill=c["glow"])
-    glow = glow.filter(ImageFilter.GaussianBlur(180))
-    bg = Image.blend(bg, Image.composite(glow, bg, Image.new("L", (1920, 1080), 255)), 0.45)
-    bg.save(f"{out}/skin_{key}_bg.png")
+def save_rgba(arr, name):
+    Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGBA").save(f"{out}/{name}.png")
 
+def vgrad(top, bot, w=1920, h=1080):
+    t = np.linspace(0, 1, h)[:, None, None]
+    img = np.array(top, float)[None, None, :] * (1 - t) + np.array(bot, float)[None, None, :] * t
+    return np.repeat(img, w, axis=1)
+
+def glow_blob(w, h, cx, cy, rx, ry, col, power=2.0):
+    y, x = np.mgrid[0:h, 0:w]
+    d = np.sqrt(((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2)
+    a = np.clip(1 - d, 0, 1) ** power
+    return a[..., None] * np.array(col, float)[None, None, :]
+
+def bg_save(key, arr):
+    Image.fromarray(np.clip(arr, 0, 255).astype(np.uint8), "RGB").save(f"{out}/skin_{key}_bg.png")
+
+def dot(key, name, col, size=96, power=2.4, spike=0.0):
+    y, x = np.mgrid[0:size, 0:size]; c = (size - 1) / 2.0
+    d = np.sqrt((x - c) ** 2 + (y - c) ** 2) / c
+    a = np.clip(1 - d, 0, 1) ** power
+    if spike:
+        a = np.maximum(a, spike * np.clip(1 - np.abs(x - c) / c, 0, 1) ** 6 * np.clip(1 - np.abs(y - c) / (c * 0.25), 0, 1) ** 2)
+        a = np.maximum(a, spike * np.clip(1 - np.abs(y - c) / c, 0, 1) ** 6 * np.clip(1 - np.abs(x - c) / (c * 0.25), 0, 1) ** 2)
+    arr = np.zeros((size, size, 4)); arr[..., :3] = col; arr[..., 3] = a * 255
+    save_rgba(arr, f"skin_{key}_{name}")
+
+def pill(key, col, style="round", w=1056, h=72):
+    k = 4
+    im = Image.new("RGBA", (w*k, h*k), (0, 0, 0, 0)); dd = ImageDraw.Draw(im)
+    if style == "chamfer":                                    # esquinas cortadas y doble linea (neon)
+        c = 20
+        pts = lambda m: [(m+c, m), (w-m, m), (w-m, h-m-c), (w-m-c, h-m), (m, h-m), (m, m+c)]
+        dd.polygon([(x*k, y*k) for x, y in pts(4)], fill=col + (30,), outline=col + (170,), width=2*k)
+        dd.line([(x*k, y*k) for x, y in pts(11) + [pts(11)[0]]], fill=col + (70,), width=k)
+    else:
+        th = 3 if style == "thick" else 2
+        dd.rounded_rectangle([3*k, 3*k, (w-3)*k, (h-3)*k], radius=(h//2-3)*k, fill=col + (34,), outline=col + (120 if style != "thick" else 150,), width=th*k)
+    im = im.resize((w, h), Image.LANCZOS)
+    halo = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+    hd = ImageDraw.Draw(halo)
+    if style == "chamfer": hd.polygon([(4+20, 4), (w-4, 4), (w-4, h-24), (w-24, h-4), (4, h-4), (4, 24)], outline=col + (110,), width=5)
+    else: hd.rounded_rectangle([3, 3, w-3, h-3], radius=h//2-3, outline=col + (90 if style != "thick" else 130,), width=5)
+    halo = halo.filter(ImageFilter.GaussianBlur(3 if style != "thick" else 5))
+    Image.alpha_composite(halo, im).save(f"{out}/skin_{key}_pill.png")
+
+# ---- PlayStation: olas con linea translucida y halo
 def skin_wave(key, k, base, amp, n, phase, fill, edge):
     W, H = 3840, 1080
     pts = [(x, F*base + F*amp * math.sin(2*math.pi*n*x/1920.0 + phase) + 0.35*F*amp*math.sin(2*math.pi*2*n*x/1920.0 + phase*1.7)) for x in range(0, W + 1, 8)]
-    fl = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    ImageDraw.Draw(fl).polygon(pts + [(W, H), (0, H)], fill=fill + (26,))               # relleno muy tenue
-    ln = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    ImageDraw.Draw(ln).line(pts, fill=edge + (60,), width=3)                              # linea fina y translucida
-    halo = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-    ImageDraw.Draw(halo).line(pts, fill=edge + (70,), width=14)
-    halo = halo.filter(ImageFilter.GaussianBlur(9))                                       # halo suave alrededor de la linea
-    im = Image.alpha_composite(Image.alpha_composite(fl, halo), ln)
-    im.save(f"{out}/skin_{key}_w{k}.png")
+    fl = Image.new("RGBA", (W, H), (0, 0, 0, 0)); ImageDraw.Draw(fl).polygon(pts + [(W, H), (0, H)], fill=fill + (26,))
+    ln = Image.new("RGBA", (W, H), (0, 0, 0, 0)); ImageDraw.Draw(ln).line(pts, fill=edge + (60,), width=3)
+    halo = Image.new("RGBA", (W, H), (0, 0, 0, 0)); ImageDraw.Draw(halo).line(pts, fill=edge + (70,), width=14)
+    halo = halo.filter(ImageFilter.GaussianBlur(9))
+    Image.alpha_composite(Image.alpha_composite(fl, halo), ln).save(f"{out}/skin_{key}_f{k}.png")
 
-def skin_pill(key, col, w=1056, h=72):
-    k = 4
-    im = Image.new("RGBA", (w*k, h*k), (0, 0, 0, 0)); dd = ImageDraw.Draw(im)
-    dd.rounded_rectangle([3*k, 3*k, (w-3)*k, (h-3)*k], radius=(h//2-3)*k, fill=col + (34,), outline=col + (120,), width=2*k)
-    im = im.resize((w, h), Image.LANCZOS)
-    halo = Image.new("RGBA", (w, h), (0, 0, 0, 0))
-    ImageDraw.Draw(halo).rounded_rectangle([3, 3, w-3, h-3], radius=h//2-3, outline=col + (90,), width=5)
-    halo = halo.filter(ImageFilter.GaussianBlur(3))
-    Image.alpha_composite(halo, im).save(f"{out}/skin_{key}_pill.png")
+bg_save("ps", vgrad((6, 14, 46), (10, 54, 138)) + glow_blob(1920, 1080, 960, 960, 900, 560, (20, 80, 190), 1.5) * 0.7)
+for k, (base, amp, n, ph, fill, edge) in enumerate([(470, 42, 1, 0.0, (120, 180, 255), (190, 225, 255)), (545, 32, 2, 1.7, (90, 150, 255), (170, 210, 255)), (615, 26, 2, 3.4, (160, 210, 255), (220, 240, 255))]):
+    skin_wave("ps", k, base, amp, n, ph, fill, edge)
+pill("ps", (175, 215, 255))
 
-for key, c in SKINS.items():
-    skin_bg(key, c)
-    for k, (base, amp, n, ph) in enumerate([(470, 42, 1, 0.0), (545, 32, 2, 1.7), (615, 26, 2, 3.4)]):
-        skin_wave(key, k, base, amp, n, ph, c["waves"][k][0], c["waves"][k][1])
-    skin_pill(key, c["pill"])
+# ---- Aurora: cortinas de luz verticales que se mecen (mezcla aditiva)
+bg_save("aurora", vgrad((3, 10, 24), (6, 52, 62)) + glow_blob(1920, 1080, 960, 1150, 1100, 420, (10, 90, 80), 1.6))
+def curtain(name, col, w, seed):
+    rng = np.random.default_rng(seed)
+    y, x = np.mgrid[0:1080, 0:w]
+    prof = np.exp(-(((x - w / 2.0) / (w * 0.27)) ** 2))                       # perfil horizontal suave
+    rays = 0.65 + 0.35 * np.sin(x / 7.0 + rng.random() * 6.28) * np.sin(x / 19.0 + rng.random() * 6.28)
+    vert = np.clip(1 - np.abs((y - 380) / 520.0), 0, 1) ** 1.6 * np.clip(y / 140.0, 0, 1)    # intensidad: mas fuerte arriba, se desvanece abajo
+    a = prof * rays * vert
+    arr = np.zeros((1080, w, 4)); arr[..., :3] = col; arr[..., 3] = a * 200
+    save_rgba(arr, f"skin_aurora_{name}")
+curtain("f0", (80, 255, 170), 520, 1); curtain("f1", (60, 220, 230), 420, 2); curtain("f2", (170, 120, 255), 460, 3)
+pill("aurora", (160, 255, 220), "thick")
+
+# ---- Atardecer: sol grande que se mece, nubes que cruzan y siluetas de tierra delante
+bg_save("sunset", vgrad((24, 10, 56), (226, 96, 92)) + glow_blob(1920, 1080, 960, 760, 1100, 480, (255, 150, 60), 1.8) * 0.8)
+def retro_sun(name, top, bot, size, stripes=True, half=False):
+    y, x = np.mgrid[0:size, 0:size]; c = size / 2.0
+    d = np.sqrt((x - c) ** 2 + (y - c) ** 2) / c
+    a = np.clip((1 - d) * c / 3.0, 0, 1)                                            # borde nitido con antialias
+    t = (y / float(size))[..., None]
+    col = np.array(top, float) * (1 - t) + np.array(bot, float) * t
+    if stripes:
+        yy = (y / float(size))
+        cut = (yy > 0.52) & (np.sin((yy - 0.52) * 70) > (0.55 - (yy - 0.52) * 2.4))        # bandas oscuras cada vez mas gruesas hacia abajo
+        a = np.where(cut, 0, a)
+    arr = np.zeros((size, size, 4)); arr[..., :3] = col; arr[..., 3] = a * 255
+    glow = glow_blob(size, size, c, c, c * 1.0, c * 1.0, bot, 2.4)
+    arr[..., :3] = np.where(a[..., None] > 0.05, arr[..., :3], glow); 
+    if half: arr = arr[: size // 2]
+    save_rgba(arr, name)
+retro_sun("skin_sunset_f0", (255, 236, 130), (255, 90, 110), 760)
+def cloud(name, w, h, col, seed):
+    rng = np.random.default_rng(seed); im = Image.new("L", (w, h), 0); dd = ImageDraw.Draw(im)
+    for i in range(14):
+        cx = rng.uniform(0.15, 0.85) * w; cy = rng.uniform(0.35, 0.7) * h; rx = rng.uniform(0.08, 0.2) * w; ry = rng.uniform(0.18, 0.4) * h
+        dd.ellipse([cx - rx, cy - ry, cx + rx, cy + ry], fill=int(rng.uniform(140, 255)))
+    im = im.filter(ImageFilter.GaussianBlur(h * 0.16)); a = np.array(im, float)
+    arr = np.zeros((h, w, 4)); arr[..., :3] = col; arr[..., 3] = a * 0.55
+    save_rgba(arr, name)
+cloud("skin_sunset_f1", 1000, 190, (255, 200, 170), 4); cloud("skin_sunset_f2", 760, 140, (255, 170, 190), 9)
+def land(name, w=1920, h=330, col=(20, 8, 30)):
+    pts = [(x, h * 0.45 + 40 * math.sin(x / 210.0) + 22 * math.sin(x / 83.0 + 1.3) + 0.00006 * (x - 960) ** 2 * 0.2) for x in range(0, w + 1, 6)]
+    im = Image.new("RGBA", (w * 2, h * 2), (0, 0, 0, 0)); ImageDraw.Draw(im).polygon([(x * 2, y * 2) for x, y in pts] + [(w * 2, h * 2), (0, h * 2)], fill=col + (255,))
+    im.resize((w, h), Image.LANCZOS).save(f"{out}/{name}.png")
+land("skin_sunset_f3")
+pill("sunset", (255, 200, 170))
+
+# ---- Neon: rejilla en perspectiva, sol a rayas y lineas que avanzan hacia ti
+HZ = 560
+neon = vgrad((8, 2, 24), (42, 8, 70)) + glow_blob(1920, 1080, 960, HZ, 1000, 260, (200, 30, 160), 1.6) * 0.9
+floor = Image.fromarray(np.clip(neon, 0, 255).astype(np.uint8), "RGB"); fd = ImageDraw.Draw(floor)
+fd.rectangle([0, HZ, 1920, 1080], fill=(10, 3, 28))
+for i in range(-22, 23):                                                           # lineas que convergen en el horizonte
+    fd.line([(960 + i * 30, HZ), (960 + i * 260, 1080)], fill=(120, 40, 200), width=2)
+fd.line([(0, HZ), (1920, HZ)], fill=(255, 90, 220), width=3)
+floor.save(f"{out}/skin_neon_bg.png")
+la = np.zeros((10, 1920, 4)); prof = np.exp(-(((np.arange(10) - 4.5) / 1.6) ** 2)); la[..., :3] = (255, 80, 220); la[..., 3] = prof[:, None] * 255
+save_rgba(la, "skin_neon_f0")
+retro_sun("skin_neon_f1", (255, 230, 90), (255, 40, 170), 560, True, True)
+pill("neon", (90, 240, 255), "chamfer")
+
+# ---- Brasas: chispas que suben (mezcla aditiva) sobre un fondo rojo oscuro
+bg_save("embers", vgrad((16, 3, 8), (92, 16, 30)) + glow_blob(1920, 1080, 960, 1160, 1200, 520, (210, 60, 20), 1.7) * 0.85)
+dot("embers", "f0", (255, 130, 40)); dot("embers", "f1", (255, 215, 120), 80, 2.8)
+pill("embers", (255, 175, 120), "thick")
+
+# ---- Cosmos: nebulosa, estrellas que titilan y una estrella fugaz
+rng = np.random.default_rng(7)
+neb = vgrad((4, 4, 20), (10, 8, 40))
+for cx, cy, rx, ry, col in [(420, 330, 520, 300, (60, 40, 150)), (1450, 700, 620, 340, (30, 80, 160)), (1000, 200, 400, 200, (110, 40, 130))]:
+    neb += glow_blob(1920, 1080, cx, cy, rx, ry, col, 1.6) * 0.65
+img = Image.fromarray(np.clip(neb, 0, 255).astype(np.uint8), "RGB"); gd = ImageDraw.Draw(img)
+for i in range(260):                                                              # estrellas pequenas fijas
+    sx, sy = rng.integers(0, 1920), rng.integers(0, 1080); v = int(rng.uniform(70, 200)); gd.point((sx, sy), fill=(v, v, min(255, v + 40)))
+img.save(f"{out}/skin_cosmos_bg.png")
+dot("cosmos", "f0", (200, 220, 255), 96, 2.2, 0.9); dot("cosmos", "f1", (255, 225, 190), 96, 2.2, 0.9)
+st = np.zeros((12, 520, 4)); xs = np.arange(520)[None, :]; ys = np.arange(12)[:, None]
+st[..., :3] = (220, 235, 255); st[..., 3] = (np.clip(xs / 520.0, 0, 1) ** 2.4) * np.exp(-(((ys - 5.5) / (0.9 + 2.2 * xs / 520.0)) ** 2)) * 255
+save_rgba(st, "skin_cosmos_f2")
+pill("cosmos", (190, 210, 255))
 
 def symbol(name, col, kind):
     k = 4; n = 72

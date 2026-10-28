@@ -34,7 +34,7 @@ const
     S_VIDEO = 0; S_SHADE_BOT = 1; S_SHADE_TOP = 2; S_BTN = 3;          // 3..11
     S_FOCUS = 12; S_BAR_BG = 13; S_BAR_FG = 14; S_KNOB = 15;
     S_BROWSE_BG = 16; S_SEL = 17; S_ROWICON = 18;                      // 18..29
-    S_HEADER = 30; S_PREVIEW = 31; S_PANEL = 32; S_VIZ = 33; S_MSEL = 34; S_BG = 35; S_WAVE = 36; S_HICON = 39; S_OVDIM = 45; S_OVBOX = 46; S_OVBG = 47; S_OVFG = 48; S_OVBTN = 49; S_OVICO = 50; S_TABUL = 51; S_TABSEL = 52; S_IMG = 53; S_IMG2 = 54; S_IBG = 55; S_CURSOR = 56; S_COUNT = 57;
+    S_HEADER = 30; S_PREVIEW = 31; S_PANEL = 32; S_VIZ = 33; S_MSEL = 34; S_BG = 35; S_WAVE = 36; S_HICON = 39; S_OVDIM = 45; S_OVBOX = 46; S_OVBG = 47; S_OVFG = 48; S_OVBTN = 49; S_OVICO = 50; S_TABUL = 51; S_TABSEL = 52; S_IMG = 53; S_IMG2 = 54; S_IBG = 55; S_CURSOR = 56; S_FX = 57; FX_N = 34; S_COUNT = 91;
     HINT_Y = 684;
     OV_TY = 290; OV_BARY = 350; OV_PY = 392; OV_BY = 452;              // ventana de progreso: titulo, barra, porcentaje y boton (en la rejilla de 1280x720)
     GK_MAX = 8192;
@@ -67,7 +67,7 @@ const
     // ajustes: tipo de fila y su identificador
     STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
     ST_WINDOW = 26; ST_UPDATES = 27; ST_CHECKNOW = 28;
-    SKIN_COUNT = 6;
+    SKIN_COUNT = 7;
     ST_LANG = 1; ST_SKIN = 2; ST_PREVIEW = 3; ST_SEEK = 4; ST_VIZ = 5; ST_UNKNOWN = 6; ST_INSTALL = 7; ST_STOREURL = 8; ST_ACCOUNTS = 9;
     ST_DLFMT = 11; ST_OPENDL = 12; ST_DATADIR = 13; ST_CLEARCACHE = 14; ST_VERSION = 15; ST_CREDITS = 16; ST_DOWNDIR = 17; ST_VIEW = 18; ST_HIDDEN = 19; ST_ALLFILES = 20; ST_TORKEEP = 21; ST_TORUP = 22; ST_TOREXTRA = 23; ST_TORDHT = 24; ST_RESUME = 25;
     APP_VERSION = "1.1.1";
@@ -82,6 +82,7 @@ global
 
     // sprites genericos controlados desde el bucle principal
     int   spr_graph[S_COUNT];
+    int   spr_fl[S_COUNT];                     // banderas de dibujo (B_ABLEND = luz aditiva, la usan los aspectos animados)
     int   spr_angle[S_COUNT];                  // giro en milesimas de grado (solo lo usa el visor de imagenes)
     int   spr_x[S_COUNT];
     int   spr_y[S_COUNT];
@@ -218,9 +219,10 @@ global
     int txt_mtitle, txt_mopt[10], txt_mhint, txt_kbin, txt_kbrow[5], txt_kbs[6];
     // idioma y aspecto
     string lang_cur = "es"; string lang_k[480]; string lang_v[480]; int lang_n, lang_ver;
-    int skin = 1;                                 // 0 clasico, 1 PlayStation, 2 Aurora, 3 Atardecer, 4 Carbon, 5 Rubi
+    int skin = 1;                                 // 0 clasico, 1 PlayStation, 2 Aurora, 3 Atardecer, 4 Neon, 5 Brasas, 6 Cosmos
+    int skin_nfx;                                 // piezas animadas cargadas del aspecto actual
     int skin_loaded = -1;                         // aspecto cuyos graficos estan en memoria
-    int g_bg_ps, g_wave[3], g_pill, g_sym[4];
+    int g_bg_ps, g_wave[4], g_pill, g_sym[4];
     int hint_key = -1, hint_n, hint_ic[6], hint_icx[6]; string s_h[6]; int txt_h[6];
     int sc_f[200], sc_a[200], sc_n;               // entrada guiada para pruebas (MP_SCRIPT)
     string last_sub_raw = "";                    // cache del subtitulo
@@ -627,6 +629,7 @@ begin
         alpha  = spr_alpha[slot];
         z      = spr_z[slot];
         angle  = spr_angle[slot];
+        flags  = spr_fl[slot];
         frame;
     end
 end
@@ -1420,8 +1423,9 @@ begin
     switch (skin)
         case 2: return "aurora"; end
         case 3: return "sunset"; end
-        case 4: return "carbon"; end
-        case 5: return "ruby"; end
+        case 4: return "neon"; end
+        case 5: return "embers"; end
+        case 6: return "cosmos"; end
     end
     return "ps";
 end
@@ -1433,39 +1437,135 @@ begin
         case 1: return tr("skin_ps"); end
         case 2: return tr("skin_aurora"); end
         case 3: return tr("skin_sunset"); end
-        case 4: return tr("skin_carbon"); end
-        case 5: return tr("skin_ruby"); end
+        case 4: return tr("skin_neon"); end
+        case 5: return tr("skin_embers"); end
+        case 6: return tr("skin_cosmos"); end
     end
     return "";
 end
 
-// Carga los graficos del aspecto elegido (fondo, tres olas y pastilla) y libera los del anterior: cada ola ocupa unos 16 MB
+// Carga los graficos del aspecto elegido (fondo, pastilla y sus piezas animadas) y libera los del anterior
 function skin_load()
 private int k; string kk;
 begin
     if (skin_loaded == skin) return 0; end
     if (skin_loaded > 0)
         map_unload(0, g_bg_ps); map_unload(0, g_pill);
-        for (k = 0; k < 3; k++) map_unload(0, g_wave[k]); end
+        for (k = 0; k < skin_nfx; k++) map_unload(0, g_wave[k]); end
     end
-    skin_loaded = skin;
+    skin_loaded = skin; skin_nfx = 0;
     if (skin <= 0) return 0; end
     kk = skin_key();
+    switch (skin)
+        case 3: skin_nfx = 4; end
+        case 4, 5: skin_nfx = 2; end
+        default: skin_nfx = 3; end
+    end
     g_bg_ps = map_load("res/skin_" + kk + "_bg.png"); hires(g_bg_ps);
-    for (k = 0; k < 3; k++) g_wave[k] = map_load("res/skin_" + kk + "_w" + k + ".png"); hires(g_wave[k]); end
+    for (k = 0; k < skin_nfx; k++) g_wave[k] = map_load("res/skin_" + kk + "_f" + k + ".png"); hires(g_wave[k]); end
     g_pill = map_load("res/skin_" + kk + "_pill.png"); hires(g_pill);
 end
 
-// Fondo degradado con tres olas que se desplazan despacio (solo con el aspecto PlayStation)
+// seno en milesimas de grado, multiplicado por amp
+function int sn(int a, int amp)
+begin
+    return sin(a) * amp;
+end
+
+// una pieza animada: grafico, posicion logica, tamano %, transparencia, z y si suma luz
+function fx(int n, int g, int px, int py, int sz, int a, int zz, int add)
+begin
+    if (a < 0) a = 0; end
+    if (a > 255) a = 255; end
+    put(S_FX + n, g, px, py, sz, a, zz);
+    if (add) spr_fl[S_FX + n] = B_ABLEND; end
+end
+
+// Aurora: cinco cortinas de luz que se mecen, cambian de ancho y respiran
+function skin_aurora(int t)
+private int k;
+begin
+    for (k = 0; k < 5; k++)
+        fx(k, g_wave[k % 3], 140 + k * 250 + sn(t * 260 + k * 70000, 80), 360, 100 + sn(t * 210 + k * 110000, 32), 150 + sn(t * 400 + k * 83000, 95), 28, 1);
+        spr_sizey[S_FX + k] = 100 + sn(t * 170 + k * 50000, 10);
+        spr_angle[S_FX + k] = sn(t * 190 + k * 90000, 2600);
+    end
+end
+
+// Atardecer: el sol se mece, las nubes cruzan despacio a distinta velocidad y la tierra queda delante
+function skin_sunset(int t)
+private int k, xp, L;
+begin
+    L = 2100;
+    fx(0, g_wave[0], 960, 480 + sn(t * 90, 10), 62 + sn(t * 150, 1), 255, 29, 0);
+    for (k = 0; k < 4; k++)
+        xp = ((k * 610) + t * (3 + k * 2) / 4) % L;
+        fx(1 + k, g_wave[1 + (k % 2)], xp - 450, 120 + k * 85 + sn(t * 70 + k * 100000, 8), 100, 200 - k * 20, 28 - k, 0);
+    end
+    fx(5, g_wave[3], 640, 610, 100, 255, 20, 0);
+end
+
+// Neon: el sol a rayas y la rejilla, con lineas que avanzan hacia ti en perspectiva
+function skin_neon(int t)
+private int k, u, hz;
+begin
+    hz = 373;
+    fx(0, g_wave[1], 640, hz - 93 + sn(t * 100, 3), 100 + sn(t * 180, 2), 255, 29, 0);
+    for (k = 0; k < 12; k++)
+        u = (t * 5 + k * 1000 / 12) % 1000;
+        fx(1 + k, g_wave[0], 640, hz + (720 - hz) * (u * u / 1000) / 1000, 40 + u / 5, u * 170 / 1000, 25, 1);
+    end
+end
+
+// Brasas: chispas que suben titilando
+function skin_embers(int t)
+private int k, p, ph, u, a, sz;
+begin
+    for (k = 0; k < 30; k++)
+        p = 330 + (k * 53) % 300;
+        ph = (t + k * 97) % p;
+        u = ph * 1000 / p;
+        if (u < 150) a = u * 255 / 150; elseif (u > 650) a = (1000 - u) * 255 / 350; else a = 255; end
+        a = a * (180 + sn(t * 900 + k * 71000, 75)) / 255;
+        sz = 25 + (k * 37) % 55;
+        fx(k, g_wave[k % 4 == 0 ? 1 : 0], ((k * 191) % 1280) + sn(t * 500 + k * 70000, 28), 740 - 780 * u / 1000, sz, a, 27, 1);
+    end
+end
+
+// Cosmos: estrellas que titilan y, de vez en cuando, una estrella fugaz
+function skin_cosmos(int t)
+private int k, ph, cy, a;
+begin
+    for (k = 0; k < 32; k++)
+        a = 70 + 185 * (1000 + sn(t * (500 + (k % 3) * 300) + k * 53000, 1000)) / 2000;
+        fx(k, g_wave[k % 4 == 0 ? 1 : 0], (k * 347) % 1280, 10 + (k * 211) % 620, 18 + (k % 5) * 9, a, 27, 1);
+    end
+    ph = t % 380; cy = t / 380;
+    if (ph < 46)
+        fx(32, g_wave[2], 180 + (cy * 263) % 700 + ph * 21, 50 + (cy * 131) % 280 + ph * 9, 100, sn(ph * 3900, 255), 26, 1);
+        spr_angle[S_FX + 32] = -23000;
+    end
+end
+
+// Fondo del aspecto elegido: degradado y las piezas animadas propias de cada uno
 function draw_bg()
-private int k, ox;
+private int k;
 begin
     if (!skin) return 0; end
     put(S_BG, g_bg_ps, SW / 2, SH / 2, 100, 255, 30);
-    for (k = 0; k < 3; k++)                                // cada ola avanza en pasos de un pixel real en cada fotograma
-        if (wave_f != frame_n) wave_pos[k] = (wave_pos[k] + (k + 1) * 24) % (RW * 64); end
-        put(S_WAVE + k, g_wave[k], 1280, SH / 2, 100, 255, 28 - k);
-        spr_xr[S_WAVE + k] = -(wave_pos[k] / 64);
+    switch (skin)
+        case 1:                                                // olas: cada una avanza en pasos de un pixel real en cada fotograma
+            for (k = 0; k < 3; k++)
+                if (wave_f != frame_n) wave_pos[k] = (wave_pos[k] + (k + 1) * 24) % (RW * 64); end
+                put(S_WAVE + k, g_wave[k], 1280, SH / 2, 100, 255, 28 - k);
+                spr_xr[S_WAVE + k] = -(wave_pos[k] / 64);
+            end
+        end
+        case 2: skin_aurora(frame_n); end
+        case 3: skin_sunset(frame_n); end
+        case 4: skin_neon(frame_n); end
+        case 5: skin_embers(frame_n); end
+        case 6: skin_cosmos(frame_n); end
     end
     wave_f = frame_n;
 end
@@ -3443,7 +3543,7 @@ function hide_sprites()
 private int i;
 begin
     for (i = 0; i < S_COUNT; i++)
-        if (i != S_VIDEO) spr_alpha[i] = 0; spr_graph[i] = 0; spr_angle[i] = 0; end
+        if (i != S_VIDEO) spr_alpha[i] = 0; spr_graph[i] = 0; spr_angle[i] = 0; spr_fl[i] = 0; end
     end
 end
 
