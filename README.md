@@ -1,9 +1,9 @@
 # BennuGD2 Media Player
 
-A media player written entirely in [BennuGD2](https://github.com/SplinterGU/BennuGD2) (`.prg`), for **PC (Linux)** and **PlayStation 5** homebrew.
+A media player written entirely in [BennuGD2](https://github.com/SplinterGU/BennuGD2) (`.prg`), for **PlayStation 5**, **Nintendo Switch**, **Linux**, **Windows** and **Android**.
 Interface drawn at 1080p with a PlayStation-style skin, designed to be driven with a gamepad.
 
-*Reproductor multimedia escrito íntegramente en BennuGD2, para PC (Linux) y homebrew de PS5. Interfaz a 1080p con aspecto estilo PlayStation, pensada para mando.* (Spanish notes at the end.)
+*Reproductor multimedia escrito íntegramente en BennuGD2, para PS5, Nintendo Switch, Linux, Windows y Android. Interfaz a 1080p con aspecto estilo PlayStation, pensada para mando.* (Spanish notes at the end.)
 
 ## Features
 
@@ -81,6 +81,13 @@ On Android the app turns the finger gestures into the keys the player already kn
 - **Send a link from your phone**: the page that receives files from the PC (*Files > Receive files from the PC*) also has a box to paste a link (`http`, `https` or `magnet:`) that is opened on the console.
 - **Playback options** (key `O`, R3 on the gamepad): speed (`,` / `.` keys or L2 / R2, 0.5x to 2x; the sound follows it, pitch included), subtitle delay (`[` / `]`), sound / picture sync (`;` / `'`), audio track, subtitles, repeat (list / this video) and shuffle. Files with chapters show the chapter next to the title and Page Up / Page Down jump between them.
 - **New version notice**: on start (can be turned off in *Settings > About*) the player asks GitHub for the latest release and tells you if there is a newer one. It only tells you; it downloads nothing.
+
+## Nintendo Switch (experimental)
+
+`./build_switch.sh` builds the engine for the Switch with devkitPro (`./build.sh switch` in the engine, branch `ps5`) and packs
+`mediaplayer.nro` with the `.dcb`, resources, languages, skins and addons in its romfs. Data goes to `sdmc:/switch/mediaplayer/`.
+Tested only in the Eden emulator. FFmpeg for the Switch is rebuilt with https/mbedTLS (recipe in `vendor/switch/ffmpeg` of the engine) and is GPLv3.
+To get a network trace create an empty `ffmpeg.debug` in `sdmc:/switch/mediaplayer/`.
 
 ## Android
 
