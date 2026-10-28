@@ -39,7 +39,7 @@ begin
         entry_logo[n_entries] = ""; entry_aargs[n_entries] = ""; entry_info[n_entries] = ""; n_entries++;
     end
     for (i = 0; i < ns_n && n_entries < 40; i++)
-        entries[n_entries] = utf8_to_latin1(ns_name[i]) + "   (" + (substr(ns_url[i], 0, 3) == "ftp" ? "FTP" : "WebDAV") + ")"; entry_dir[n_entries] = K_NETSRV; entry_url[n_entries] = "" + i; entry_size[n_entries] = 0;
+        entries[n_entries] = utf8_to_latin1(ns_name[i]) + "   (" + (substr(ns_url[i], 0, 3) == "ftp" ? "FTP" : (lcase(ext_of(ns_url[i])) == "xml" ? "DLNA" : "WebDAV")) + ")"; entry_dir[n_entries] = K_NETSRV; entry_url[n_entries] = "" + i; entry_size[n_entries] = 0;
         entry_logo[n_entries] = ""; entry_aargs[n_entries] = ""; entry_info[n_entries] = ""; n_entries++;
     end
     entries[n_entries] = tr("m_ns_add"); entry_dir[n_entries] = K_NETADD; entry_url[n_entries] = ""; entry_size[n_entries] = 0;
@@ -148,6 +148,17 @@ begin
             dlna_list_servers();
             if (dlna_count() == 0 && ns_n == 0) toast(tr("s_dlna_none")); end
         end
+    elseif (dlna_job == 5)                                   // espera a que se lea la descripcion del servidor dado por direccion
+        if (dlna_scan_state() == 2 || dn_t > 600)
+            dn_srv = dlna_find(dn_req_url);
+            if (dn_srv < 0)
+                dlna_job = 0; addon_busy = 0; s_amsg = ""; show_error(tr("s_dlna"), tr("t_dlna_fail"));
+                if (dn_depth > 0) dn_depth = 0; end
+                dlna_mode = 1; dlna_list_servers();
+            else
+                dlna_job = 0; dlna_ask("0", 0);
+            end
+        end
     elseif (dlna_job == 2)
         st = dlna_browse_state();
         if (st == 2)
@@ -199,7 +210,14 @@ end
 function ns_open(int i)
 private string u, rest, path, scheme, host; int p;
 begin
-    u = ns_url[i]; p = find(u, "://"); scheme = substr(u, 0, p + 3); rest = substr(u, p + 3);
+    u = ns_url[i];
+    if (lcase(ext_of(u)) == "xml")                           // un servidor DLNA dado por la direccion de su descripcion (cuando la busqueda no llega)
+        if (dlna_add(u) != 0) toast(tr("t_ru_busy")); return 0; end
+        dn_req_url = u; dn_depth = 1; dn_ids[0] = "0"; dn_titles[0] = ns_name[i]; dlna_mode = 2; dn_kind = 1;
+        dlna_job = 5; dn_t = 0; s_amsg = tr("s_dlna_search"); addon_busy = 1;
+        return 0;
+    end
+    p = find(u, "://"); scheme = substr(u, 0, p + 3); rest = substr(u, p + 3);
     p = find(rest, "/"); if (p < 0) host = rest; path = "/"; else host = substr(rest, 0, p); path = substr(rest, p); end
     p = find(host, "@"); if (p >= 0) host = substr(host, p + 1); end                       // si la direccion ya llevaba usuario, se usa el que se dio aparte
     dn_pfx = scheme + (ns_user[i] != "" ? url_enc(ns_user[i]) + ":" + url_enc(ns_pass[i]) + "@" : "") + host;
