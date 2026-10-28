@@ -929,7 +929,7 @@ end
 
 function string join_path(string d, string f)
 begin
-    if (d == "/") return "/" + f; end
+    if (d != "" && substr(d, len(d) - 1, 1) == "/") return d + f; end        // "/", "romfs:/", "sdmc:/": sin barra doble (la Switch no la admite)
     return d + "/" + f;
 end
 
