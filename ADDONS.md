@@ -100,6 +100,16 @@ A `doing` page runs like any other page, but what it shows is ignored. When it e
 go to results with query is q          # opens that page (arguments as in "opening"); "go to home" starts again from the first page
 ```
 
+## A window with a code (dialog)
+
+```
+dialog "Log in" showing "Open example.com/activate and type this code" with code pin.code
+...                      # wait, poll a server...
+clear dialog
+```
+
+`dialog TITLE showing TEXT [with code CODE]` opens a window of its own over the dimmed screen, with the title, the text, the code (if any) in a big box in the middle and a **Cancel** button (the page is cancelled like with any other wait). It stays until `clear dialog` or until the page ends. An 8-letter code is shown in two groups of four.
+
 ## Torrents
 
 A video can be a **magnet link** or the address (or file) of a **.torrent**: `show video "Title" playing "magnet:?xt=urn:btih:..."`. The player finds the files of the torrent, asks which one to watch if there are several, and plays it while it downloads (the progress and the connected peers are shown). What was downloaded is deleted afterwards unless *Settings > Downloads > Keep what torrents download* is on; uploading to others is off unless a limit is chosen there. Only content you have the right to watch should be played.

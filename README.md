@@ -73,6 +73,14 @@ On Android the app turns the finger gestures into the keys the player already kn
 | long press | options |
 | the system back button | back (the engine maps it to ESC) |
 
+## Network servers, resume list, playback options
+
+- **Network servers** (home screen, second row): the player looks for DLNA / UPnP media servers on the local network (Plex, Jellyfin, Kodi, MiniDLNA, a router with a USB disk, a NAS...) and lets you browse their folders and play their files. You can also add **WebDAV** (`http://` / `https://`) and **FTP** (`ftp://`) servers with *Add a WebDAV / FTP server...* (address, user, password; kept in `netservers.cfg` in the data folder, in plain text like the list accounts; options menu on a server to remove it). Nothing is ever written to those servers.
+- **Continue watching** (home screen): the last videos left halfway, most recent first.
+- **Send a link from your phone**: the page that receives files from the PC (*Files > Receive files from the PC*) also has a box to paste a link (`http`, `https` or `magnet:`) that is opened on the console.
+- **Playback options** (key `O`, R3 on the gamepad): speed (`,` / `.` keys or L2 / R2, 0.5x to 2x; the sound follows it, pitch included), subtitle delay (`[` / `]`), sound / picture sync (`;` / `'`), audio track, subtitles, repeat (list / this video) and shuffle. Files with chapters show the chapter next to the title and Page Up / Page Down jump between them.
+- **New version notice**: on start (can be turned off in *Settings > About*) the player asks GitHub for the latest release and tells you if there is a newer one. It only tells you; it downloads nothing.
+
 ## Android
 
 The app is built from the SDL2 template in [`android/`](android). It runs on phones and tablets
