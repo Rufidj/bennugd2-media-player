@@ -350,3 +350,4 @@ m_rep_one=this video
 m_shuffle=Shuffle
 m_on=On
 m_off=Off
+s_chapter=Chapter

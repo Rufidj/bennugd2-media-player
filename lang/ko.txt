@@ -349,3 +349,4 @@ m_rep_one=이 영상
 m_shuffle=셔플
 m_on=켜짐
 m_off=꺼짐
+s_chapter=챕터

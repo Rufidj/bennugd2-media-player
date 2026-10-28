@@ -349,3 +349,4 @@ m_rep_one=この動画
 m_shuffle=シャッフル
 m_on=オン
 m_off=オフ
+s_chapter=チャプター

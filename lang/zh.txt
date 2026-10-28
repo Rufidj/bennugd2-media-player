@@ -349,3 +349,4 @@ m_rep_one=本视频
 m_shuffle=随机
 m_on=开
 m_off=关
+s_chapter=章节

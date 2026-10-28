@@ -350,3 +350,4 @@ m_rep_one=este vídeo
 m_shuffle=Aleatorio
 m_on=Sí
 m_off=No
+s_chapter=Capítulo

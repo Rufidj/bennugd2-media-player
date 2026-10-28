@@ -349,3 +349,4 @@ m_rep_one=это видео
 m_shuffle=Перемешать
 m_on=Вкл
 m_off=Выкл
+s_chapter=Глава

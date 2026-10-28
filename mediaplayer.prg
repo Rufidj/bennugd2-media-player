@@ -113,6 +113,7 @@ global
     int spr_xr[S_COUNT];                              // desplazamiento extra en pixeles reales (las olas)
     int wave_f; int wave_pos[3];                                  // posicion de las olas en 1/64 de pixel
     int win_mode, win_full;                           // ajuste: 0 con marco, 1 sin marco, 2 pantalla completa; win_full = pantalla completa activada con F11
+    string title_base = "";                          // titulo del video (sin el capitulo)
     int play_repeat, play_shuffle;                     // repetir (0 no, 1 la lista, 2 este video) y orden aleatorio
     int play_speed = 100, sub_delay_ms, av_off_ms;     // velocidad (%), retardo de subtitulos y desfase de la imagen (ms) del video que se ve
     int kp_slow, kp_fast, kp_subm, kp_subp, kp_avm, kp_avp, kp_menu, kp_r2, kp_l2, kp_r3;   // teclas / gatillos de la fotograma anterior (para detectar la pulsacion)
@@ -2920,6 +2921,7 @@ begin
     state = ST_PLAY;
     overlay_a = 255; overlay_t = 0; focus = B_PLAY;
     s_title = pending_title != "" ? utf8_to_latin1(pending_title) : base_name(path);
+    title_base = s_title;
     pending_title = "";
     if (sub_tracks > 0) toast(tr("t_subs") + sub_name()); end
     return 1;
@@ -3096,6 +3098,31 @@ begin
     end
 end
 
+// capitulo en el que se esta (indice) o -1
+function int chapter_now()
+private int i, n, p, c;
+begin
+    n = video_chapters(vh); c = -1; p = vpos();
+    for (i = 0; i < n; i++) if (video_chapter_start(vh, i) <= p + 500) c = i; end end
+    return c;
+end
+
+// al capitulo siguiente (d = 1) o al anterior / inicio del actual (d = -1)
+function chapter_step(int d)
+private int c, n, t;
+begin
+    n = video_chapters(vh); c = chapter_now();
+    if (d > 0)
+        if (c + 1 >= n) toast(tr("t_no_more")); return 0; end
+        c++;
+    else
+        if (vpos() - video_chapter_start(vh, c < 0 ? 0 : c) < 3000 && c > 0) c--; end            // si acaba de empezar, el anterior
+        if (c < 0) c = 0; end
+    end
+    seek_to(video_chapter_start(vh, c));
+    t = c + 1; toast(tr("s_chapter") + " " + t + "/" + n + ": " + utf8_to_latin1(video_chapter_title(vh, c)));
+end
+
 // 125 -> "1.25x", 150 -> "1.5x", 100 -> "1x"
 function string fmt_speed(int pct)
 begin
@@ -3110,6 +3137,16 @@ private int a;
 begin
     a = ms < 0 ? -ms : ms;
     return (ms < 0 ? "-" : "+") + (a / 1000) + "." + ((a % 1000) / 100) + " s";
+end
+
+// "   - Capitulo 3: titulo" si el archivo tiene capitulos
+function string chapter_text()
+private int c;
+begin
+    if (hls_url != "" || video_chapters(vh) < 2) return ""; end
+    c = chapter_now();
+    if (c < 0) return ""; end
+    return "   -   " + tr("s_chapter") + " " + (c + 1) + "/" + video_chapters(vh) + (video_chapter_title(vh, c) != "" ? ": " + fit_text(utf8_to_latin1(video_chapter_title(vh, c)), 420) : "");
 end
 
 function speed_set(int pct)
@@ -3232,8 +3269,8 @@ begin
         seek_rel(k * d); toast((k < 0 ? "-" : "+") + (d / 1000) + " s");
         act_press[A_LEFT] = 0; act_press[A_RIGHT] = 0;
     end
-    if (key(_PGUP) && !pg_prev) seek_rel(-60000); toast("-60 s"); end
-    if (key(_PGDN) && !pg_prev) seek_rel(60000); toast("+60 s"); end
+    if (key(_PGUP) && !pg_prev) if (hls_url == "" && video_chapters(vh) > 1) chapter_step(-1); else seek_rel(-60000); toast("-60 s"); end end
+    if (key(_PGDN) && !pg_prev) if (hls_url == "" && video_chapters(vh) > 1) chapter_step(1); else seek_rel(60000); toast("+60 s"); end end
     pg_prev = key(_PGUP) || key(_PGDN);
     if (key(_HOME) && !hm_prev) seek_to(0); end
     hm_prev = key(_HOME);
@@ -3556,6 +3593,8 @@ begin
             if (dur > 0) s_time = fmt_time(pos) + " / " + fmt_time(dur) + tor_stats(); else s_time = fmt_time(pos) + "  (en directo)"; end
             last_sec = pos / 1000; last_dur = dur;
         end
+        t = title_base + chapter_text();                  // el capitulo en el que se esta, junto al titulo
+        if (t != s_title && title_base != "") s_title = t; end
         txt_want[txt_time] = 8589934336 + (a);
         txt_want[txt_title] = 8589934336 + (a);
     end
