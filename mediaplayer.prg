@@ -1709,7 +1709,7 @@ begin
     for (i = 0; i < 128; i++) txt_cache[i] = 0; txt_want[i] = 0; end
     create_texts();
     texts_ready = 1;
-    hint_key = -1; mlbl_ver = -1; lbl_ver = -1;
+    hint_key = -1; mlbl_ver = -1; lbl_ver = -1; dlg_key = -1;       // los textos nuevos hay que volver a colocarlos (la ventana de Ajustes los coloca una sola vez)
 end
 
 // ---- fuentes de subtitulos: se elige la que cubre la escritura del texto (se cargan al primer uso)
