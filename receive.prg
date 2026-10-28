@@ -41,9 +41,13 @@ end
 
 // un paso por fotograma: se para con atras / circulo
 function ru_step()
-private int p, n;
+private int p, n; string u;
 begin
     if (ov_cancel_asked()) ru_end(); return 0; end
+    u = upload_url();                                  // alguien envio una direccion desde la pagina: se cierra la recepcion y se reproduce
+    if (u != "")
+        ru_end(); pending_title = u; start_video(u); return 0;
+    end
     p = upload_percent(); n = upload_files();
     if (p >= 0)
         ov_pct = p;
