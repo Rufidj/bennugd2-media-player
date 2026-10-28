@@ -1709,7 +1709,8 @@ begin
     for (i = 0; i < 128; i++) txt_cache[i] = 0; txt_want[i] = 0; end
     create_texts();
     texts_ready = 1;
-    hint_key = -1; mlbl_ver = -1; lbl_ver = -1; dlg_key = -1;       // los textos nuevos hay que volver a colocarlos (la ventana de Ajustes los coloca una sola vez)
+    // los textos nuevos hay que volver a colocarlos: la barra, las ayudas, las ventanas, las filas, la vista previa y el reloj los colocan solo cuando cambia algo
+    hint_key = -1; mlbl_ver = -1; lbl_ver = -1; dlg_key = -1; tab_key = -1; pv_idx = -1; last_sec = -1; mq_ver = -1; kb_dirty = 1;
 end
 
 // ---- fuentes de subtitulos: se elige la que cubre la escritura del texto (se cargan al primer uso)
