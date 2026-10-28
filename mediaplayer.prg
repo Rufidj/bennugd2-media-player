@@ -51,19 +51,19 @@ const
 
     ST_BROWSE = 0; ST_PLAY = 1; ST_IMAGE = 2;
     K_FILE = 0; K_DIR = 1; K_LIST = 2; K_URL = 3; K_MYLISTS = 4; K_ADDONS = 5; K_ADDON = 6; K_AFOLDER = 7; K_STORE = 8; K_SITEM = 9; K_DOWNLOADS = 10;
-    K_RESUMES = 16; K_DLNA = 17; K_DLNASRV = 18; K_DLNADIR = 19; K_DLNAMORE = 20; K_XCAT = 12; K_XSTR = 13; K_XSER = 14; K_AWIDGET = 15;   // elemento de un addon que no abre nada: boton, casilla, selector, campo de texto o cabecera
+    K_RESUMES = 16; K_DLNA = 17; K_DLNASRV = 18; K_DLNADIR = 19; K_DLNAMORE = 20; K_NETSRV = 21; K_NETADD = 22; K_XCAT = 12; K_XSTR = 13; K_XSER = 14; K_AWIDGET = 15;   // elemento de un addon que no abre nada: boton, casilla, selector, campo de texto o cabecera
       // entradas de una pantalla de Xtream (categoría, canal, serie)
     // tienda de addons: repositorio oficial del reproductor (se puede apuntar a otro con MP_STORE_URL)
     STORE_URL = "https://raw.githubusercontent.com/Rufidj/bennugd2-media-player/main/addons";
     M_NONE = 0; M_MENU = 1; M_KB = 2; M_CREDITS = 3; M_SYSKB = 4; M_SETTINGS = 5;                             // pantallas modales (menu / teclado)
     KB_NEWLIST = 1; KB_RENAME_LIST = 2; KB_URL = 3; KB_NEW_TITLE = 4; KB_ENTRY_TITLE = 5; KB_LOGO = 6; KB_ADDON = 7; KB_ASET = 8;
-    KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11; KB_AUTH_SERVER = 12; KB_ADDON_URL = 14; KB_STORE_URL = 15; KB_FRENAME = 16; KB_NEWDIR = 17; KB_WIDGET = 18;
+    KB_AUTH_USER = 9; KB_AUTH_PASS = 10; KB_OPEN_LIST = 11; KB_AUTH_SERVER = 12; KB_ADDON_URL = 14; KB_STORE_URL = 15; KB_FRENAME = 16; KB_NEWDIR = 17; KB_WIDGET = 18; KB_NETURL = 19; KB_NETUSER = 20; KB_NETPASS = 21;
     MA_CANCEL = 0; MA_NEW_LIST = 1; MA_GOTO_LISTS = 2; MA_ADD_TO = 3; MA_NEW_AND_ADD = 4; MA_RENAME_LIST = 5; MA_DELETE_LIST = 6;
     MA_DELETE_YES = 7; MA_ADD_URL = 8; MA_RENAME_ENTRY = 9; MA_LOGO = 10; MA_REMOVE = 11; MA_UP = 12; MA_DOWN = 13; MA_SETTINGS = 14; MA_LANG = 15; MA_SKIN = 16; MA_ASETTINGS = 18; MA_ABOUT = 19; MA_ASET = 300; MA_PICK = 100;
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
     MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27; MA_DOWNLOAD = 29; MA_DELETE_DL = 30; MA_DELETE_DL_YES = 31; MA_DL_VIDEO = 32; MA_DL_AUDIO = 33; MA_DL_FMT = 400; MA_UNK_YES = 34; MA_CACHE_YES = 35; MA_ST_BACK = 36;
     MA_FILES = 37; MA_FCOPY = 38; MA_FMOVE = 39; MA_FPASTE = 40; MA_FRENAME = 41; MA_FDEL = 42; MA_FDEL_YES = 43; MA_FNEWDIR = 44; MA_FMARK = 45; MA_FMARKALL = 46; MA_FPROPS = 47;
-    MA_IMG_SLIDE = 48; MA_IMG_INT = 49; MA_IMG_TR = 50; MA_IMG_SHUF = 51; MA_IMG_ROT = 52; MA_IMG_INFO = 53; MA_IMG_CLOSE = 54; MA_TOR_FILE = 60; MA_FRECV = 55; MA_RS_YES = 56; MA_RS_NO = 57; MA_PREP = 75; MA_PSHUF = 76; MA_PSPEED = 70; MA_PSUB = 71; MA_PAV = 72; MA_PAUDIO = 73; MA_PSUBS = 74;
+    MA_IMG_SLIDE = 48; MA_IMG_INT = 49; MA_IMG_TR = 50; MA_IMG_SHUF = 51; MA_IMG_ROT = 52; MA_IMG_INFO = 53; MA_IMG_CLOSE = 54; MA_TOR_FILE = 60; MA_FRECV = 55; MA_RS_YES = 56; MA_RS_NO = 57; MA_NETDEL = 77; MA_PREP = 75; MA_PSHUF = 76; MA_PSPEED = 70; MA_PSUB = 71; MA_PAV = 72; MA_PAUDIO = 73; MA_PSUBS = 74;
     // ajustes: tipo de fila y su identificador
     STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
     ST_WINDOW = 26; ST_UPDATES = 27; ST_CHECKNOW = 28;
@@ -255,6 +255,10 @@ declare function dlna_open() end
 declare function dlna_activate(int i) end
 declare function dlna_back() end
 declare function dlna_step() end
+declare function net_add_url(string u) end
+declare function net_add_user(string u) end
+declare function net_add_pass(string pw) end
+declare function net_remove(int i) end
 declare function string dlna_path() end
 declare function upd_begin(int manual) end
 declare function reselect(int i) end
@@ -365,8 +369,8 @@ include "imageviewer.prg";
 include "torrentplay.prg";
 include "receive.prg";
 include "resume.prg";
-include "update.prg";
 include "dlna.prg";
+include "update.prg";
 
 process main()
 private
@@ -1372,7 +1376,7 @@ begin
         read_resumes();
     elseif (entry_dir[i] == K_DLNA)
         dlna_open();
-    elseif (entry_dir[i] == K_DLNASRV || entry_dir[i] == K_DLNADIR || entry_dir[i] == K_DLNAMORE)
+    elseif (entry_dir[i] == K_DLNASRV || entry_dir[i] == K_DLNADIR || entry_dir[i] == K_DLNAMORE || entry_dir[i] == K_NETSRV || entry_dir[i] == K_NETADD)
         dlna_activate(i);
     elseif (entry_dir[i] == K_MYLISTS)
         cur_dir = lists_dir; read_dir();
@@ -2213,6 +2217,12 @@ function open_context_menu()
 private string nm;
 begin
     menu_clear();
+    if (dlna_mode == 1)                                    // lista de servidores de red: quitar uno guardado
+        if (sel > 0 && sel < n_entries && entry_dir[sel] == K_NETSRV) menu_add(tr("m_ns_remove"), MA_NETDEL); end
+        menu_add(tr("m_cancel"), MA_CANCEL);
+        menu_show(tr("s_dlna"));
+        return 0;
+    end
     if (addon_mode > 0)
         // un video de un addon se puede guardar en la consola (los avisos de radio y audio no)
         if (dl_possible(sel) > 0) menu_add(tr("m_download"), MA_DOWNLOAD); end
@@ -2351,6 +2361,7 @@ begin
             skin = !skin; cfg_save(); open_settings_menu(1);
         end
         case MA_PSPEED, MA_PSUB, MA_PAV, MA_PREP, MA_PSHUF: play_menu_adjust(act, 1); end
+        case MA_NETDEL: net_remove(atoi(entry_url[sel])); end
         case MA_PAUDIO: cycle_audio(); open_play_menu(3); end
         case MA_PSUBS: cycle_subs(); open_play_menu(4); end
         case MA_NEW_LIST:   op_after = 0; kb_open(tr("k_new_list"), "", KB_NEWLIST); end
@@ -2611,6 +2622,9 @@ begin
         case KB_ADDON_URL:
             addon_install_url(kb_text); settings_open();
         end
+        case KB_NETURL: net_add_url(kb_text); end
+        case KB_NETUSER: net_add_user(kb_text); end
+        case KB_NETPASS: net_add_pass(kb_text); end
         case KB_STORE_URL:
             set_store_url = kb_text; if (set_store_url == "https://") set_store_url = ""; end cfg_save(); settings_open();
         end
@@ -3492,7 +3506,7 @@ begin
                 txt_want[grid_mode == 1 ? txt_cell[i] : txt_row[i]] = 8589934336 + (rowi == sel && !tab_focus ? 255 : 190);
                 switch (entry_dir[rowi])
                     case K_DIR, K_MYLISTS, K_AFOLDER, K_DOWNLOADS, K_RESUMES, K_DLNADIR, K_DLNAMORE: g = g_icon[10]; end
-                    case K_DLNA, K_DLNASRV: g = g_icon[14]; end
+                    case K_DLNA, K_DLNASRV, K_NETSRV: g = g_icon[14]; end
                     case K_ADDONS, K_ADDON: g = g_icon[16]; end
                     case K_AWIDGET: g = entry_akind[rowi] == 4 ? g_icon[0] : (entry_akind[rowi] == 8 ? 0 : g_icon[16]); end
                     case K_STORE: g = g_icon[14]; end

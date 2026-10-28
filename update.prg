@@ -16,7 +16,7 @@ end
 // pide a GitHub cual es la ultima version publicada (en segundo plano: la interfaz sigue viva)
 function upd_begin(int manual)
 begin
-    if (upd_state || store_job || dl_job || xt_job || tor_job || ru_job) if (manual) toast(tr("t_ru_busy")); end return 0; end
+    if (upd_state || store_job || dl_job || xt_job || tor_job || ru_job || dlna_job) if (manual) toast(tr("t_ru_busy")); end return 0; end
     if (http_fetch_begin("https://api.github.com/repos/Rufidj/bennugd2-media-player/releases/latest", "", "GET", "") != 0) if (manual) toast(tr("s_update_fail")); end return 0; end
     upd_state = 1; upd_manual = manual; upd_t = 0;
 end
