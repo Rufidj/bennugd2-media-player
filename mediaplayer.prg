@@ -63,7 +63,7 @@ const
     MA_STORE_REFRESH = 20; MA_LIST_ACCOUNT = 21; MA_ACCOUNTS = 22; MA_ACC_EDIT = 23; MA_ACC_DEL = 24; MA_ACC_PICK = 110;
     MA_OPEN_LIST = 25; MA_ACC_OPEN = 26; MA_ACC_NEW = 27; MA_DOWNLOAD = 29; MA_DELETE_DL = 30; MA_DELETE_DL_YES = 31; MA_DL_VIDEO = 32; MA_DL_AUDIO = 33; MA_DL_FMT = 400; MA_UNK_YES = 34; MA_CACHE_YES = 35; MA_ST_BACK = 36;
     MA_FILES = 37; MA_FCOPY = 38; MA_FMOVE = 39; MA_FPASTE = 40; MA_FRENAME = 41; MA_FDEL = 42; MA_FDEL_YES = 43; MA_FNEWDIR = 44; MA_FMARK = 45; MA_FMARKALL = 46; MA_FPROPS = 47;
-    MA_IMG_SLIDE = 48; MA_IMG_INT = 49; MA_IMG_TR = 50; MA_IMG_SHUF = 51; MA_IMG_ROT = 52; MA_IMG_INFO = 53; MA_IMG_CLOSE = 54; MA_TOR_FILE = 60; MA_FRECV = 55; MA_RS_YES = 56; MA_RS_NO = 57;
+    MA_IMG_SLIDE = 48; MA_IMG_INT = 49; MA_IMG_TR = 50; MA_IMG_SHUF = 51; MA_IMG_ROT = 52; MA_IMG_INFO = 53; MA_IMG_CLOSE = 54; MA_TOR_FILE = 60; MA_FRECV = 55; MA_RS_YES = 56; MA_RS_NO = 57; MA_PREP = 75; MA_PSHUF = 76; MA_PSPEED = 70; MA_PSUB = 71; MA_PAV = 72; MA_PAUDIO = 73; MA_PSUBS = 74;
     // ajustes: tipo de fila y su identificador
     STT_TOGGLE = 0; STT_CHOICE = 1; STT_ACTION = 2; STT_INFO = 3;
     ST_WINDOW = 26;
@@ -113,6 +113,9 @@ global
     int spr_xr[S_COUNT];                              // desplazamiento extra en pixeles reales (las olas)
     int wave_f; int wave_pos[3];                                  // posicion de las olas en 1/64 de pixel
     int win_mode, win_full;                           // ajuste: 0 con marco, 1 sin marco, 2 pantalla completa; win_full = pantalla completa activada con F11
+    int play_repeat, play_shuffle;                     // repetir (0 no, 1 la lista, 2 este video) y orden aleatorio
+    int play_speed = 100, sub_delay_ms, av_off_ms;     // velocidad (%), retardo de subtitulos y desfase de la imagen (ms) del video que se ve
+    int kp_slow, kp_fast, kp_subm, kp_subp, kp_avm, kp_avp, kp_menu, kp_r2, kp_l2, kp_r3;   // teclas / gatillos de la fotograma anterior (para detectar la pulsacion)
     int vol_applied = -1, vol_vh;                     // volumen que tiene puesto el video que se ve
     int mn_x0, mn_y0, mn_w;                           // ventana del menu (para el raton)
 
@@ -418,6 +421,8 @@ begin
         if (getenv("MP_ENTER") != "" && frame_n == 10) activate_entry(sel); end                       // solo pruebas
         if (getenv("MP_SEL2") != "" && frame_n == 12) sel = atoi(getenv("MP_SEL2")); end
         if (getenv("MP_ENTER2") != "" && frame_n == 40) sel = atoi(getenv("MP_ENTER2")); activate_entry(sel); end
+        if (getenv("MP_SPEED") != "" && frame_n == 100 && vh) speed_set(atoi(getenv("MP_SPEED"))); end                  // solo pruebas
+        if (getenv("MP_PMENU") != "" && frame_n == 100 && vh) speed_set(150); sub_delay_step(300); open_play_menu(0); end         // solo pruebas
         if (getenv("MP_AUDIO_AT") != "" && frame_n == atoi(getenv("MP_AUDIO_AT")) && vh) cycle_audio(); end   // solo pruebas
         if (load_wait > 0)
             load_wait--;
@@ -2312,6 +2317,9 @@ begin
         case MA_SKIN:
             skin = !skin; cfg_save(); open_settings_menu(1);
         end
+        case MA_PSPEED, MA_PSUB, MA_PAV, MA_PREP, MA_PSHUF: play_menu_adjust(act, 1); end
+        case MA_PAUDIO: cycle_audio(); open_play_menu(3); end
+        case MA_PSUBS: cycle_subs(); open_play_menu(4); end
         case MA_NEW_LIST:   op_after = 0; kb_open(tr("k_new_list"), "", KB_NEWLIST); end
         case MA_OPEN_LIST:  kb_open(tr("k_open_list"), "", KB_OPEN_LIST); end
         case MA_GOTO_LISTS: cur_list = ""; cur_dir = lists_dir; read_dir(); end
@@ -2623,7 +2631,7 @@ end
 function int menu_hit()
 private int r, x0, w, y0, h;
 begin
-    if (state == ST_BROWSE || state == ST_IMAGE)
+    if (state == ST_BROWSE || state == ST_IMAGE || state == ST_PLAY)
         x0 = mn_x0; w = mn_w; y0 = mn_y0 + 118; h = 112 + menu_n * 52;
         if (ptr_x < mn_x0 || ptr_x > mn_x0 + mn_w || ptr_y < mn_y0 || ptr_y > mn_y0 + h) return -2; end
     else
@@ -2718,6 +2726,7 @@ begin
         end
         if (act_press[A_UP])   menu_sel = (menu_sel + menu_n - 1) % menu_n; end
         if (act_press[A_DOWN]) menu_sel = (menu_sel + 1) % menu_n; end
+        if (state == ST_PLAY && (act_press[A_LEFT] || act_press[A_RIGHT])) play_menu_adjust(menu_act[menu_sel], act_press[A_RIGHT] ? 1 : -1); end
         if (act_press[A_OK])   menu_run(menu_act[menu_sel]); end
         if (act_press[A_BACK] || act_press[A_MUTE]) modal = M_NONE; end
     elseif (modal == M_SETTINGS)
@@ -2903,6 +2912,7 @@ begin
     audio_tracks = video_audio_tracks(vh);
     audio_sel = 0;
     video_volume(vh, muted ? 0 : vol * 128 / 100);
+    play_speed = 100; sub_delay_ms = 0; av_off_ms = 0;
     video_play(vh, 0);
     rs_cur_key = rs_key_of(path); rs_save_t = 0;
     if (rs_start_pos > 0) video_seek(vh, rs_start_pos); toast(tr("t_resumed") + " " + fmt_time(rs_start_pos)); end
@@ -3035,14 +3045,37 @@ begin
 end
 
 function next_video(int dir)
-private int i;
+private int i, n, c, k;
 begin
+    // aleatorio: cualquier otro video de la lista
+    if (play_shuffle)
+        n = 0;
+        for (i = 0; i < n_entries; i++) if ((entry_dir[i] == K_FILE || entry_dir[i] == K_URL) && entries[i] != ".." && i != cur_file_idx) n++; end end
+        if (n > 0)
+            c = rand(0, n - 1);
+            for (i = 0; i < n_entries; i++)
+                if ((entry_dir[i] == K_FILE || entry_dir[i] == K_URL) && entries[i] != ".." && i != cur_file_idx)
+                    if (c == 0) request_open(i); return 1; end
+                    c--;
+                end
+            end
+        end
+    end
     i = cur_file_idx + dir;
     while (i >= 0 && i < n_entries)
         if ((entry_dir[i] == K_FILE || entry_dir[i] == K_URL) && entries[i] != "..")
             request_open(i); return 1;
         end
         i += dir;
+    end
+    if (play_repeat == 1)                                  // repetir la lista: se da la vuelta
+        i = dir > 0 ? 0 : n_entries - 1;
+        while (i >= 0 && i < n_entries && k < 5000)
+            if ((entry_dir[i] == K_FILE || entry_dir[i] == K_URL) && entries[i] != "..")
+                request_open(i); return 1;
+            end
+            i += dir; k++;
+        end
     end
     toast(dir > 0 ? tr("t_no_more") : tr("t_no_prev"));
     return 0;
@@ -3063,6 +3096,87 @@ begin
     end
 end
 
+// 125 -> "1.25x", 150 -> "1.5x", 100 -> "1x"
+function string fmt_speed(int pct)
+begin
+    if (pct % 100 == 0) return (pct / 100) + "x"; end
+    if (pct % 10 == 0) return (pct / 100) + "." + ((pct % 100) / 10) + "x"; end
+    return (pct / 100) + "." + ((pct % 100) < 10 ? "0" : "") + (pct % 100) + "x";
+end
+
+// 300 -> "+0.3 s", -1500 -> "-1.5 s"
+function string fmt_ms(int ms)
+private int a;
+begin
+    a = ms < 0 ? -ms : ms;
+    return (ms < 0 ? "-" : "+") + (a / 1000) + "." + ((a % 1000) / 100) + " s";
+end
+
+function speed_set(int pct)
+begin
+    if (!vh) return 0; end
+    play_speed = pct; video_speed(vh, pct);
+    toast(tr("m_speed") + ": " + fmt_speed(pct));
+end
+
+// de una lista de velocidades a la anterior / siguiente
+function speed_step(int d)
+private int i, n; int v[7];
+begin
+    v[0] = 50; v[1] = 75; v[2] = 100; v[3] = 125; v[4] = 150; v[5] = 175; v[6] = 200;
+    n = 2;
+    for (i = 0; i < 7; i++) if (v[i] <= play_speed) n = i; end end
+    n += d; if (n < 0) n = 0; end if (n > 6) n = 6; end
+    speed_set(v[n]);
+end
+
+function sub_delay_step(int ms)
+begin
+    if (!vh) return 0; end
+    sub_delay_ms += ms; if (sub_delay_ms > 10000) sub_delay_ms = 10000; end if (sub_delay_ms < -10000) sub_delay_ms = -10000; end
+    video_sub_delay(vh, sub_delay_ms);
+    toast(tr("m_subdelay") + ": " + fmt_ms(sub_delay_ms));
+end
+
+function av_step(int ms)
+begin
+    if (!vh) return 0; end
+    av_off_ms += ms; if (av_off_ms > 2000) av_off_ms = 2000; end if (av_off_ms < -2000) av_off_ms = -2000; end
+    video_av_offset(vh, av_off_ms);
+    toast(tr("m_avsync") + ": " + (av_off_ms >= 0 ? "+" : "") + av_off_ms + " ms");
+end
+
+// menu de reproduccion (sirve con el mando: izquierda / derecha cambian el valor)
+function open_play_menu(int keep)
+begin
+    menu_clear();
+    menu_add(tr("m_speed") + ": " + fmt_speed(play_speed), MA_PSPEED);
+    menu_add(tr("m_subdelay") + ": " + fmt_ms(sub_delay_ms), MA_PSUB);
+    menu_add(tr("m_avsync") + ": " + (av_off_ms >= 0 ? "+" : "") + av_off_ms + " ms", MA_PAV);
+    menu_add(tr("m_paudio"), MA_PAUDIO);
+    menu_add(tr("m_psubs"), MA_PSUBS);
+    menu_add(tr("m_repeat") + ": " + (play_repeat == 0 ? tr("m_off") : (play_repeat == 1 ? tr("m_rep_list") : tr("m_rep_one"))), MA_PREP);
+    menu_add(tr("m_shuffle") + ": " + (play_shuffle ? tr("m_on") : tr("m_off")), MA_PSHUF);
+    menu_add(tr("m_back"), MA_CANCEL);
+    menu_show(tr("mt_play"));
+    menu_sel = keep;
+end
+
+// izquierda / derecha en una fila ajustable del menu de reproduccion; devuelve 1 si la atendio
+function int play_menu_adjust(int act, int d)
+begin
+    switch (act)
+        case MA_PSPEED: if (hls_url == "") speed_step(d); end end
+        case MA_PSUB: sub_delay_step(d * 100); end
+        case MA_PREP: play_repeat = (play_repeat + 3 + d) % 3; end
+        case MA_PSHUF: play_shuffle = !play_shuffle; end
+        case MA_PAV: av_step(d * 50); end
+        default: return 0; end
+    end
+    open_play_menu(menu_sel);
+    return 1;
+end
+
 function update_player()
 private int shown, hs, k, d;
 begin
@@ -3079,6 +3193,7 @@ begin
     rs_tick();
     if (video_is_finished(vh))
         if (rs_cur_key != "") rs_remove(rs_cur_key); rs_cur_key = ""; end
+        if (play_repeat == 2) video_seek(vh, 0); video_play(vh, 0); return 0; end         // repetir este video
         if (!next_video(1)) stop_video(); end
         return 0;
     end
@@ -3122,6 +3237,20 @@ begin
     pg_prev = key(_PGUP) || key(_PGDN);
     if (key(_HOME) && !hm_prev) seek_to(0); end
     hm_prev = key(_HOME);
+
+    // velocidad, retardo de subtitulos, sincronia del audio: teclado (, . [ ] ; ') y mando (R2 / L2); R3 o la tecla O abren el menu
+    if (hls_url == "")
+        if (key(_POINT) && !kp_fast) speed_step(1); end        kp_fast = key(_POINT);
+        if (key(_COMMA) && !kp_slow) speed_step(-1); end       kp_slow = key(_COMMA);
+        k = joy_getaxis(JOY_AXIS_TRIGGERRIGHT) > 16000; if (k && !kp_r2) speed_step(1); end kp_r2 = k;
+        k = joy_getaxis(JOY_AXIS_TRIGGERLEFT) > 16000; if (k && !kp_l2) speed_step(-1); end kp_l2 = k;
+    end
+    if (key(_R_BRACKET) && !kp_subp) sub_delay_step(100); end   kp_subp = key(_R_BRACKET);
+    if (key(_L_BRACKET) && !kp_subm) sub_delay_step(-100); end  kp_subm = key(_L_BRACKET);
+    if (key(_APOSTROPHE) && !kp_avp) av_step(50); end           kp_avp = key(_APOSTROPHE);
+    if (key(_SEMICOLON) && !kp_avm) av_step(-50); end           kp_avm = key(_SEMICOLON);
+    k = key(_O) || joy_getbutton(JOY_BUTTON_RIGHTSTICK);
+    if (k && !kp_menu) open_play_menu(0); return 0; end         kp_menu = k;
 
     // atajos que funcionan siempre
     if (act_press[A_SEEKB]) seek_rel(-seek_ms()); toast("-" + seek_txt()); end
@@ -3235,7 +3364,7 @@ begin
     for (i = 0; i < 6; i++) txt_want[txt_h[i]] = 8589934336 + (0); end
     for (i = 0; i < 6; i += 2) txt_want[txt_sub[i]] = 4294967296; end
 
-    if (modal != M_NONE && !(modal == M_MENU && (state == ST_BROWSE || state == ST_IMAGE))) draw_modal(); return 0; end
+    if (modal != M_NONE && !(modal == M_MENU && (state == ST_BROWSE || state == ST_IMAGE || state == ST_PLAY))) draw_modal(); return 0; end
 
     if (state == ST_IMAGE)
         draw_image();
@@ -3459,4 +3588,5 @@ begin
             txt_want[txt_sub[k * 2 + 1]] = 8589934336 + 255;
         end
     end
+    if (modal == M_MENU) draw_menu_dialog(); end
 end
