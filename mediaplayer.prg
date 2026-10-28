@@ -222,6 +222,7 @@ global
     int txc = 8589934336; int txs = 8589934336;   // color de los textos de la interfaz y de la fila elegida (RGB<<8, mas el bit 32 que los distingue de 'sin pedir'); los fija el aspecto
     int skin_loaded = -1;                         // aspecto cuyos graficos estan en memoria
     int g_bg_ps, g_wave[4], g_pill, g_sym[4];
+    int jb_ok = JOY_BUTTON_A, jb_back = JOY_BUTTON_B, jb_opt = JOY_BUTTON_X, jb_tri = JOY_BUTTON_Y;   // botones del mando de cada accion (en la Switch SDL los da por posicion: A<->B y X<->Y)
     int btn_pref;                                 // ajuste Iconos de botones: 0 automatico, 1 teclado, 2 PlayStation, 3 Nintendo, 4 Xbox
     int btn_set = -1;                             // juego de iconos en uso: 0 teclado, 1 PlayStation, 2 Nintendo, 3 Xbox
     string bt_n[7];                               // nombre de cada boton en los textos: ok back opt tri l1 r1 start
@@ -399,6 +400,7 @@ private
 begin
     soundsys_init();
     storage_init();
+    if (is_switch()) jb_ok = JOY_BUTTON_B; jb_back = JOY_BUTTON_A; jb_opt = JOY_BUTTON_Y; jb_tri = JOY_BUTTON_X; end      // SDL nombra los botones por posicion: el A de Nintendo (derecha) es su "B"
     cfg_load();
     win_full = (win_mode == 2);
     set_mode(RW, RH, win_flags());
@@ -723,22 +725,22 @@ begin
     h[A_DOWN]  = key(_DOWN)  || joy_getbutton(JOY_BUTTON_DPAD_DOWN)  || ay >  16000;
     h[A_LEFT]  = key(_LEFT)  || joy_getbutton(JOY_BUTTON_DPAD_LEFT)  || ax < -16000;
     h[A_RIGHT] = key(_RIGHT) || joy_getbutton(JOY_BUTTON_DPAD_RIGHT) || ax >  16000;
-    h[A_OK]    = key(_ENTER) || joy_getbutton(JOY_BUTTON_A);
-    h[A_BACK]  = key(_ESC)   || key(_BACKSPACE) || joy_getbutton(JOY_BUTTON_B);
-    h[A_SUBS]  = key(_S)     || joy_getbutton(JOY_BUTTON_Y);
+    h[A_OK]    = key(_ENTER) || joy_getbutton(jb_ok);
+    h[A_BACK]  = key(_ESC)   || key(_BACKSPACE) || joy_getbutton(jb_back);
+    h[A_SUBS]  = key(_S)     || joy_getbutton(jb_tri);
     h[A_PAUSE] = key(_SPACE) || joy_getbutton(JOY_BUTTON_START);
     h[A_SEEKB] = key(_N) || joy_getbutton(JOY_BUTTON_LEFTSHOULDER);
     h[A_SEEKF] = key(_P)|| joy_getbutton(JOY_BUTTON_RIGHTSHOULDER);
     h[A_AUDIO] = key(_A) || joy_getbutton(JOY_BUTTON_TOUCHPAD);
-    h[A_MUTE]  = key(_M)     || joy_getbutton(JOY_BUTTON_X);
+    h[A_MUTE]  = key(_M)     || joy_getbutton(jb_opt);
     if (modal == M_KB)       // teclado en pantalla: las letras escriben, no son atajos
-        h[A_SUBS]  = joy_getbutton(JOY_BUTTON_Y);
+        h[A_SUBS]  = joy_getbutton(jb_tri);
         h[A_PAUSE] = joy_getbutton(JOY_BUTTON_START);
         h[A_SEEKB] = joy_getbutton(JOY_BUTTON_LEFTSHOULDER);
         h[A_SEEKF] = joy_getbutton(JOY_BUTTON_RIGHTSHOULDER);
         h[A_AUDIO] = joy_getbutton(JOY_BUTTON_TOUCHPAD);
-        h[A_MUTE]  = joy_getbutton(JOY_BUTTON_X);
-        h[A_BACK]  = key(_ESC) || joy_getbutton(JOY_BUTTON_B);
+        h[A_MUTE]  = joy_getbutton(jb_opt);
+        h[A_BACK]  = key(_ESC) || joy_getbutton(jb_back);
     end
 
     // ultima posicion del dedo (el motor suelta el dedo un fotograma despues,
