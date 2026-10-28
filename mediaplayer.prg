@@ -51,7 +51,7 @@ const
 
     ST_BROWSE = 0; ST_PLAY = 1; ST_IMAGE = 2;
     K_FILE = 0; K_DIR = 1; K_LIST = 2; K_URL = 3; K_MYLISTS = 4; K_ADDONS = 5; K_ADDON = 6; K_AFOLDER = 7; K_STORE = 8; K_SITEM = 9; K_DOWNLOADS = 10;
-    K_RESUMES = 16; K_XCAT = 12; K_XSTR = 13; K_XSER = 14; K_AWIDGET = 15;   // elemento de un addon que no abre nada: boton, casilla, selector, campo de texto o cabecera
+    K_RESUMES = 16; K_DLNA = 17; K_DLNASRV = 18; K_DLNADIR = 19; K_DLNAMORE = 20; K_XCAT = 12; K_XSTR = 13; K_XSER = 14; K_AWIDGET = 15;   // elemento de un addon que no abre nada: boton, casilla, selector, campo de texto o cabecera
       // entradas de una pantalla de Xtream (categoría, canal, serie)
     // tienda de addons: repositorio oficial del reproductor (se puede apuntar a otro con MP_STORE_URL)
     STORE_URL = "https://raw.githubusercontent.com/Rufidj/bennugd2-media-player/main/addons";
@@ -251,6 +251,11 @@ declare function string fit_text(string t, int maxw) end
 declare function read_dir() end
 declare function int rs_playable() end
 declare function update_check() end
+declare function dlna_open() end
+declare function dlna_activate(int i) end
+declare function dlna_back() end
+declare function dlna_step() end
+declare function string dlna_path() end
 declare function upd_begin(int manual) end
 declare function reselect(int i) end
 declare function toast(string t) end
@@ -361,6 +366,7 @@ include "torrentplay.prg";
 include "receive.prg";
 include "resume.prg";
 include "update.prg";
+include "dlna.prg";
 
 process main()
 private
@@ -762,7 +768,7 @@ private
     int dh, i, j, d;
     string nm, t_s; int t_d, t_z;
 begin
-    n_entries = 0; addon_mode = 0; store_mode = 0; resume_mode = 0;
+    n_entries = 0; addon_mode = 0; store_mode = 0; resume_mode = 0; dlna_mode = 0;
     marks_clear();
     sel = 0; top_row = 0; dir_ver++;
     grid_mode = 0;
@@ -794,7 +800,14 @@ begin
         end
         entries[j + 1] = t_s; entry_dir[j + 1] = t_d; entry_size[j + 1] = t_z;
     end
-    // en el inicio, tras ".." una fila que abre la lista de lo que se dejo a medias
+    // en el inicio: "Servidores de red" y, si hay algo a medias, "Continuar viendo"
+    if (store_dir != "" && cur_dir == home_dir && cur_list == "" && n_entries < MAX_ENTRIES - 1)
+        for (j = n_entries; j > 1; j--)
+            entries[j] = entries[j - 1]; entry_dir[j] = entry_dir[j - 1]; entry_size[j] = entry_size[j - 1]; entry_logo[j] = entry_logo[j - 1]; entry_url[j] = entry_url[j - 1];
+        end
+        entries[1] = tr("m_network"); entry_dir[1] = K_DLNA; entry_size[1] = 0; entry_logo[1] = ""; entry_url[1] = "";
+        n_entries++;
+    end
     if (set_resume && store_dir != "" && cur_dir == home_dir && cur_list == "" && n_entries < MAX_ENTRIES - 1)
         i = rs_playable();
         if (i > 0)
@@ -926,7 +939,7 @@ end
 // seccion en la que esta el explorador (-1 = dentro de algo: un addon, una lista, una carpeta...: sin barra de secciones)
 function int cur_section()
 begin
-    if (resume_mode) return -1; end
+    if (resume_mode || dlna_mode) return -1; end
     if (xt_screen == 1 || cur_list != "" || addon_mode == 2) return -1; end
     if (store_mode == 1) return 2; end
     if (addon_mode == 1) return 1; end
@@ -1032,6 +1045,7 @@ end
 function update_browser()
 private int old, r;
 begin
+    if (dlna_job) dlna_step(); return 0; end                       // buscando servidores de la red o pidiendo una carpeta
     if (xt_job) xt_step(); return 0; end                          // Xtream: cargando categorías o canales
     if (store_job == 1) store_step(); return 0; end                // instalando: no se atiende al mando
     if (fo_job == 1) fo_step(); return 0; end                      // copiando, moviendo o borrando: solo se puede cancelar
@@ -1259,6 +1273,7 @@ end
 function go_up()
 private string nm;
 begin
+    if (dlna_mode) dlna_back(); return 0; end
     if (resume_mode) cur_dir = home_dir; read_dir(); return 0; end
     if (xt_screen == 1)
         if (xt_level > 0) xt_level--; xt_job = 0; xt_open_level(xt_level); return 0; end
@@ -1355,6 +1370,10 @@ begin
         cur_dir = join_path(cur_dir, entries[i]); read_dir();
     elseif (entry_dir[i] == K_RESUMES)
         read_resumes();
+    elseif (entry_dir[i] == K_DLNA)
+        dlna_open();
+    elseif (entry_dir[i] == K_DLNASRV || entry_dir[i] == K_DLNADIR || entry_dir[i] == K_DLNAMORE)
+        dlna_activate(i);
     elseif (entry_dir[i] == K_MYLISTS)
         cur_dir = lists_dir; read_dir();
     elseif (entry_dir[i] == K_DOWNLOADS)
@@ -3427,7 +3446,7 @@ begin
         update_cell_logos();
         // los textos solo se rehacen al cambiar de carpeta o de pagina (crear cadenas cada fotograma es caro y las acumula)
         if (lbl_ver != dir_ver || lbl_top != top_row)
-            if (store_mode == 1) s_path = "  " + tr("s_store"); elseif (addon_mode == 2) s_path = "  " + addon_name; elseif (addon_mode == 1) s_path = "  " + tr("s_addons"); elseif (resume_mode) s_path = "  " + tr("m_continue"); elseif (cur_list != "") s_path = "  " + utf8_to_latin1(base_name(cur_list)) + "   " + tr("s_internet_tag"); else s_path = "  " + utf8_to_latin1(cur_dir); end
+            if (store_mode == 1) s_path = "  " + tr("s_store"); elseif (addon_mode == 2) s_path = "  " + addon_name; elseif (addon_mode == 1) s_path = "  " + tr("s_addons"); elseif (resume_mode) s_path = "  " + tr("m_continue"); elseif (dlna_mode) s_path = dlna_path(); elseif (cur_list != "") s_path = "  " + utf8_to_latin1(base_name(cur_list)) + "   " + tr("s_internet_tag"); else s_path = "  " + utf8_to_latin1(cur_dir); end
                 s_empty = tr("s_empty");
             s_hint = tr("h_browser") + "    [" + (store_dir != "" ? cut_text(store_dir, 24) : tr("s_nostore")) + "]";
             for (i = 0; i < ROWS; i++)
@@ -3472,7 +3491,8 @@ begin
                 if (grid_mode == 1) by = grid_cy(i); end
                 txt_want[grid_mode == 1 ? txt_cell[i] : txt_row[i]] = 8589934336 + (rowi == sel && !tab_focus ? 255 : 190);
                 switch (entry_dir[rowi])
-                    case K_DIR, K_MYLISTS, K_AFOLDER, K_DOWNLOADS, K_RESUMES: g = g_icon[10]; end
+                    case K_DIR, K_MYLISTS, K_AFOLDER, K_DOWNLOADS, K_RESUMES, K_DLNADIR, K_DLNAMORE: g = g_icon[10]; end
+                    case K_DLNA, K_DLNASRV: g = g_icon[14]; end
                     case K_ADDONS, K_ADDON: g = g_icon[16]; end
                     case K_AWIDGET: g = entry_akind[rowi] == 4 ? g_icon[0] : (entry_akind[rowi] == 8 ? 0 : g_icon[16]); end
                     case K_STORE: g = g_icon[14]; end
