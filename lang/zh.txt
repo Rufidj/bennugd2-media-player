@@ -336,3 +336,4 @@ st_win1=无边框（重启后）
 st_win2=全屏
 t_fullscreen=全屏（按F11退出）
 t_windowed=窗口
+m_continue=继续观看

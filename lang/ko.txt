@@ -336,3 +336,4 @@ st_win1=테두리 없음(재시작 시)
 st_win2=전체 화면
 t_fullscreen=전체 화면 (F11로 해제)
 t_windowed=창 모드
+m_continue=이어서 보기

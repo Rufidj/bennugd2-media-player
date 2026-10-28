@@ -51,7 +51,7 @@ const
 
     ST_BROWSE = 0; ST_PLAY = 1; ST_IMAGE = 2;
     K_FILE = 0; K_DIR = 1; K_LIST = 2; K_URL = 3; K_MYLISTS = 4; K_ADDONS = 5; K_ADDON = 6; K_AFOLDER = 7; K_STORE = 8; K_SITEM = 9; K_DOWNLOADS = 10;
-    K_XCAT = 12; K_XSTR = 13; K_XSER = 14; K_AWIDGET = 15;   // elemento de un addon que no abre nada: boton, casilla, selector, campo de texto o cabecera
+    K_RESUMES = 16; K_XCAT = 12; K_XSTR = 13; K_XSER = 14; K_AWIDGET = 15;   // elemento de un addon que no abre nada: boton, casilla, selector, campo de texto o cabecera
       // entradas de una pantalla de Xtream (categoría, canal, serie)
     // tienda de addons: repositorio oficial del reproductor (se puede apuntar a otro con MP_STORE_URL)
     STORE_URL = "https://raw.githubusercontent.com/Rufidj/bennugd2-media-player/main/addons";
@@ -96,6 +96,7 @@ global
     int any_input;
 
     // en Android los toques los convierte la app en teclas (ver TouchOverlayView)
+    int resume_mode;                // 1 = se ve la lista de "Continuar viendo"
     int touch_mode;                 // 1 = se esta manejando con el dedo
     int touch_x, touch_y;           // ultima posicion del dedo
     int touch_age;                  // fotogramas desde el ultimo toque
@@ -241,6 +242,7 @@ declare function string fmt_size(int b) end
 declare function string cut_text(string t, int n) end
 declare function string fit_text(string t, int maxw) end
 declare function read_dir() end
+declare function int rs_playable() end
 declare function reselect(int i) end
 declare function toast(string t) end
 declare function string tail_fit(string t, int maxw) end
@@ -747,7 +749,7 @@ private
     int dh, i, j, d;
     string nm, t_s; int t_d, t_z;
 begin
-    n_entries = 0; addon_mode = 0; store_mode = 0;
+    n_entries = 0; addon_mode = 0; store_mode = 0; resume_mode = 0;
     marks_clear();
     sel = 0; top_row = 0; dir_ver++;
     grid_mode = 0;
@@ -779,6 +781,45 @@ begin
         end
         entries[j + 1] = t_s; entry_dir[j + 1] = t_d; entry_size[j + 1] = t_z;
     end
+    // en el inicio, tras ".." una fila que abre la lista de lo que se dejo a medias
+    if (set_resume && store_dir != "" && cur_dir == home_dir && cur_list == "" && n_entries < MAX_ENTRIES - 1)
+        i = rs_playable();
+        if (i > 0)
+            for (j = n_entries; j > 1; j--)
+                entries[j] = entries[j - 1]; entry_dir[j] = entry_dir[j - 1]; entry_size[j] = entry_size[j - 1]; entry_logo[j] = entry_logo[j - 1]; entry_url[j] = entry_url[j - 1];
+            end
+            entries[1] = tr("m_continue") + " (" + i + ")"; entry_dir[1] = K_RESUMES; entry_size[1] = 0; entry_logo[1] = ""; entry_url[1] = "";
+            n_entries++;
+        end
+    end
+end
+
+// cuantos videos de la lista de "continuar" se pueden volver a abrir (los de torrent no: su direccion cambia)
+function int rs_playable()
+private int i, n;
+begin
+    n = 0;
+    for (i = 0; i < rs_n; i++) if (substr(rs_key[i], 0, 4) != "tor:") n++; end end
+    return n;
+end
+
+// la lista de "Continuar viendo": lo ultimo que se dejo a medias, lo mas reciente arriba
+function read_resumes()
+private int i; string k;
+begin
+    n_entries = 0; addon_mode = 0; store_mode = 0; marks_clear();
+    sel = 0; top_row = 0; dir_ver++; grid_mode = 0; cur_list = "";
+    entries[0] = ".."; entry_dir[0] = K_DIR; entry_url[0] = ""; entry_size[0] = 0; entry_logo[0] = ""; entry_aargs[0] = ""; entry_info[0] = ""; n_entries = 1;
+    for (i = rs_n - 1; i >= 0 && n_entries < MAX_ENTRIES; i--)
+        k = rs_key[i];
+        if (substr(k, 0, 4) != "tor:")
+            entries[n_entries] = utf8_to_latin1(base_name(k)) + "    " + fmt_time(rs_pos[i]) + " / " + fmt_time(rs_dur[i]);
+            entry_dir[n_entries] = K_URL; entry_url[n_entries] = k; entry_size[n_entries] = 0; entry_logo[n_entries] = "";
+            entry_aargs[n_entries] = utf8_to_latin1(base_name(k)); entry_info[n_entries] = "";
+            n_entries++;
+        end
+    end
+    resume_mode = 1; lbl_ver = -1;
 end
 
 // Lista de enlaces M3U: "#EXTINF:-1,Titulo" seguido de la URL (las lineas "#..." sin mas se ignoran)
@@ -872,6 +913,7 @@ end
 // seccion en la que esta el explorador (-1 = dentro de algo: un addon, una lista, una carpeta...: sin barra de secciones)
 function int cur_section()
 begin
+    if (resume_mode) return -1; end
     if (xt_screen == 1 || cur_list != "" || addon_mode == 2) return -1; end
     if (store_mode == 1) return 2; end
     if (addon_mode == 1) return 1; end
@@ -1204,6 +1246,7 @@ end
 function go_up()
 private string nm;
 begin
+    if (resume_mode) cur_dir = home_dir; read_dir(); return 0; end
     if (xt_screen == 1)
         if (xt_level > 0) xt_level--; xt_job = 0; xt_open_level(xt_level); return 0; end
         xt_screen = 0; grid_mode = 0; cur_dir = home_dir; read_dir(); return 0;
@@ -1237,6 +1280,7 @@ begin
     cur_file_idx = i;
     hls_url = ""; hls_base = 0; hls_total = 0; hls_vurl = ""; hls_aurl = ""; hls_ct_url[0] = ""; hls_ct_url[1] = ""; hls_seek_to = -1;
     pending_title = entries[i]; pending_logo = entry_logo[i]; hls_title = entries[i];
+    if (resume_mode && entry_aargs[i] != "") pending_title = entry_aargs[i]; hls_title = entry_aargs[i]; end
     if (entry_dir[i] == K_URL)
         s_toast = tr("s_connecting"); toast_t = 600;
         load_path = au_apply(entry_url[i]); load_wait = 3;
@@ -1296,6 +1340,8 @@ begin
         go_up();
     elseif (entry_dir[i] == K_DIR)
         cur_dir = join_path(cur_dir, entries[i]); read_dir();
+    elseif (entry_dir[i] == K_RESUMES)
+        read_resumes();
     elseif (entry_dir[i] == K_MYLISTS)
         cur_dir = lists_dir; read_dir();
     elseif (entry_dir[i] == K_DOWNLOADS)
@@ -3202,7 +3248,7 @@ begin
         update_cell_logos();
         // los textos solo se rehacen al cambiar de carpeta o de pagina (crear cadenas cada fotograma es caro y las acumula)
         if (lbl_ver != dir_ver || lbl_top != top_row)
-            if (store_mode == 1) s_path = "  " + tr("s_store"); elseif (addon_mode == 2) s_path = "  " + addon_name; elseif (addon_mode == 1) s_path = "  " + tr("s_addons"); elseif (cur_list != "") s_path = "  " + utf8_to_latin1(base_name(cur_list)) + "   " + tr("s_internet_tag"); else s_path = "  " + utf8_to_latin1(cur_dir); end
+            if (store_mode == 1) s_path = "  " + tr("s_store"); elseif (addon_mode == 2) s_path = "  " + addon_name; elseif (addon_mode == 1) s_path = "  " + tr("s_addons"); elseif (resume_mode) s_path = "  " + tr("m_continue"); elseif (cur_list != "") s_path = "  " + utf8_to_latin1(base_name(cur_list)) + "   " + tr("s_internet_tag"); else s_path = "  " + utf8_to_latin1(cur_dir); end
                 s_empty = tr("s_empty");
             s_hint = tr("h_browser") + "    [" + (store_dir != "" ? cut_text(store_dir, 24) : tr("s_nostore")) + "]";
             for (i = 0; i < ROWS; i++)
@@ -3247,13 +3293,13 @@ begin
                 if (grid_mode == 1) by = grid_cy(i); end
                 txt_want[grid_mode == 1 ? txt_cell[i] : txt_row[i]] = 8589934336 + (rowi == sel && !tab_focus ? 255 : 190);
                 switch (entry_dir[rowi])
-                    case K_DIR, K_MYLISTS, K_AFOLDER, K_DOWNLOADS: g = g_icon[10]; end
+                    case K_DIR, K_MYLISTS, K_AFOLDER, K_DOWNLOADS, K_RESUMES: g = g_icon[10]; end
                     case K_ADDONS, K_ADDON: g = g_icon[16]; end
                     case K_AWIDGET: g = entry_akind[rowi] == 4 ? g_icon[0] : (entry_akind[rowi] == 8 ? 0 : g_icon[16]); end
                     case K_STORE: g = g_icon[14]; end
                     case K_SITEM: if (entry_skind[rowi] == 1) g = entry_siver[rowi] != "" ? g_icon[11] : g_icon[14]; else g = entry_siver[rowi] != "" ? g_icon[16] : g_icon[14]; end end
                     case K_LIST: g = g_icon[14]; end
-                    case K_URL: g = (addon_mode == 2 && entry_akind[rowi] == 1) ? g_icon[11] : ((addon_mode == 2 && entry_akind[rowi] >= 2) ? g_icon[15] : g_icon[14]); end
+                    case K_URL: if (resume_mode && find(entry_url[rowi], "://") < 0) g = g_icon[11]; else g = (addon_mode == 2 && entry_akind[rowi] == 1) ? g_icon[11] : ((addon_mode == 2 && entry_akind[rowi] >= 2) ? g_icon[15] : g_icon[14]); end end
                     default: g = is_audio(entries[rowi]) ? g_icon[15] : (is_image(entries[rowi]) ? g_icon[17] : (lcase(ext_of(entries[rowi])) == "torrent" ? g_icon[14] : g_icon[11])); end
                 end
                 if (entries[rowi] == "..") g = g_icon[12]; end

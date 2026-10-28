@@ -336,3 +336,4 @@ st_win1=枠なし（再起動後）
 st_win2=全画面
 t_fullscreen=全画面（F11で解除）
 t_windowed=ウィンドウ
+m_continue=続きを見る

@@ -337,3 +337,4 @@ st_win1=Borderless (on restart)
 st_win2=Full screen
 t_fullscreen=Full screen (F11 to exit)
 t_windowed=Windowed
+m_continue=Continue watching

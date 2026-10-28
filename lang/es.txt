@@ -337,3 +337,4 @@ st_win1=Sin marco (al reiniciar)
 st_win2=Pantalla completa
 t_fullscreen=Pantalla completa (F11 para salir)
 t_windowed=Ventana
+m_continue=Continuar viendo

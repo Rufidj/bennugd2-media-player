@@ -69,6 +69,10 @@ function rs_set(string k, int pos, int dur)
 private int i;
 begin
     i = rs_find(k);
+    if (i >= 0)                                           // el mas reciente va el ultimo: se mueve al final
+        while (i < rs_n - 1) rs_key[i] = rs_key[i + 1]; rs_pos[i] = rs_pos[i + 1]; rs_dur[i] = rs_dur[i + 1]; i++; end
+        rs_n--; i = -1;
+    end
     if (i < 0)
         if (rs_n >= RS_MAX) for (i = 1; i < rs_n; i++) rs_key[i - 1] = rs_key[i]; rs_pos[i - 1] = rs_pos[i]; rs_dur[i - 1] = rs_dur[i]; end rs_n--; end   // el mas antiguo se descarta
         i = rs_n; rs_key[i] = k; rs_n++;
