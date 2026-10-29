@@ -5,6 +5,16 @@ Interface drawn at 1080p with a PlayStation-style skin, designed to be driven wi
 
 *Reproductor multimedia escrito íntegramente en BennuGD2, para PS5, Nintendo Switch, Linux, Windows y Android. Interfaz a 1080p con aspecto estilo PlayStation, pensada para mando.* (Spanish notes at the end.)
 
+## Screenshots
+
+Captured on a PS5 (1.2.2, *Aurora* skin) / Capturas en una PS5 (1.2.2, aspecto *Aurora*):
+
+| Addons | Store / Tienda |
+|---|---|
+| ![Addons](docs/screenshots/ps5-addons.png) | ![Store](docs/screenshots/ps5-store.png) |
+
+![Settings / Ajustes](docs/screenshots/ps5-settings.png)
+
 ## Features
 
 - File explorer with **preview** (a random frame, duration, resolution, audio/subtitle tracks), icons and folders
