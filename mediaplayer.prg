@@ -989,8 +989,10 @@ begin
 end
 
 function tab_goto(int k)
+private int j;
 begin
-    pv_idx = -1;
+    pv_idx = -1; close_preview();
+    for (j = 0; j < 7; j++) s_info[j] = ""; info_fit[j] = ""; end      // la descripcion de la vista previa es de la seccion que se deja
     switch (k)
         case 0: cur_list = ""; cur_dir = home_dir; read_dir(); end
         case 1: read_addons(); end
